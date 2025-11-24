@@ -81,18 +81,11 @@ if ! grep -q "SECRET_KEY" docker-compose.yml; then
     echo "Consider adding SECRET_KEY environment variable for production security"
 fi
 
-# Step 4: Update frontend API URL for production
-echo -e "${YELLOW}[4/10] Updating frontend configuration...${NC}"
+# Step 4: Get public IP for display
+echo -e "${YELLOW}[4/10] Detecting public IP...${NC}"
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "localhost")
 echo "Using public IP: $PUBLIC_IP"
-
-# Update API base URL to use Nginx proxy
-sed -i.backup "s|const API_BASE_URL = .*|const API_BASE_URL = '/api';|g" frontend/src/services/api.js
-
-# Also update AuthContext API URL
-sed -i.backup "s|const API_URL = .*|const API_URL = '';|g" frontend/src/context/AuthContext.jsx
-
-echo "✓ Frontend configured for production (API via Nginx proxy)"
+echo "✓ API will be accessible at: http://$PUBLIC_IP:3002/api"
 
 # Step 5: Stop existing SimpleNote containers
 echo -e "${YELLOW}[5/10] Stopping existing SimpleNote containers...${NC}"

@@ -69,6 +69,7 @@ services:
       dockerfile: Dockerfile.frontend
       args:
         NODE_OPTIONS: "--max_old_space_size=512"
+        VITE_API_URL: "/api"  # Use relative URL - Nginx will proxy to backend
     container_name: simplenote-frontend
     restart: unless-stopped
     ports:
@@ -79,8 +80,6 @@ services:
       - simplenote-nginx-logs:/var/log/nginx
     networks:
       - simplenote-network
-    environment:
-      - VITE_API_URL=http://44.192.13.139:5002/api
     mem_limit: 128m
     cpus: 0.3
     logging:

@@ -1,4 +1,7 @@
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002/api';
+// In production, use relative URL (Nginx proxies /api to backend)
+// In development, use direct backend URL
+export const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.MODE === 'production' ? '/api' : 'http://localhost:5002/api');
 
 // Generic fetch wrapper
 async function fetchAPI(endpoint, options = {}) {
