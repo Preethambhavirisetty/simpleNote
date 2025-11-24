@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Moon, Sun, LogOut, User } from 'lucide-react';
+import { Moon, Sun, LogOut, User, Menu, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
 import Editor from './components/Editor';
@@ -21,6 +21,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState(null);
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   
   const handleLogout = async () => {
     await logout();
@@ -239,6 +240,15 @@ export default function App() {
       {/* Top Bar - Responsive */}
       <div className={`${glassClass} rounded-lg p-2 sm:p-3 mb-2 sm:mb-4 flex justify-between items-center relative z-50 border-b border-[var(--color-border-medium)]`}>
         <div className="flex items-center gap-2 sm:gap-4">
+          {/* Mobile Hamburger Menu */}
+          <button
+            onClick={() => setShowMobileSidebar(!showMobileSidebar)}
+            className={`md:hidden p-1.5 rounded ${hoverClass} border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+            title="Toggle Sidebar"
+          >
+            {showMobileSidebar ? <X size={18} /> : <Menu size={18} />}
+          </button>
+          
           <h1 className="text-lg sm:text-2xl font-bold tracking-tight">
             SimpleNote
           </h1>
@@ -259,6 +269,15 @@ export default function App() {
           >
             <span className="text-sm">✨</span>
             <span className="hidden sm:inline">AI Tools</span>
+          </button>
+
+          {/* Theme Toggle */}
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            className={`p-1.5 sm:p-2 rounded ${hoverClass} border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+          >
+            {theme === 'light' ? <Moon size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Sun size={16} className="sm:w-[18px] sm:h-[18px]" />}
           </button>
           
           {/* Account Info - Responsive */}
@@ -281,36 +300,49 @@ export default function App() {
               </button>
             </>
           )}
-          
-          {/* Theme Toggle */}
-          <button
-            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
-            className={`p-1.5 sm:p-2 rounded ${hoverClass} border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
-            title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-          >
-            {theme === 'light' ? <Moon size={16} className="sm:w-[18px] sm:h-[18px]" /> : <Sun size={16} className="sm:w-[18px] sm:h-[18px]" />}
-          </button>
         </div>
       </div>
 
       <div className="flex flex-col md:flex-row gap-2 sm:gap-4 h-[calc(100vh-80px)] sm:h-[calc(100vh-108px)]">
-        {/* Sidebar */}
-        <Sidebar
-          documents={documents}
-          activeDoc={activeDoc}
-          setActiveDoc={setActiveDoc}
-          addNewDocument={addNewDocument}
-          deleteDocument={deleteDocument}
-          updateDocTitle={updateDocTitle}
-          glassClass={glassClass}
-          hoverClass={hoverClass}
-          textClass={textClass}
-          theme={theme}
-          isCollapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-          isSaving={isSaving}
-          lastSaved={lastSaved}
-        />
+        {/* Mobile Sidebar Overlay */}
+        {showMobileSidebar && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setShowMobileSidebar(false)}
+          />
+        )}
+        
+        {/* Sidebar - Desktop: Always visible, Mobile: Slide-in overlay */}
+        <div className={`
+          fixed md:relative z-50 md:z-auto
+          inset-y-0 left-0
+          w-72 md:w-auto
+          transition-transform duration-300 ease-in-out
+          ${showMobileSidebar ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}>
+          <Sidebar
+            documents={documents}
+            activeDoc={activeDoc}
+            setActiveDoc={(docId) => {
+              setActiveDoc(docId);
+              setShowMobileSidebar(false); // Close mobile sidebar on selection
+            }}
+            addNewDocument={() => {
+              addNewDocument();
+              setShowMobileSidebar(false);
+            }}
+            deleteDocument={deleteDocument}
+            updateDocTitle={updateDocTitle}
+            glassClass={glassClass}
+            hoverClass={hoverClass}
+            textClass={textClass}
+            theme={theme}
+            isCollapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+            isSaving={isSaving}
+            lastSaved={lastSaved}
+          />
+        </div>
 
         {/* Editor or No Documents State */}
         {documents.length === 0 ? (

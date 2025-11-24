@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Bold,
   Italic,
@@ -22,7 +22,10 @@ import {
   Upload,
   Video,
   LinkIcon,
-  Eraser
+  Eraser,
+  Code,
+  StickyNote,
+  Wand2
 } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import mammoth from 'mammoth';
@@ -39,6 +42,19 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
   const [isUploading, setIsUploading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showTableDialog, setShowTableDialog] = useState(false);
+  const [autoCorrect, setAutoCorrect] = useState(true);
+  
+  // Active formatting states
+  const [activeFormats, setActiveFormats] = useState({
+    bold: false,
+    italic: false,
+    underline: false,
+    alignLeft: false,
+    alignCenter: false,
+    alignRight: false,
+    unorderedList: false,
+    orderedList: false
+  });
   
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -98,12 +114,50 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
     }
   }, [updateDocContent]);
 
+  // Check active formatting on cursor position
+  const checkActiveFormats = () => {
+    const selection = window.getSelection();
+    if (!selection.rangeCount) return;
+    
+    setActiveFormats({
+      bold: document.queryCommandState('bold'),
+      italic: document.queryCommandState('italic'),
+      underline: document.queryCommandState('underline'),
+      alignLeft: document.queryCommandState('justifyLeft'),
+      alignCenter: document.queryCommandState('justifyCenter'),
+      alignRight: document.queryCommandState('justifyRight'),
+      unorderedList: document.queryCommandState('insertUnorderedList'),
+      orderedList: document.queryCommandState('insertOrderedList')
+    });
+  };
+
+  // Monitor cursor position for active formatting
+  useEffect(() => {
+    const editor = document.querySelector('[contenteditable]');
+    if (editor) {
+      const handleSelectionChange = () => {
+        checkActiveFormats();
+      };
+      
+      editor.addEventListener('mouseup', handleSelectionChange);
+      editor.addEventListener('keyup', handleSelectionChange);
+      editor.addEventListener('focus', handleSelectionChange);
+      
+      return () => {
+        editor.removeEventListener('mouseup', handleSelectionChange);
+        editor.removeEventListener('keyup', handleSelectionChange);
+        editor.removeEventListener('focus', handleSelectionChange);
+      };
+    }
+  }, [currentDoc]);
+
   const execCommand = (command, value = null) => {
     document.execCommand(command, false, value);
     document.querySelector('[contenteditable]')?.focus();
     setTimeout(() => {
       const content = document.querySelector('[contenteditable]')?.innerHTML;
       if (content) updateDocContent(content);
+      checkActiveFormats();
     }, 0);
   };
 
@@ -116,6 +170,112 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
     document.execCommand('insertHTML', false, shapeHTML[shape]);
     const content = document.querySelector('[contenteditable]')?.innerHTML;
     if (content) updateDocContent(content);
+  };
+
+  // Insert code block
+  const insertCodeBlock = () => {
+    const isDark = document.documentElement.classList.contains('dark');
+    const bgColor = isDark ? '#1f2937' : '#f5f5f5';
+    const textColor = isDark ? '#e5e7eb' : '#111827';
+    const borderColor = isDark ? '#374151' : '#e5e5e5';
+    
+    const codeBlockHTML = `
+      <div style="margin: 20px 0; border-radius: 8px; overflow: hidden; border: 1px solid ${borderColor};">
+        <div style="background-color: ${isDark ? '#111827' : '#e5e5e5'}; padding: 8px 16px; font-size: 12px; font-weight: 600; color: ${textColor};">
+          Code
+        </div>
+        <pre style="background-color: ${bgColor}; color: ${textColor}; padding: 16px; margin: 0; font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word;"><code contenteditable="true" style="outline: none;">// Write your code here...</code></pre>
+      </div>
+      <p><br></p>
+    `;
+    
+    document.execCommand('insertHTML', false, codeBlockHTML);
+    const content = document.querySelector('[contenteditable]')?.innerHTML;
+    if (content) updateDocContent(content);
+    
+    if (showToast) {
+      showToast('Code block inserted', 'success');
+    }
+  };
+
+  // Insert quick note
+  const insertQuickNote = () => {
+    const isDark = document.documentElement.classList.contains('dark');
+    const bgColor = isDark ? '#3730a3' : '#e0e7ff';
+    const borderColor = isDark ? '#4f46e5' : '#a5b4fc';
+    const textColor = isDark ? '#e0e7ff' : '#312e81';
+    
+    const quickNoteHTML = `
+      <div style="margin: 20px 0; padding: 16px; background-color: ${bgColor}; border-left: 4px solid ${borderColor}; border-radius: 8px; color: ${textColor};">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span style="font-size: 18px;">📝</span>
+          <strong style="font-size: 14px; font-weight: 600;">Quick Note</strong>
+        </div>
+        <div contenteditable="true" style="outline: none; font-size: 14px; line-height: 1.6;">
+          Add your note here...
+        </div>
+      </div>
+      <p><br></p>
+    `;
+    
+    document.execCommand('insertHTML', false, quickNoteHTML);
+    const content = document.querySelector('[contenteditable]')?.innerHTML;
+    if (content) updateDocContent(content);
+    
+    if (showToast) {
+      showToast('Quick note inserted', 'success');
+    }
+  };
+
+  // Auto-correct functionality
+  const handleAutoCorrect = () => {
+    const editor = document.querySelector('[contenteditable]');
+    if (!editor) return;
+    
+    let content = editor.innerHTML;
+    
+    // Common auto-corrections
+    const corrections = {
+      'teh': 'the',
+      'recieve': 'receive',
+      'occured': 'occurred',
+      'seperate': 'separate',
+      'definately': 'definitely',
+      'accomodate': 'accommodate',
+      'wierd': 'weird',
+      'occassion': 'occasion',
+      'untill': 'until',
+      'wich': 'which',
+      'becuase': 'because',
+      'reccomend': 'recommend',
+      'necesary': 'necessary',
+      'refered': 'referred',
+      'independant': 'independent',
+      'existance': 'existence',
+      'truely': 'truly',
+      'occuring': 'occurring',
+      'basicly': 'basically',
+      'begining': 'beginning'
+    };
+    
+    // Apply corrections (case-insensitive, preserving original case)
+    Object.keys(corrections).forEach(wrong => {
+      const right = corrections[wrong];
+      const regex = new RegExp(`\\b${wrong}\\b`, 'gi');
+      content = content.replace(regex, (match) => {
+        if (match[0] === match[0].toUpperCase()) {
+          return right.charAt(0).toUpperCase() + right.slice(1);
+        }
+        return right;
+      });
+    });
+    
+    editor.innerHTML = content;
+    updateDocContent(content);
+    
+    if (showToast) {
+      showToast('Auto-correct applied', 'success');
+    }
   };
 
   const handleVoiceRecording = () => {
@@ -447,21 +607,33 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
           <div className="grid grid-cols-3 gap-1.5">
             <button
               onClick={() => execCommand('bold')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.bold
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Bold"
             >
               <Bold size={14} strokeWidth={2} className="mx-auto" />
             </button>
             <button
               onClick={() => execCommand('italic')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.italic
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Italic"
             >
               <Italic size={14} strokeWidth={2} className="mx-auto" />
             </button>
             <button
               onClick={() => execCommand('underline')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.underline
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Underline"
             >
               <Underline size={14} strokeWidth={2} className="mx-auto" />
@@ -484,21 +656,33 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
           <div className="grid grid-cols-3 gap-1.5">
             <button
               onClick={() => execCommand('justifyLeft')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.alignLeft
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Align Left"
             >
               <AlignLeft size={14} strokeWidth={2} className="mx-auto" />
             </button>
             <button
               onClick={() => execCommand('justifyCenter')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.alignCenter
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Center"
             >
               <AlignCenter size={14} strokeWidth={2} className="mx-auto" />
             </button>
             <button
               onClick={() => execCommand('justifyRight')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.alignRight
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Align Right"
             >
               <AlignRight size={14} strokeWidth={2} className="mx-auto" />
@@ -514,14 +698,22 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
           <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={() => execCommand('insertUnorderedList')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.unorderedList
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Bullet List"
             >
               <List size={14} strokeWidth={2} className="mx-auto" />
             </button>
             <button
               onClick={() => execCommand('insertOrderedList')}
-              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              className={`p-2 rounded transition-all border ${
+                activeFormats.orderedList
+                  ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-white'
+                  : `${hoverClass} border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`
+              }`}
               title="Numbered"
             >
               <ListOrdered size={14} strokeWidth={2} className="mx-auto" />
@@ -697,6 +889,44 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
               <Video size={14} strokeWidth={2} className="mx-auto" />
             </button>
           </div>
+        </div>
+
+        {/* Code & Notes */}
+        <div className="mb-4">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2 pb-1 border-b border-[var(--color-border-light)]">
+            Blocks
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={insertCodeBlock}
+              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              title="Insert Code Block"
+            >
+              <Code size={14} strokeWidth={2} className="mx-auto" />
+            </button>
+            <button
+              onClick={insertQuickNote}
+              className={`p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+              title="Insert Quick Note"
+            >
+              <StickyNote size={14} strokeWidth={2} className="mx-auto" />
+            </button>
+          </div>
+        </div>
+
+        {/* Auto-Correct */}
+        <div className="mb-4">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2 pb-1 border-b border-[var(--color-border-light)]">
+            Corrections
+          </div>
+          <button
+            onClick={handleAutoCorrect}
+            className={`w-full p-2 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)] flex items-center justify-center gap-2`}
+            title="Auto-Correct Document"
+          >
+            <Wand2 size={14} strokeWidth={2} />
+            <span className="text-xs font-semibold">Auto-Correct</span>
+          </button>
         </div>
       </div>
     </div>
