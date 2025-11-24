@@ -11,7 +11,17 @@ import bcrypt
 from functools import wraps
 
 app = Flask(__name__)
-CORS(app, supports_credentials=True, origins=['http://localhost:3002', 'http://localhost:5173'])
+
+# Get allowed origins from environment or use defaults
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3002,http://localhost:5173').split(',')
+
+# Configure CORS with credentials support
+CORS(app, 
+     supports_credentials=True, 
+     origins=ALLOWED_ORIGINS,
+     allow_headers=['Content-Type', 'Authorization'],
+     expose_headers=['Set-Cookie'],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'])
 
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'simplenote-secret-key-change-in-production-2024')

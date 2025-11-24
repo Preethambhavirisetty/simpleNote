@@ -3,47 +3,24 @@ import { FileText, Clock, BookOpen } from 'lucide-react';
 import TextSelectionTooltip from './TextSelectionTooltip';
 
 export default function Editor({
-  currentDoc,
-  updateDocContent,
+  content,
+  onContentChange,
   onTextSelection,
-  onShowAIPanel,
-  glassClass,
-  textClass
+  onAskAI,
+  editorRef,
+  theme
 }) {
-  const editorRef = useRef(null);
   const [fontSize, setFontSize] = useState(16);
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
   const [tooltipPosition, setTooltipPosition] = useState(null);
 
   useEffect(() => {
-    if (editorRef.current && currentDoc) {
-      editorRef.current.innerHTML = currentDoc.content;
-      updateCounts(currentDoc.content);
-      
-      // Auto-focus and move cursor to end
-      editorRef.current.focus();
-      
-      // Move cursor to the end
-      const range = document.createRange();
-      const selection = window.getSelection();
-      
-      if (editorRef.current.childNodes.length > 0) {
-        const lastNode = editorRef.current.childNodes[editorRef.current.childNodes.length - 1];
-        range.selectNodeContents(lastNode);
-        range.collapse(false); // false = collapse to end
-      } else {
-        range.selectNodeContents(editorRef.current);
-        range.collapse(false);
-      }
-      
-      selection.removeAllRanges();
-      selection.addRange(range);
-      
-      // Scroll to bottom
-      editorRef.current.scrollTop = editorRef.current.scrollHeight;
+    if (editorRef.current && content !== undefined) {
+      editorRef.current.innerHTML = content;
+      updateCounts(content);
     }
-  }, [currentDoc?.id]);
+  }, [content]);
 
   const updateCounts = (html) => {
     const text = html.replace(/<[^>]*>/g, ' ').trim();
@@ -54,9 +31,9 @@ export default function Editor({
 
   const handleInput = () => {
     if (editorRef.current) {
-      const content = editorRef.current.innerHTML;
-      updateDocContent(content);
-      updateCounts(content);
+      const newContent = editorRef.current.innerHTML;
+      onContentChange(newContent);
+      updateCounts(newContent);
     }
   };
 
@@ -83,8 +60,8 @@ export default function Editor({
 
   const handleAskAI = () => {
     setTooltipPosition(null);
-    if (onShowAIPanel) {
-      onShowAIPanel();
+    if (onAskAI) {
+      onAskAI();
     }
   };
 
@@ -101,8 +78,8 @@ export default function Editor({
         document.execCommand('indent', false, null);
       }
       
-      const content = editorRef.current?.innerHTML;
-      if (content) updateDocContent(content);
+      const newContent = editorRef.current?.innerHTML;
+      if (newContent) onContentChange(newContent);
     }
   };
 
@@ -113,61 +90,52 @@ export default function Editor({
         onAskAI={handleAskAI}
       />
       
-      <div className={`flex-1 ${glassClass} rounded-lg overflow-hidden flex flex-col`}>
+      <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
         {/* Stats Bar */}
-      {currentDoc && (
-        <div className="px-6 py-3 border-b border-[var(--color-border-light)] bg-[var(--color-bg-secondary)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-6">
+        <div className="px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <FileText size={14} strokeWidth={2} className="text-[var(--color-text-muted)]" />
-                <span className="text-xs font-bold tracking-tight">{currentDoc.title}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="flex items-center gap-2">
-                <BookOpen size={14} strokeWidth={2} className="text-[var(--color-text-muted)]" />
-                <span className="text-xs font-semibold tracking-tight">
+                <BookOpen size={14} strokeWidth={2} className="text-gray-500 dark:text-gray-400" />
+                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                   {wordCount} {wordCount === 1 ? 'word' : 'words'}
                 </span>
               </div>
-              <div className="w-px h-4 bg-[var(--color-border-medium)]"></div>
+              <div className="w-px h-4 bg-gray-300 dark:bg-gray-600"></div>
               <div className="flex items-center gap-2">
-                <Clock size={14} strokeWidth={2} className="text-[var(--color-text-muted)]" />
-                <span className="text-xs font-semibold tracking-tight">
+                <Clock size={14} strokeWidth={2} className="text-gray-500 dark:text-gray-400" />
+                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                   {Math.ceil(wordCount / 200)} min read
                 </span>
               </div>
-              <div className="w-px h-4 bg-[var(--color-border-medium)]"></div>
-              <span className="text-xs font-semibold tracking-tight text-[var(--color-text-muted)]">
+              <div className="w-px h-4 bg-gray-300 dark:bg-gray-600"></div>
+              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
                 {charCount} chars
               </span>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Editor */}
-      <div className="flex-1 overflow-y-auto">
-        <div
-          ref={editorRef}
-          contentEditable
-          className={`p-8 ${textClass} prose prose-lg max-w-none min-h-full focus:outline-none editor-content`}
-          onInput={handleInput}
-          onMouseUp={handleMouseUp}
-          onKeyDown={handleKeyDown}
-          style={{
-            fontSize: `${fontSize}px`,
-            lineHeight: '1.5',
-            minHeight: '100%',
-            wordWrap: 'break-word',
-            overflowWrap: 'break-word',
-            whiteSpace: 'pre-wrap'
-          }}
-          placeholder="Start writing..."
-        />
+        {/* Editor */}
+        <div className="flex-1 overflow-y-auto">
+          <div
+            ref={editorRef}
+            contentEditable
+            className="p-4 sm:p-6 md:p-8 lg:p-12 prose prose-sm sm:prose-base lg:prose-lg max-w-none min-h-full focus:outline-none editor-content text-gray-900 dark:text-gray-100"
+            onInput={handleInput}
+            onMouseUp={handleMouseUp}
+            onKeyDown={handleKeyDown}
+            style={{
+              fontSize: `${fontSize}px`,
+              lineHeight: '1.8',
+              minHeight: '100%',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word',
+              whiteSpace: 'pre-wrap'
+            }}
+          />
+        </div>
       </div>
-    </div>
     </>
   );
 }

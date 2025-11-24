@@ -24,26 +24,54 @@ echo ""
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-# Step 1: Cleanup old containers/images to free space
+# Step 1: Pre-deployment Docker cleanup
 echo -e "${YELLOW}[1/10] Cleaning up old Docker resources...${NC}"
-echo "Before cleanup:"
+echo ""
+echo -e "${BLUE}Current disk usage:${NC}"
+df -h / | grep -E "Filesystem|/$" || df -h / | tail -1
+echo ""
+echo -e "${BLUE}Docker space before cleanup:${NC}"
 docker system df 2>/dev/null || true
+echo ""
+
+# Stop existing SimpleNote containers first
+echo "Stopping SimpleNote containers..."
+docker compose down 2>/dev/null || true
 
 # Remove stopped containers
+echo "Removing stopped containers..."
 docker container prune -f 2>/dev/null || true
 
-# Remove dangling images
+# Remove dangling/untagged images
+echo "Removing dangling images..."
 docker image prune -f 2>/dev/null || true
 
-# Remove unused volumes (but not SimpleNote's)
-docker volume prune -f 2>/dev/null || true
+# Remove old SimpleNote images (not currently in use)
+echo "Removing old SimpleNote images..."
+docker images | grep simplenote | grep -v "$(docker compose images -q 2>/dev/null | head -1)" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
 
-# Remove old SimpleNote images if they exist
-docker images | grep simplenote | grep -v "$(docker compose images -q | head -1)" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+# Remove unused networks
+echo "Removing unused networks..."
+docker network prune -f 2>/dev/null || true
 
-echo "After cleanup:"
+# Remove unused volumes (only if not SimpleNote volumes)
+echo "Removing unused volumes (preserving data)..."
+docker volume ls -qf dangling=true | xargs -r docker volume rm 2>/dev/null || true
+
+# Clean build cache
+echo "Cleaning build cache..."
+docker builder prune -f 2>/dev/null || true
+
+echo ""
+echo -e "${BLUE}Docker space after cleanup:${NC}"
 docker system df 2>/dev/null || true
-echo "✓ Cleanup complete"
+
+echo ""
+echo -e "${BLUE}Disk space reclaimed:${NC}"
+df -h / | grep -E "Filesystem|/$" || df -h / | tail -1
+echo ""
+echo -e "${GREEN}✓ Cleanup complete${NC}"
+echo ""
 
 # Step 2: Verify swap exists
 echo -e "${YELLOW}[2/10] Checking swap space...${NC}"
@@ -212,15 +240,10 @@ echo "Using public IP: $PUBLIC_IP"
 sed -i.backup "s|const API_BASE_URL = .*|const API_BASE_URL = '/api';|g" frontend/src/services/api.js
 echo "✓ Frontend configured for production"
 
-# Step 5: Stop existing SimpleNote containers
-echo -e "${YELLOW}[5/9] Stopping existing SimpleNote containers...${NC}"
+# Step 5: Ensure SimpleNote is stopped (already done in Step 1)
+echo -e "${YELLOW}[5/9] Verifying SimpleNote is stopped...${NC}"
 docker compose down 2>/dev/null || true
-echo "✓ Containers stopped"
-
-# Step 6: Clean up old images
-echo -e "${YELLOW}[6/9] Cleaning Docker (keeping other projects)...${NC}"
-docker images | grep simplenote | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
-echo "✓ Old SimpleNote images removed"
+echo "✓ Containers confirmed stopped"
 
 # Step 8: Build database and backend
 echo -e "${YELLOW}[8/10] Pulling PostgreSQL image...${NC}"
@@ -304,6 +327,18 @@ echo "  Stop SimpleNote:    docker compose down"
 echo "  Restart:            docker compose restart"
 echo "  Check memory:       free -h"
 echo "  Check containers:   docker ps"
+echo ""
+echo -e "${YELLOW}Docker Cleanup Commands:${NC}"
+echo "  Quick cleanup:      docker system prune -f"
+echo "  Full cleanup:       docker system prune -af --volumes"
+echo "  Remove SimpleNote:  docker images | grep simplenote | awk '{print \$3}' | xargs docker rmi -f"
+echo "  Show disk usage:    docker system df"
+echo "  Or use Makefile:    make prune, make prune-all, make cleanup-simplenote"
+echo ""
+echo -e "${BLUE}Memory & Disk:${NC}"
+docker system df 2>/dev/null || true
+echo ""
+free -h 2>/dev/null || true
 echo ""
 echo -e "${GREEN}🎉 SimpleNote is ready!${NC}"
 
