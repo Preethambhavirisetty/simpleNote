@@ -114,25 +114,25 @@ export default function Editor({
       />
       
       <div className={`flex-1 ${glassClass} rounded-lg overflow-hidden flex flex-col`}>
-        {/* Stats Bar */}
+        {/* Stats Bar - Responsive */}
       {currentDoc && (
-        <div className="px-6 py-3 border-b border-[var(--color-border-light)] bg-[var(--color-bg-secondary)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-6">
+        <div className="px-3 sm:px-6 py-2 sm:py-3 border-b border-[var(--color-border-light)] bg-[var(--color-bg-secondary)]">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-3 sm:gap-6">
               <div className="flex items-center gap-2">
                 <FileText size={14} strokeWidth={2} className="text-[var(--color-text-muted)]" />
-                <span className="text-xs font-bold tracking-tight">{currentDoc.title}</span>
+                <span className="text-xs font-bold tracking-tight truncate max-w-[150px] sm:max-w-none">{currentDoc.title}</span>
               </div>
             </div>
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3 sm:gap-6">
               <div className="flex items-center gap-2">
                 <BookOpen size={14} strokeWidth={2} className="text-[var(--color-text-muted)]" />
                 <span className="text-xs font-semibold tracking-tight">
                   {wordCount} {wordCount === 1 ? 'word' : 'words'}
                 </span>
               </div>
-              <div className="w-px h-4 bg-[var(--color-border-medium)]"></div>
-              <div className="flex items-center gap-2">
+              <div className="hidden sm:block w-px h-4 bg-[var(--color-border-medium)]"></div>
+              <div className="hidden sm:flex items-center gap-2">
                 <Clock size={14} strokeWidth={2} className="text-[var(--color-text-muted)]" />
                 <span className="text-xs font-semibold tracking-tight">
                   {Math.ceil(wordCount / 200)} min read
@@ -147,12 +147,12 @@ export default function Editor({
         </div>
       )}
 
-      {/* Editor */}
+      {/* Editor - Responsive padding */}
       <div className="flex-1 overflow-y-auto">
         <div
           ref={editorRef}
           contentEditable
-          className={`p-8 ${textClass} prose prose-lg max-w-none min-h-full focus:outline-none editor-content`}
+          className={`p-4 sm:p-6 md:p-8 ${textClass} prose prose-sm sm:prose-base md:prose-lg max-w-none min-h-full focus:outline-none editor-content`}
           onInput={handleInput}
           onMouseUp={handleMouseUp}
           onKeyDown={handleKeyDown}

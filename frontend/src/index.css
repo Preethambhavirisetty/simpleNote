@@ -574,7 +574,8 @@ input:focus-visible {
 
 /* Glassmorphism for text selection */
 .editor-content::selection {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(2, 125, 109, 0.2);
+  color: #027d6d;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);

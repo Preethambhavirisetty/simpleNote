@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-
-const API_URL = import.meta.env.PROD ? '' : 'http://localhost:5002';
+import { API_BASE_URL } from '../services/api';
 
 const AuthContext = createContext();
 
@@ -18,7 +17,7 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuth = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/auth/me`, {
+      const response = await fetch(`${API_BASE_URL}/auth/me`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -41,10 +40,14 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await fetch(`${API_URL}/api/auth/logout`, {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       });
+
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      localStorage.removeItem('expiresAt');
       setUser(null);
     } catch (error) {
       console.error('Logout failed:', error);

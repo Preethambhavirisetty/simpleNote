@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { API_BASE_URL } from '../services/api';
 
-const API_URL = import.meta.env.PROD ? '' : 'http://localhost:5002';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -32,7 +32,7 @@ export default function Register() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/auth/register`, {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

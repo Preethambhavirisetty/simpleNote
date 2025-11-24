@@ -21,8 +21,8 @@ export default function Sidebar({
   return (
     <div 
       className={`${glassClass} rounded-lg overflow-hidden transition-all duration-300 ease-in-out flex flex-col border-r-2 border-[var(--color-accent-primary)] ${
-        isCollapsed ? 'w-16' : 'w-72'
-      }`}
+        isCollapsed ? 'w-12 sm:w-16' : 'w-full md:w-72'
+      } md:min-h-0`}
     >
       {/* Header */}
       <div className="p-3 border-b border-[var(--color-border-medium)] bg-[var(--color-bg-tertiary)]">

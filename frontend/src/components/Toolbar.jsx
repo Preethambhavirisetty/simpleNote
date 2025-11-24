@@ -380,7 +380,7 @@ export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocC
 
   return (
     <>
-      <div className={`${glassClass} rounded-lg border-l-2 border-[var(--color-accent-primary)] w-48 overflow-y-auto`}>
+      <div className={`${glassClass} rounded-lg border-l-2 border-[var(--color-accent-primary)] w-full md:w-48 overflow-y-auto md:max-h-full max-h-40`}>
         <div className="p-3">
         {/* Hidden file inputs */}
         <input

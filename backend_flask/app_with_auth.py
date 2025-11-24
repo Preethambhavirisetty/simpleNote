@@ -261,7 +261,8 @@ def login():
 def logout():
     """Logout user"""
     response = make_response(jsonify({'message': 'Logged out successfully'}))
-    response.set_cookie('auth_token', '', expires=0)
+    # response.set_cookie('auth_token', '', expires=0)
+    response.delete_cookie('auth_token')
     return response
 
 @app.route('/api/auth/me', methods=['GET'])
