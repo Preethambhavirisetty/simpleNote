@@ -72,7 +72,7 @@ services:
     container_name: simplenote-frontend
     restart: unless-stopped
     ports:
-      - "80:80"  # Changed from 3001 to 3002
+      - "3002:80"  # Changed from 3001 to 3002
     depends_on:
       - simplenote-backend
     volumes:
