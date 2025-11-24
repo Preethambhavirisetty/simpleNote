@@ -259,7 +259,7 @@ export default function AppContent() {
   const currentDoc = documents.find(d => d.id === activeDoc);
 
   return (
-    <div className={`h-screen flex overflow-hidden ${theme === 'dark' ? 'dark' : ''}`}>
+    <div className={`h-screen flex flex-col md:flex-row overflow-hidden ${theme === 'dark' ? 'dark' : ''}`}>
       <Sidebar
         documents={documents}
         activeDoc={activeDoc}
@@ -275,19 +275,19 @@ export default function AppContent() {
         onLogout={logout}
       />
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {documents.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-900">
-            <div className="text-center">
-              <p className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4">
+          <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-900 p-4">
+            <div className="text-center max-w-md">
+              <p className="text-xl sm:text-2xl font-bold text-gray-800 dark:text-gray-200 mb-4">
                 No Documents Yet
               </p>
-              <p className="text-gray-600 dark:text-gray-400 mb-8">
+              <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mb-6 sm:mb-8">
                 Create your first document to get started
               </p>
               <button
                 onClick={addNewDocument}
-                className="px-6 py-3 bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                className="px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base bg-black dark:bg-white text-white dark:text-black hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
               >
                 Create New Document
               </button>
@@ -307,7 +307,7 @@ export default function AppContent() {
               isUploading={isUploading}
             />
 
-            <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex overflow-hidden min-h-0">
               <Editor
                 content={currentDoc?.content || ''}
                 onContentChange={(content) => updateDocContent(activeDoc, content)}

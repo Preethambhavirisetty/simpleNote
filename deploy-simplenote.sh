@@ -24,8 +24,29 @@ echo ""
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
-# Step 1: Verify swap exists
-echo -e "${YELLOW}[1/9] Checking swap space...${NC}"
+# Step 1: Cleanup old containers/images to free space
+echo -e "${YELLOW}[1/10] Cleaning up old Docker resources...${NC}"
+echo "Before cleanup:"
+docker system df 2>/dev/null || true
+
+# Remove stopped containers
+docker container prune -f 2>/dev/null || true
+
+# Remove dangling images
+docker image prune -f 2>/dev/null || true
+
+# Remove unused volumes (but not SimpleNote's)
+docker volume prune -f 2>/dev/null || true
+
+# Remove old SimpleNote images if they exist
+docker images | grep simplenote | grep -v "$(docker compose images -q | head -1)" | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
+
+echo "After cleanup:"
+docker system df 2>/dev/null || true
+echo "✓ Cleanup complete"
+
+# Step 2: Verify swap exists
+echo -e "${YELLOW}[2/10] Checking swap space...${NC}"
 if swapon --show | grep -q "/swapfile"; then
     echo "✓ Swap is active"
     free -h
@@ -44,8 +65,8 @@ else
     fi
 fi
 
-# Step 2: Check port availability
-echo -e "${YELLOW}[2/9] Checking port availability...${NC}"
+# Step 3: Check port availability
+echo -e "${YELLOW}[3/10] Checking port availability...${NC}"
 echo "Ports in use: 3001, 5001 (other services), 5432 (existing database)"
 echo "SimpleNote will use: 3002 (frontend), 5002 (backend), 5433 (PostgreSQL)"
 
@@ -201,8 +222,8 @@ echo -e "${YELLOW}[6/9] Cleaning Docker (keeping other projects)...${NC}"
 docker images | grep simplenote | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
 echo "✓ Old SimpleNote images removed"
 
-# Step 7: Build database and backend
-echo -e "${YELLOW}[7/10] Pulling PostgreSQL image...${NC}"
+# Step 8: Build database and backend
+echo -e "${YELLOW}[8/10] Pulling PostgreSQL image...${NC}"
 docker compose pull simplenote-db
 echo "✓ PostgreSQL image ready"
 
@@ -215,7 +236,7 @@ echo "Waiting 15 seconds for memory to stabilize..."
 sleep 15
 
 # Step 9: Build frontend (memory intensive)
-echo -e "${YELLOW}[9/10] Building frontend (5-10 minutes)...${NC}"
+echo -e "${YELLOW}[9/10] Building frontend (may take 5-10 minutes)...${NC}"
 echo -e "${RED}⚠️  System will slow down. DO NOT interrupt!${NC}"
 
 export NODE_OPTIONS="--max_old_space_size=512"

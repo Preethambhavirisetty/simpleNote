@@ -60,26 +60,26 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-4">
+    <div className="min-h-screen bg-white flex items-center justify-center px-4 py-8">
       <div className="max-w-md w-full">
         {/* Logo */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6 sm:mb-8">
           <div className="flex items-center justify-center space-x-2 mb-2">
-            <span className="text-4xl">📝</span>
-            <h1 className="text-3xl font-bold">SimpleNote</h1>
+            <span className="text-3xl sm:text-4xl">📝</span>
+            <h1 className="text-2xl sm:text-3xl font-bold">SimpleNote</h1>
           </div>
-          <p className="text-gray-600">Create your account</p>
+          <p className="text-sm sm:text-base text-gray-600">Create your account</p>
         </div>
 
         {/* Form */}
-        <div className="border border-gray-200 p-8">
+        <div className="border border-gray-200 p-6 sm:p-8">
           {error && (
             <div className="mb-6 p-4 bg-black text-white text-sm">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
             <div>
               <label className="block text-sm font-medium mb-2">
                 Name
@@ -89,7 +89,7 @@ export default function Register() {
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-black"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 focus:outline-none focus:border-black"
                 placeholder="John Doe"
               />
             </div>
@@ -103,7 +103,7 @@ export default function Register() {
                 required
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-black"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 focus:outline-none focus:border-black"
                 placeholder="you@example.com"
               />
             </div>
@@ -117,7 +117,7 @@ export default function Register() {
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-black"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 focus:outline-none focus:border-black"
                 placeholder="••••••••"
               />
               <p className="text-xs text-gray-600 mt-1">At least 6 characters</p>
@@ -132,7 +132,7 @@ export default function Register() {
                 required
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-black"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 focus:outline-none focus:border-black"
                 placeholder="••••••••"
               />
             </div>
