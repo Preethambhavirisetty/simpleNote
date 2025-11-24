@@ -27,7 +27,7 @@ import {
 import html2pdf from 'html2pdf.js';
 import mammoth from 'mammoth';
 
-export default function Toolbar({ glassClass, hoverClass, updateDocContent, onFileUpload, showToast, isCollapsed, onToggleCollapse }) {
+export default function Toolbar({ currentDoc, glassClass, hoverClass, updateDocContent, onFileUpload, showToast, isCollapsed, onToggleCollapse }) {
   const [fontSize, setFontSize] = useState('16');
   const [textColor, setTextColor] = useState('#000000');
   const [isRecording, setIsRecording] = useState(false);
@@ -289,9 +289,17 @@ export default function Toolbar({ glassClass, hoverClass, updateDocContent, onFi
     }
 
     try {
+      // Use document title for filename, sanitize it
+      const docTitle = currentDoc?.title || 'document';
+      const sanitizedTitle = docTitle
+        .replace(/[^a-z0-9]/gi, '_')
+        .toLowerCase()
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      
       const opt = {
-        margin: 0.4,
-        filename: 'document.pdf',
+        margin: 0.2,  // Reduced from 0.4 to 0.2 inches
+        filename: `${sanitizedTitle}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
@@ -300,7 +308,7 @@ export default function Toolbar({ glassClass, hoverClass, updateDocContent, onFi
       await html2pdf().set(opt).from(editor).save();
       
       if (showToast) {
-        showToast('PDF exported successfully!', 'success');
+        showToast(`"${currentDoc?.title || 'Document'}" exported to PDF!`, 'success');
       }
     } catch (error) {
       console.error('PDF export error:', error);

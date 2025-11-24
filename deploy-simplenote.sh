@@ -16,6 +16,7 @@ NC='\033[0m'
 echo -e "${BLUE}╔════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║   SimpleNote Deployment Script        ║${NC}"
 echo -e "${BLUE}║   Optimized for Low Memory EC2        ║${NC}"
+echo -e "${BLUE}║   Frontend: 3002 | API: 5002 | DB: 5433${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -45,17 +46,25 @@ fi
 
 # Step 2: Check port availability
 echo -e "${YELLOW}[2/9] Checking port availability...${NC}"
-if lsof -Pi :3001 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo -e "${RED}⚠️  Port 3001 is in use!${NC}"
-    echo "Please free port 3001 or modify docker-compose.yml"
+echo "Ports in use: 3001, 5001 (other services), 5432 (existing database)"
+echo "SimpleNote will use: 3002 (frontend), 5002 (backend), 5433 (PostgreSQL)"
+
+if lsof -Pi :3002 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo -e "${RED}⚠️  Port 3002 is in use!${NC}"
+    echo "Please free port 3002 or modify docker-compose.yml"
     exit 1
 fi
-if lsof -Pi :5001 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    echo -e "${RED}⚠️  Port 5001 is in use!${NC}"
-    echo "Please free port 5001 or modify docker-compose.yml"
+if lsof -Pi :5002 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo -e "${RED}⚠️  Port 5002 is in use!${NC}"
+    echo "Please free port 5002 or modify docker-compose.yml"
     exit 1
 fi
-echo "✓ Ports 3001 and 5001 are available"
+if lsof -Pi :5433 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo -e "${RED}⚠️  Port 5433 is in use!${NC}"
+    echo "Please free port 5433 or modify docker-compose.yml"
+    exit 1
+fi
+echo "✓ Ports 3002, 5002, and 5433 are available"
 
 # Step 3: Update backend config for production
 echo -e "${YELLOW}[3/9] Updating backend configuration...${NC}"
@@ -92,6 +101,7 @@ init_db()
 
 @app.route('/api/health', methods=['GET'])
 def health():
+    app.logger.info('Health check requested')
     return jsonify({'status': 'healthy'}), 200
 
 @app.route('/api/documents', methods=['GET'])
@@ -147,7 +157,22 @@ def delete_document(doc_id):
     return jsonify({'success': True})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    import logging
+    from logging.handlers import RotatingFileHandler
+    
+    # Setup logging
+    if not app.debug:
+        os.makedirs('/app/logs', exist_ok=True)
+        file_handler = RotatingFileHandler('/app/logs/app.log', maxBytes=10240000, backupCount=3)
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        ))
+        file_handler.setLevel(logging.INFO)
+        app.logger.addHandler(file_handler)
+        app.logger.setLevel(logging.INFO)
+        app.logger.info('SimpleNote backend starting...')
+    
+    app.run(host='0.0.0.0', port=5002, debug=False)
 EOF
 
 # Backup original and use new config
@@ -176,8 +201,12 @@ echo -e "${YELLOW}[6/9] Cleaning Docker (keeping other projects)...${NC}"
 docker images | grep simplenote | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
 echo "✓ Old SimpleNote images removed"
 
-# Step 7: Build backend
-echo -e "${YELLOW}[7/9] Building backend...${NC}"
+# Step 7: Build database and backend
+echo -e "${YELLOW}[7/10] Pulling PostgreSQL image...${NC}"
+docker compose pull simplenote-db
+echo "✓ PostgreSQL image ready"
+
+echo -e "${YELLOW}[8/10] Building backend...${NC}"
 docker compose build --no-cache simplenote-backend
 echo "✓ Backend built"
 
@@ -185,8 +214,8 @@ echo "✓ Backend built"
 echo "Waiting 15 seconds for memory to stabilize..."
 sleep 15
 
-# Step 8: Build frontend (memory intensive)
-echo -e "${YELLOW}[8/9] Building frontend (5-10 minutes)...${NC}"
+# Step 9: Build frontend (memory intensive)
+echo -e "${YELLOW}[9/10] Building frontend (5-10 minutes)...${NC}"
 echo -e "${RED}⚠️  System will slow down. DO NOT interrupt!${NC}"
 
 export NODE_OPTIONS="--max_old_space_size=512"
@@ -197,8 +226,8 @@ docker compose build --no-cache --build-arg NODE_OPTIONS="--max_old_space_size=5
 }
 echo "✓ Frontend built"
 
-# Step 9: Start services
-echo -e "${YELLOW}[9/9] Starting SimpleNote...${NC}"
+# Step 10: Start services
+echo -e "${YELLOW}[10/10] Starting SimpleNote...${NC}"
 docker compose up -d
 
 echo "Waiting for services to start (60 seconds)..."
@@ -217,21 +246,39 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
 echo ""
 echo -e "${GREEN}Access your apps:${NC}"
-echo -e "  ${BLUE}SimpleNote:${NC}        http://$PUBLIC_IP:3001"
+echo -e "  ${BLUE}SimpleNote:${NC}        http://$PUBLIC_IP:3002"
+echo -e "  ${BLUE}Other Service:${NC}     http://$PUBLIC_IP:3001"
 echo -e "  ${BLUE}Finance Tracker:${NC}   http://$PUBLIC_IP (if running)"
 echo ""
 
 # Health check
 echo -e "${YELLOW}Health Check:${NC}"
-if curl -s http://localhost:5001/api/health > /dev/null 2>&1; then
+if curl -s http://localhost:5002/api/health > /dev/null 2>&1; then
     echo "  ✓ Backend is healthy"
 else
     echo "  ⚠️  Backend may need more time to start"
 fi
 
 echo ""
+echo -e "${YELLOW}📋 Logging Information:${NC}"
+echo "Backend logs are stored in:"
+echo "  • Docker logs: docker compose logs -f simplenote-backend"
+echo "  • App logs:    docker compose exec simplenote-backend cat /app/logs/app.log"
+echo "  • Volume:      /var/lib/docker/volumes/simplenote_simplenote-logs/_data/"
+echo ""
+echo "Frontend (Nginx) logs are stored in:"
+echo "  • Docker logs: docker compose logs -f simplenote-frontend"
+echo "  • Access log:  docker compose exec simplenote-frontend cat /var/log/nginx/access.log"
+echo "  • Error log:   docker compose exec simplenote-frontend cat /var/log/nginx/error.log"
+echo "  • API log:     docker compose exec simplenote-frontend cat /var/log/nginx/api_access.log"
+echo "  • Volume:      /var/lib/docker/volumes/simplenote_simplenote-nginx-logs/_data/"
+echo ""
+
 echo -e "${YELLOW}Useful Commands:${NC}"
-echo "  View logs:          docker compose logs -f"
+echo "  View all logs:      docker compose logs -f"
+echo "  View backend logs:  docker compose logs -f simplenote-backend"
+echo "  View frontend logs: docker compose logs -f simplenote-frontend"
+echo "  Tail app logs:      docker compose exec simplenote-backend tail -f /app/logs/app.log"
 echo "  Stop SimpleNote:    docker compose down"
 echo "  Restart:            docker compose restart"
 echo "  Check memory:       free -h"

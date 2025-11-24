@@ -308,6 +308,7 @@ export default function App() {
 
         {/* Right Toolbar */}
         <Toolbar
+          currentDoc={currentDoc}
           glassClass={glassClass}
           hoverClass={hoverClass}
           updateDocContent={updateDocContent}

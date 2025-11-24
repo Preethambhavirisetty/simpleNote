@@ -2,16 +2,27 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install system dependencies (curl for healthcheck, gcc for psycopg2)
+RUN apt-get update && \
+    apt-get install -y curl gcc postgresql-client libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY backend_flask/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application
+# Copy application files
 COPY backend_flask/ .
 
-# Expose port (using 5001 to not conflict with project1)
-EXPOSE 5001
+# Create logs directory
+RUN mkdir -p /app/logs
 
-# Run the application
-CMD ["python", "app.py"]
+# Expose port (using 5002 to avoid conflicts)
+EXPOSE 5002
+
+# Wait for database and run application
+COPY wait-for-db.sh /wait-for-db.sh
+RUN chmod +x /wait-for-db.sh
+
+CMD ["/wait-for-db.sh", "python", "-u", "app_postgres.py"]
 
