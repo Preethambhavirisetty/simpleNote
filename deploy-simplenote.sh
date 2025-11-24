@@ -66,138 +66,41 @@ if lsof -Pi :5433 -sTCP:LISTEN -t >/dev/null 2>&1; then
 fi
 echo "✓ Ports 3002, 5002, and 5433 are available"
 
-# Step 3: Update backend config for production
-echo -e "${YELLOW}[3/9] Updating backend configuration...${NC}"
-cat > backend_flask/app.py.tmp << 'EOF'
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import sqlite3
-import os
-from datetime import datetime
-
-app = Flask(__name__)
-CORS(app)
-
-# Use persistent volume for database
-DB_PATH = '/app/data/database.db'
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS documents (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            content TEXT,
-            created_at TEXT,
-            updated_at TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    app.logger.info('Health check requested')
-    return jsonify({'status': 'healthy'}), 200
-
-@app.route('/api/documents', methods=['GET'])
-def get_documents():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM documents ORDER BY updated_at DESC')
-    docs = cursor.fetchall()
-    conn.close()
-    return jsonify([{
-        'id': doc[0],
-        'title': doc[1],
-        'content': doc[2],
-        'created_at': doc[3],
-        'updated_at': doc[4]
-    } for doc in docs])
-
-@app.route('/api/documents', methods=['POST'])
-def create_document():
-    data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO documents (id, title, content, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (data['id'], data['title'], data.get('content', ''),
-          data['created_at'], data['updated_at']))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True}), 201
-
-@app.route('/api/documents/<doc_id>', methods=['PUT'])
-def update_document(doc_id):
-    data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE documents 
-        SET title = ?, content = ?, updated_at = ?
-        WHERE id = ?
-    ''', (data['title'], data['content'], datetime.now().isoformat(), doc_id))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True})
-
-@app.route('/api/documents/<doc_id>', methods=['DELETE'])
-def delete_document(doc_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM documents WHERE id = ?', (doc_id,))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True})
-
-if __name__ == '__main__':
-    import logging
-    from logging.handlers import RotatingFileHandler
-    
-    # Setup logging
-    if not app.debug:
-        os.makedirs('/app/logs', exist_ok=True)
-        file_handler = RotatingFileHandler('/app/logs/app.log', maxBytes=10240000, backupCount=3)
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
-        app.logger.setLevel(logging.INFO)
-        app.logger.info('SimpleNote backend starting...')
-    
-    app.run(host='0.0.0.0', port=5002, debug=False)
-EOF
-
-# Backup original and use new config
-if [ -f backend_flask/app.py ]; then
-    cp backend_flask/app.py backend_flask/app.py.backup
+# Step 3: Verify backend authentication setup
+echo -e "${YELLOW}[3/10] Verifying backend configuration...${NC}"
+if [ ! -f backend_flask/app_with_auth.py ]; then
+    echo -e "${RED}⚠️  Error: app_with_auth.py not found!${NC}"
+    echo "Make sure you have the authentication backend file."
+    exit 1
 fi
-mv backend_flask/app.py.tmp backend_flask/app.py
-echo "✓ Backend configured for production"
+echo "✓ Backend with authentication found"
 
-# Step 4: Update frontend API URL
-echo -e "${YELLOW}[4/9] Updating frontend configuration...${NC}"
+# Check if SECRET_KEY is set in docker-compose.yml
+if ! grep -q "SECRET_KEY" docker-compose.yml; then
+    echo -e "${YELLOW}⚠️  WARNING: SECRET_KEY not set in docker-compose.yml${NC}"
+    echo "Consider adding SECRET_KEY environment variable for production security"
+fi
+
+# Step 4: Update frontend API URL for production
+echo -e "${YELLOW}[4/10] Updating frontend configuration...${NC}"
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "localhost")
 echo "Using public IP: $PUBLIC_IP"
 
-# Update API base URL
+# Update API base URL to use Nginx proxy
 sed -i.backup "s|const API_BASE_URL = .*|const API_BASE_URL = '/api';|g" frontend/src/services/api.js
-echo "✓ Frontend configured for production"
+
+# Also update AuthContext API URL
+sed -i.backup "s|const API_URL = .*|const API_URL = '';|g" frontend/src/context/AuthContext.jsx
+
+echo "✓ Frontend configured for production (API via Nginx proxy)"
 
 # Step 5: Stop existing SimpleNote containers
-echo -e "${YELLOW}[5/9] Stopping existing SimpleNote containers...${NC}"
+echo -e "${YELLOW}[5/10] Stopping existing SimpleNote containers...${NC}"
 docker compose down 2>/dev/null || true
 echo "✓ Containers stopped"
 
 # Step 6: Clean up old images
-echo -e "${YELLOW}[6/9] Cleaning Docker (keeping other projects)...${NC}"
+echo -e "${YELLOW}[6/10] Cleaning Docker (keeping other projects)...${NC}"
 docker images | grep simplenote | awk '{print $3}' | xargs -r docker rmi -f 2>/dev/null || true
 echo "✓ Old SimpleNote images removed"
 

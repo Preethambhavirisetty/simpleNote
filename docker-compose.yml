@@ -44,6 +44,7 @@ services:
       - PORT=5002
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://simplenote_user:simplenote_secure_password_2024@simplenote-db:5432/simplenote
+      - SECRET_KEY=simplenote-secret-key-2024-change-in-production
     depends_on:
       simplenote-db:
         condition: service_healthy

@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom text selection color - light purple */
+::selection {
+  background-color: #e9d5ff; /* light purple */
+  color: #1f2937; /* dark gray for contrast */
+}
+
+::-moz-selection {
+  background-color: #e9d5ff;
+  color: #1f2937;
+}
+
+/* Fix table cell cursor positioning */
+table td[contenteditable="true"],
+table th[contenteditable="true"] {
+  cursor: text;
+  position: relative;
+}
+
+table td[contenteditable="true"]:focus,
+table th[contenteditable="true"]:focus {
+  outline: 2px solid #9333ea;
+  outline-offset: -2px;
+}
+
 /* Black & White Sophisticated Design */
 :root {
   /* Light theme - Pure Black & White */

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, LogOut, User } from 'lucide-react';
+import { useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
 import Editor from './components/Editor';
 import Toolbar from './components/Toolbar';
@@ -8,6 +9,7 @@ import Toast from './components/Toast';
 import * as api from './services/api';
 
 export default function App() {
+  const { user, logout } = useAuth();
   const [theme, setTheme] = useState('light');
   const [documents, setDocuments] = useState([]);
   const [activeDoc, setActiveDoc] = useState(null);
@@ -17,6 +19,13 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
   const [toast, setToast] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
+  
+  const handleLogout = async () => {
+    await logout();
+    window.location.href = '/';
+  };
 
   // Load documents on mount
   useEffect(() => {
@@ -250,6 +259,28 @@ export default function App() {
             <span className="text-sm">✨</span>
             <span className="hidden sm:inline">AI Tools</span>
           </button>
+          
+          {/* Account Info */}
+          {user && (
+            <>
+              <div className="h-6 w-px bg-[var(--color-border-light)]"></div>
+              <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                <User size={16} className="text-[var(--color-text-muted)]" />
+                <span className="hidden md:inline text-[var(--color-text-secondary)] font-medium">
+                  {user.email}
+                </span>
+              </div>
+              <button
+                onClick={handleLogout}
+                className={`px-3 py-1.5 rounded ${hoverClass} text-xs font-semibold flex items-center gap-2 border border-[var(--color-border-medium)] hover:border-red-500 hover:text-red-500 transition-colors`}
+                title="Logout"
+              >
+                <LogOut size={16} />
+                <span className="hidden sm:inline">Logout</span>
+              </button>
+            </>
+          )}
+          
           <button
             onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
             className={`p-2 rounded ${hoverClass} border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
@@ -274,6 +305,8 @@ export default function App() {
           theme={theme}
           isCollapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          isSaving={isSaving}
+          lastSaved={lastSaved}
         />
 
         {/* Editor or No Documents State */}
@@ -289,7 +322,7 @@ export default function App() {
               </p>
               <button
                 onClick={addNewDocument}
-                className={`px-6 py-3 rounded-lg bg-[var(--color-accent-primary)] text-[var(--color-bg-primary)] font-semibold ${hoverClass} transition-all shadow-lg`}
+                className={`px-6 py-3 rounded-lg bg-[var(--color-accent-primary)] text-[var(--color-bg-primary)] font-semibold hover:opacity-80 transition-all shadow-lg`}
               >
                 Create New Document
               </button>

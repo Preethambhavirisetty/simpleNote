@@ -1,8 +1,9 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5002/api';
 
 // Generic fetch wrapper
 async function fetchAPI(endpoint, options = {}) {
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    credentials: 'include', // IMPORTANT: Send cookies for authentication
     ...options,
     headers: {
       'Content-Type': 'application/json',
