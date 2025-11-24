@@ -44,7 +44,7 @@ services:
       - PORT=5002
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://simplenote_user:simplenote_secure_password_2024@simplenote-db:5432/simplenote
-      - SECRET_KEY=simplenote-secret-key-2024-change-in-production
+      - SECRET_KEY=7659d6f3c03985717ce4146a0ff56e37cfa41eff15ebf09b168f15426ce9e229b719dccd5dcc1b705113752b29d5679fd985213779dd23b883bf57a7e330e65
     depends_on:
       simplenote-db:
         condition: service_healthy
@@ -79,6 +79,8 @@ services:
       - simplenote-nginx-logs:/var/log/nginx
     networks:
       - simplenote-network
+    environment:
+      - VITE_API_URL=http://44.192.13.139:5002/api
     mem_limit: 128m
     cpus: 0.3
     logging:
