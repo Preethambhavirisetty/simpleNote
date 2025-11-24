@@ -1,10 +1,12 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { FileText, Clock, BookOpen } from 'lucide-react';
+import TextSelectionTooltip from './TextSelectionTooltip';
 
 export default function Editor({
   currentDoc,
   updateDocContent,
   onTextSelection,
+  onShowAIPanel,
   glassClass,
   textClass
 }) {
@@ -12,11 +14,34 @@ export default function Editor({
   const [fontSize, setFontSize] = useState(16);
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
+  const [tooltipPosition, setTooltipPosition] = useState(null);
 
   useEffect(() => {
     if (editorRef.current && currentDoc) {
       editorRef.current.innerHTML = currentDoc.content;
       updateCounts(currentDoc.content);
+      
+      // Auto-focus and move cursor to end
+      editorRef.current.focus();
+      
+      // Move cursor to the end
+      const range = document.createRange();
+      const selection = window.getSelection();
+      
+      if (editorRef.current.childNodes.length > 0) {
+        const lastNode = editorRef.current.childNodes[editorRef.current.childNodes.length - 1];
+        range.selectNodeContents(lastNode);
+        range.collapse(false); // false = collapse to end
+      } else {
+        range.selectNodeContents(editorRef.current);
+        range.collapse(false);
+      }
+      
+      selection.removeAllRanges();
+      selection.addRange(range);
+      
+      // Scroll to bottom
+      editorRef.current.scrollTop = editorRef.current.scrollHeight;
     }
   }, [currentDoc?.id]);
 
@@ -38,14 +63,58 @@ export default function Editor({
   const handleMouseUp = () => {
     const selection = window.getSelection();
     const text = selection.toString().trim();
+    
     if (text) {
-      onTextSelection(text);
+      if (onTextSelection) {
+        onTextSelection(text);
+      }
+      
+      // Get selection position for tooltip
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      setTooltipPosition({
+        x: rect.left + rect.width / 2,
+        y: rect.top + window.scrollY
+      });
+    } else {
+      setTooltipPosition(null);
+    }
+  };
+
+  const handleAskAI = () => {
+    setTooltipPosition(null);
+    if (onShowAIPanel) {
+      onShowAIPanel();
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    // Handle Tab key for indentation/subpoints
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      
+      if (e.shiftKey) {
+        // Shift+Tab: Outdent
+        document.execCommand('outdent', false, null);
+      } else {
+        // Tab: Indent
+        document.execCommand('indent', false, null);
+      }
+      
+      const content = editorRef.current?.innerHTML;
+      if (content) updateDocContent(content);
     }
   };
 
   return (
-    <div className={`flex-1 ${glassClass} rounded-lg overflow-hidden flex flex-col`}>
-      {/* Stats Bar */}
+    <>
+      <TextSelectionTooltip
+        position={tooltipPosition}
+        onAskAI={handleAskAI}
+      />
+      
+      <div className={`flex-1 ${glassClass} rounded-lg overflow-hidden flex flex-col`}>
+        {/* Stats Bar */}
       {currentDoc && (
         <div className="px-6 py-3 border-b border-[var(--color-border-light)] bg-[var(--color-bg-secondary)]">
           <div className="flex items-center justify-between">
@@ -83,12 +152,13 @@ export default function Editor({
         <div
           ref={editorRef}
           contentEditable
-          className={`p-8 ${textClass} prose prose-lg max-w-none min-h-full focus:outline-none`}
+          className={`p-8 ${textClass} prose prose-lg max-w-none min-h-full focus:outline-none editor-content`}
           onInput={handleInput}
           onMouseUp={handleMouseUp}
+          onKeyDown={handleKeyDown}
           style={{
             fontSize: `${fontSize}px`,
-            lineHeight: '1.75',
+            lineHeight: '1.5',
             minHeight: '100%',
             wordWrap: 'break-word',
             overflowWrap: 'break-word',
@@ -98,5 +168,6 @@ export default function Editor({
         />
       </div>
     </div>
+    </>
   );
 }

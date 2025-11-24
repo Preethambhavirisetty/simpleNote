@@ -1,0 +1,16 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+*.md
+.env
+.DS_Store
+frontend/dist
+frontend/node_modules
+backend_flask/__pycache__
+backend_flask/*.pyc
+backend_flask/database.db
+*.log
+.vscode
+.idea
+

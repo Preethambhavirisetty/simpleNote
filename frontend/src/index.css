@@ -39,9 +39,9 @@
   --color-text-primary: #ffffff;
   --color-text-secondary: #d4d4d4;
   --color-text-muted: #a3a3a3;
-  --color-border-light: #262626;
-  --color-border-medium: #b31515;
-  --color-border-dark: #525252;
+  --color-border-light: #374151;
+  --color-border-medium: #4b5563;
+  --color-border-dark: #6b7280;
   --color-hover: #1a1a1a;
   --color-active: #262626;
   
@@ -463,3 +463,125 @@ input:focus-visible {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--color-border-medium), transparent);
 }
+
+/* Table styling improvements */
+[contenteditable] table {
+  width: 100% !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  margin: 20px 0 !important;
+  table-layout: fixed !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+}
+
+[contenteditable] table th:first-child {
+  border-top-left-radius: 8px !important;
+}
+
+[contenteditable] table th:last-child {
+  border-top-right-radius: 8px !important;
+}
+
+[contenteditable] table tr:last-child td:first-child {
+  border-bottom-left-radius: 8px !important;
+}
+
+[contenteditable] table tr:last-child td:last-child {
+  border-bottom-right-radius: 8px !important;
+}
+
+[contenteditable] table th,
+[contenteditable] table td {
+  vertical-align: top !important;
+  text-align: left !important;
+  word-wrap: break-word !important;
+  overflow-wrap: break-word !important;
+}
+
+[contenteditable] table th {
+  font-weight: 700 !important;
+}
+
+/* Dark mode table overrides */
+.dark [contenteditable] table th {
+  border-color: #6b7280 !important;
+  background: #1f2937 !important;
+  color: #e5e7eb !important;
+}
+
+.dark [contenteditable] table td {
+  border-color: #4b5563 !important;
+  background: #111827 !important;
+  color: #d1d5db !important;
+}
+
+/* Toast animations */
+@keyframes slide-in {
+  from {
+    transform: translateX(400px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out;
+}
+
+/* Quick fade in for tooltip */
+@keyframes fade-in-quick {
+  from {
+    opacity: 0;
+    transform: translateY(5px) translateX(-50%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) translateX(-50%);
+  }
+}
+
+.animate-fade-in-quick {
+  animation: fade-in-quick 0.2s ease-out;
+}
+
+/* Glassmorphism for text selection */
+.editor-content::selection {
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+.dark .editor-content::selection {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.4);
+}
+
+/* Better list indentation - reduced spacing */
+[contenteditable] ul ul,
+[contenteditable] ol ul,
+[contenteditable] ul ol,
+[contenteditable] ol ol {
+  margin-left: 1.5em;
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+/* Reduce line spacing */
+[contenteditable] p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+[contenteditable] ul,
+[contenteditable] ol {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+

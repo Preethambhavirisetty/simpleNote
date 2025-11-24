@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  simplenote-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: simplenote-backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      - simplenote-data:/app/data
+    environment:
+      - FLASK_ENV=production
+      - PORT=5001
+    networks:
+      - simplenote-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: 256m
+    cpus: 0.5
+
+  simplenote-frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NODE_OPTIONS: "--max_old_space_size=512"
+    container_name: simplenote-frontend
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      - simplenote-backend
+    networks:
+      - simplenote-network
+    mem_limit: 128m
+    cpus: 0.3
+
+networks:
+  simplenote-network:
+    driver: bridge
+
+volumes:
+  simplenote-data:
+    driver: local
+

@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY backend_flask/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY backend_flask/ .
+
+# Expose port (using 5001 to not conflict with project1)
+EXPOSE 5001
+
+# Run the application
+CMD ["python", "app.py"]
+

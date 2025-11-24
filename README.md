@@ -1,386 +1,231 @@
 # SimpleNote - Advanced Text Editor
 
-A modern, full-stack text editor with multi-page support, rich formatting, and built-in infrastructure for AI-powered features including speech-to-text, text summarization, and intelligent rewriting.
+A modern, feature-rich text editor with AI integration capabilities, built with React and Flask.
 
-## 🚀 Features
+## ✨ Features
 
-### Current Features
-- **Multi-Document Support**: Create, edit, and manage multiple documents
-- **Rich Text Editing**: Bold, italic, underline, alignment, lists, and more
-- **Template System**: Pre-built templates for meetings, journals, to-do lists, and more
-- **Theme Support**: Light and dark mode with beautiful glassmorphic UI
-- **Auto-Save**: Automatic saving to backend database
-- **Persistent Storage**: All documents saved to SQLite database
-- **Modern UI**: Beautiful gradient backgrounds with glass-morphism effects
+### Core Features
+- 📝 Multi-document support with real-time auto-save
+- 🎨 Black and white minimalist design with dark mode
+- 📱 Collapsible sidebars for focused writing
+- 🔄 Auto-focus and cursor positioning
+- 🗂️ Recently edited documents move to top
+- 🔗 Hash-based routing for direct document access
 
-### Future-Ready Architecture
-- **AI Integration Ready**: Pre-built endpoints for text summarization and rewriting
-- **Speech-to-Text Ready**: Infrastructure for voice recording and transcription
-- **Scalable Database**: SQLite with tables for documents, AI interactions, and speech sessions
-- **RESTful API**: Clean, documented API endpoints
+### Editing Tools
+- **Text Formatting**: Bold, Italic, Underline
+- **Alignment**: Left, Center, Right
+- **Lists**: Bullet points and numbered lists
+- **Font Control**: Size and color customization with color picker
+- **Insert Options**: Tables, horizontal lines, images, videos, links
 
-## 🏗️ Architecture
+### Advanced Features
+- 🎙️ **Speech-to-Text**: Real-time voice recording with visual feedback
+- 📄 **File Import**: Import .txt and .docx files as new documents with formatting preserved
+- 📥 **PDF Export**: Convert documents to PDF with loading indicator
+- 🔤 **Markdown**: Toggle markdown mode for easy formatting
+- 📎 **Attachments**: Upload images and videos directly into documents
+- 📊 **Enhanced Tables**: Beautiful dialog for creating tables with customizable rows/columns
 
-```
-simpleNote/
-├── backend/                  # Express.js API server
-│   ├── server.js            # Main server with REST API
-│   ├── package.json         # Backend dependencies
-│   └── notes.db             # SQLite database (auto-created)
-│
-├── frontend/                # React + Vite frontend
-│   ├── src/
-│   │   ├── components/      # React components
-│   │   │   ├── Sidebar.jsx
-│   │   │   ├── Editor.jsx
-│   │   │   ├── Toolbar.jsx
-│   │   │   ├── TemplateSelector.jsx
-│   │   │   └── AIPanel.jsx
-│   │   ├── services/        # API integration
-│   │   │   └── api.js
-│   │   ├── utils/           # Utilities
-│   │   │   └── templates.js
-│   │   ├── App.jsx          # Main app component
-│   │   ├── main.jsx         # Entry point
-│   │   └── index.css        # Global styles
-│   ├── index.html
-│   ├── package.json
-│   ├── vite.config.js
-│   └── tailwind.config.js
-│
-└── main.jsx                 # Original file (can be removed)
-```
+### AI Integration (Coming Soon)
+- Text summarization
+- Content rewriting
+- Smart suggestions
 
-## 📦 Installation
+## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ and npm
-- Git
+- Node.js (v16 or higher)
+- Python 3.8+
+- npm or yarn
 
-### Setup Instructions
+### Installation
 
-1. **Clone or navigate to the project**
-   ```bash
-   cd simpleNote
-   ```
-
-2. **Install Backend Dependencies**
-   ```bash
-   cd backend
-   npm install
-   ```
-
-3. **Install Frontend Dependencies**
-   ```bash
-   cd ../frontend
-   npm install
-   ```
-
-4. **Install additional Tailwind plugin**
-   ```bash
-   npm install -D @tailwindcss/typography
-   ```
-
-## 🚀 Running the Application
-
-You need to run both the backend and frontend servers.
-
-### Terminal 1: Start Backend Server
+1. **Clone the repository**
 ```bash
-cd backend
-npm start
+git clone <your-repo-url>
+cd simpleNote
 ```
-The backend API will run on `http://localhost:3001`
 
-### Terminal 2: Start Frontend Development Server
+2. **Install Frontend Dependencies**
+```bash
+cd frontend
+npm install
+```
+
+3. **Install Backend Dependencies**
+```bash
+cd ../backend_flask
+pip install -r requirements.txt
+```
+
+4. **Start the Application**
+
+**Option 1: Using the startup script**
+```bash
+chmod +x start-flask.sh
+./start-flask.sh
+```
+
+**Option 2: Manual start**
+
+Terminal 1 (Backend):
+```bash
+cd backend_flask
+python app.py
+```
+
+Terminal 2 (Frontend):
 ```bash
 cd frontend
 npm run dev
 ```
-The frontend will run on `http://localhost:3000`
 
-Open your browser and navigate to `http://localhost:3000`
+5. **Access the App**
+Open your browser and navigate to:
+```
+http://localhost:5173
+```
 
-## 🔌 API Endpoints
+## 🎯 Usage Guide
+
+### Voice Recording
+1. Click the microphone icon in the toolbar
+2. Allow microphone permissions when prompted
+3. Start speaking - text will appear in real-time
+4. Click again to stop recording
+
+### File Import
+- Click the upload icon in the toolbar
+- Select .txt or .docx files
+- A new document will be created with the file's content and title
+- Original formatting is preserved for .docx files
+- Loading spinner shows progress during upload
+
+### PDF Export
+- Click the download icon in the toolbar
+- Loading spinner indicates export in progress
+- Document will be saved as PDF with all formatting, images, and styles preserved
+- Professional page layout with proper margins
+
+### Markdown Mode
+- Click the code icon to toggle markdown
+- Edit text with markdown syntax
+- Toggle off to render as HTML
+
+### Tables
+- Click the table icon in the toolbar
+- A dialog appears to set rows and columns
+- First row is automatically styled as header
+- Tables include professional styling with borders and backgrounds
+- Click Insert to add the table to your document
 
 ### Document Management
-- `GET /api/documents` - Get all documents
-- `GET /api/documents/:id` - Get specific document
-- `POST /api/documents` - Create new document
-- `PUT /api/documents/:id` - Update document
-- `DELETE /api/documents/:id` - Delete document (soft delete)
+- Create new documents with the + button
+- Documents auto-sort by last edited
+- Click any document to switch
+- Use trash icon to delete (requires >1 document)
+- URL automatically updates with document ID for easy sharing
 
-### AI Features (Ready for Integration)
-- `POST /api/ai/summarize` - Summarize selected text
-  ```json
-  {
-    "documentId": "string",
-    "selectedText": "string"
-  }
-  ```
+### Color Picker
+- Click the palette icon in the toolbar
+- Use the full color picker for custom colors
+- Or choose from 8 preset colors
+- Click to apply color to selected text
+- Color picker closes automatically after selection
 
-- `POST /api/ai/rewrite` - Rewrite text with style
-  ```json
-  {
-    "documentId": "string",
-    "selectedText": "string",
-    "style": "professional|casual"
-  }
-  ```
+## 🛠️ Tech Stack
 
-### Speech-to-Text (Ready for Integration)
-- `POST /api/speech/transcribe` - Transcribe audio to text
-  ```json
-  {
-    "documentId": "string",
-    "audioData": "base64_encoded_audio"
-  }
-  ```
+### Frontend
+- React 18
+- Tailwind CSS
+- Lucide Icons
+- Marked (Markdown parser)
+- html2pdf.js (PDF export)
+- Mammoth (DOCX parser)
+- Web Speech API
 
-## 🤖 Adding AI Features
+### Backend
+- Python Flask
+- SQLite
+- CORS support
 
-The application is designed to easily integrate AI capabilities:
+## 📁 Project Structure
 
-### 1. Text Summarization & Rewriting
-
-Update `/backend/server.js` endpoints to integrate with your preferred AI service:
-
-**Option A: OpenAI**
-```javascript
-const OpenAI = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-app.post('/api/ai/summarize', async (req, res) => {
-  const { selectedText } = req.body;
-  
-  const completion = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
-    messages: [
-      {
-        role: "system",
-        content: "Summarize the following text concisely:"
-      },
-      {
-        role: "user",
-        content: selectedText
-      }
-    ]
-  });
-  
-  res.json({ summary: completion.choices[0].message.content });
-});
 ```
-
-**Option B: Anthropic Claude**
-```javascript
-const Anthropic = require('@anthropic-ai/sdk');
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-app.post('/api/ai/summarize', async (req, res) => {
-  const { selectedText } = req.body;
-  
-  const message = await client.messages.create({
-    model: "claude-3-sonnet-20240229",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `Summarize this text: ${selectedText}`
-      }
-    ]
-  });
-  
-  res.json({ summary: message.content[0].text });
-});
-```
-
-**Option C: Local Models (Ollama)**
-```javascript
-const axios = require('axios');
-
-app.post('/api/ai/summarize', async (req, res) => {
-  const { selectedText } = req.body;
-  
-  const response = await axios.post('http://localhost:11434/api/generate', {
-    model: 'llama2',
-    prompt: `Summarize this text: ${selectedText}`,
-    stream: false
-  });
-  
-  res.json({ summary: response.data.response });
-});
-```
-
-### 2. Speech-to-Text Integration
-
-**Option A: Web Speech API (Browser-based)**
-
-Update `/frontend/src/components/Toolbar.jsx`:
-```javascript
-const handleVoiceRecording = () => {
-  if (!isRecording) {
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map(result => result[0].transcript)
-        .join('');
-      
-      // Insert transcript into editor
-      document.execCommand('insertText', false, transcript);
-    };
-
-    recognition.start();
-    setIsRecording(true);
-  } else {
-    recognition.stop();
-    setIsRecording(false);
-  }
-};
-```
-
-**Option B: External Service (Deepgram, AssemblyAI)**
-```javascript
-// Backend implementation
-const axios = require('axios');
-
-app.post('/api/speech/transcribe', async (req, res) => {
-  const { audioData } = req.body;
-  
-  const response = await axios.post('https://api.deepgram.com/v1/listen', 
-    Buffer.from(audioData, 'base64'),
-    {
-      headers: {
-        'Authorization': `Token ${process.env.DEEPGRAM_API_KEY}`,
-        'Content-Type': 'audio/wav'
-      }
-    }
-  );
-  
-  res.json({ transcript: response.data.results.channels[0].alternatives[0].transcript });
-});
+simpleNote/
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── Editor.jsx
+│   │   │   ├── Sidebar.jsx
+│   │   │   ├── Toolbar.jsx
+│   │   │   └── AIPanel.jsx
+│   │   ├── services/
+│   │   │   └── api.js
+│   │   ├── App.jsx
+│   │   ├── index.css
+│   │   └── main.jsx
+│   ├── package.json
+│   └── ...
+├── backend_flask/
+│   ├── app.py
+│   ├── requirements.txt
+│   └── database.db
+├── start-flask.sh
+└── README.md
 ```
 
 ## 🎨 Customization
 
-### Adding New Templates
+### Theme Colors
+Edit `/frontend/src/index.css` to customize the black and white theme:
+- Light mode: CSS variables define all colors
+- Dark mode: Automatically removes borders for cleaner look
+- Customize accent colors, backgrounds, and borders as needed
 
-Edit `/frontend/src/utils/templates.js`:
-```javascript
-export const templates = {
-  // ... existing templates
-  myTemplate: {
-    name: 'My Custom Template',
-    content: '<h2>Title</h2><p>Content...</p>'
-  }
-};
-```
+## 🐛 Troubleshooting
 
-### Styling
+### Voice Recording Not Working
+- Use Chrome, Edge, or Safari (Firefox has limited support)
+- Ensure microphone permissions are granted
+- Check browser console for errors
 
-The app uses Tailwind CSS. Modify styles in:
-- `/frontend/src/index.css` - Global styles
-- Component files - Component-specific styles
+### PDF Export Issues
+- Large documents may take longer to export
+- Check browser console for errors
+- Ensure pop-up blocker is disabled
 
-## 🗄️ Database Schema
+### File Upload Not Working
+- Check file format (.txt or .docx only)
+- Verify file size (<10MB recommended)
+- Ensure browser has file access permissions
+- Watch for loading spinner - upload may take a few seconds
+- New document will appear at the top of the sidebar when complete
 
-### documents
-- `id` (TEXT PRIMARY KEY)
-- `title` (TEXT)
-- `content` (TEXT)
-- `created_at` (TEXT)
-- `updated_at` (TEXT)
-- `is_deleted` (INTEGER)
+### Dark Mode Border Issues
+- Borders are automatically hidden in dark mode
+- If you see borders, check that dark mode is properly enabled
 
-### ai_interactions
-- `id` (INTEGER PRIMARY KEY)
-- `document_id` (TEXT)
-- `interaction_type` (TEXT)
-- `input_text` (TEXT)
-- `output_text` (TEXT)
-- `created_at` (TEXT)
+## 📝 License
 
-### speech_sessions
-- `id` (INTEGER PRIMARY KEY)
-- `document_id` (TEXT)
-- `transcript` (TEXT)
-- `duration` (INTEGER)
-- `created_at` (TEXT)
-
-## 🔐 Environment Variables
-
-Create a `.env` file in the backend directory:
-```env
-PORT=3001
-OPENAI_API_KEY=your_key_here
-ANTHROPIC_API_KEY=your_key_here
-DEEPGRAM_API_KEY=your_key_here
-```
-
-## 🚢 Production Deployment
-
-### Build Frontend
-```bash
-cd frontend
-npm run build
-```
-
-### Serve Static Files
-Update backend server.js:
-```javascript
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
-});
-```
-
-### Deploy Options
-- **Vercel/Netlify**: Frontend
-- **Heroku/Railway**: Backend + Database
-- **Docker**: Full stack containerization
-
-## 📝 Development Tips
-
-1. **Hot Reload**: Both servers support hot reload
-2. **Database Reset**: Delete `backend/notes.db` to reset
-3. **API Testing**: Use Postman or `curl` to test endpoints
-4. **Debugging**: Check browser console and backend terminal
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🤝 Contributing
 
-Feel free to contribute by:
-1. Adding new features
-2. Improving UI/UX
-3. Integrating AI services
-4. Adding tests
-5. Improving documentation
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📄 License
-
-See LICENSE file for details.
-
-## 🎯 Roadmap
+## 💡 Future Enhancements
 
 - [ ] Real-time collaboration
-- [ ] Export to PDF/Word
 - [ ] Cloud sync
 - [ ] Mobile app
-- [ ] Browser extensions
-- [ ] Offline mode
-- [ ] End-to-end encryption
-
-## 💡 Tips for AI Integration
-
-1. **Rate Limiting**: Implement rate limiting for AI endpoints
-2. **Caching**: Cache AI responses to reduce API costs
-3. **Streaming**: Add streaming support for real-time AI responses
-4. **Error Handling**: Add robust error handling for AI failures
-5. **User Feedback**: Show loading states and error messages
+- [ ] Advanced AI features
+- [ ] Custom theme builder
+- [ ] Plugin system
+- [ ] Version history
+- [ ] Search across documents
 
 ---
 
-Built with ❤️ using React, Express, and SQLite
-
+Built with ❤️ using React and Flask
