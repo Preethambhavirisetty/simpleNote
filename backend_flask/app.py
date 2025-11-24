@@ -288,5 +288,5 @@ if __name__ == '__main__':
     print("📊 API endpoints available at: http://localhost:3001/api")
     print("✨ Press Ctrl+C to stop")
     print()
-    app.run(debug=True, host='0.0.0.0', port=3001)
+    app.run(debug=True, host='0.0.0.0', port=5001)
 

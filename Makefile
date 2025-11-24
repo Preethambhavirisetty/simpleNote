@@ -159,6 +159,14 @@ db-size: ## Show database size
 	@echo "$(BLUE)Database size:$(NC)"
 	@docker compose exec -T simplenote-db psql -U simplenote_user -d simplenote -c "SELECT pg_size_pretty(pg_database_size('simplenote'));"
 
+db-users: ## List all users
+	@echo "$(BLUE)Registered users:$(NC)"
+	@docker compose exec -T simplenote-db psql -U simplenote_user -d simplenote -c "SELECT id, name, email, created_at FROM users ORDER BY created_at DESC;"
+
+db-stats: ## Show user and document statistics
+	@echo "$(BLUE)User and Document Statistics:$(NC)"
+	@docker compose exec -T simplenote-db psql -U simplenote_user -d simplenote -c "SELECT u.name, u.email, COUNT(d.id) as document_count FROM users u LEFT JOIN documents d ON u.id = d.user_id GROUP BY u.id, u.name, u.email ORDER BY document_count DESC;"
+
 ports: ## Show port usage
 	@echo "$(BLUE)Port Allocation:$(NC)"
 	@echo "  Frontend:  3002"
@@ -188,8 +196,14 @@ test: ## Run basic connectivity tests
 	@echo -n "Testing database (port 5433): "
 	@docker compose exec -T simplenote-db pg_isready -U simplenote_user > /dev/null && echo "$(GREEN)✓ Pass$(NC)" || echo "$(RED)✗ Fail$(NC)"
 
-dev: ## Start services with live logs
+dev: ## Start services with live logs (Docker)
 	@docker compose up
+
+dev-local: ## Start development servers locally (no Docker)
+	@./start-dev.sh
+
+dev-stop: ## Stop local development servers
+	@./stop-dev.sh
 
 prod: ## Deploy in production mode
 	@./deploy-simplenote.sh

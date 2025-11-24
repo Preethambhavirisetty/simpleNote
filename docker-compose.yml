@@ -44,6 +44,7 @@ services:
       - PORT=5002
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://simplenote_user:simplenote_secure_password_2024@simplenote-db:5432/simplenote
+      - SECRET_KEY=simplenote-jwt-secret-key-change-in-production-2024
     depends_on:
       simplenote-db:
         condition: service_healthy
@@ -71,7 +72,7 @@ services:
     container_name: simplenote-frontend
     restart: unless-stopped
     ports:
-      - "3002:80"  # Changed from 3001 to 3002
+      - "80:80"  # Changed from 3001 to 3002
     depends_on:
       - simplenote-backend
     volumes:

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, ChevronLeft, ChevronRight, FileText, Clock } from 'lucide-react';
+import { Plus, Trash2, ChevronLeft, ChevronRight, FileText, Clock, LogOut, User } from 'lucide-react';
 
 export default function Sidebar({
   documents,
@@ -13,7 +13,9 @@ export default function Sidebar({
   textClass,
   theme,
   isCollapsed,
-  onToggleCollapse
+  onToggleCollapse,
+  user,
+  onLogout
 }) {
   const [editingId, setEditingId] = useState(null);
   return (
@@ -151,6 +153,30 @@ export default function Sidebar({
           >
             <Plus size={18} strokeWidth={2.5} />
           </button>
+        </div>
+      )}
+      
+      {/* User Info Section */}
+      {!isCollapsed && user && (
+        <div className="p-3 border-t border-[var(--color-border-medium)] bg-[var(--color-bg-tertiary)]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-full bg-[var(--color-accent-primary)] flex items-center justify-center text-[var(--color-bg-primary)] text-xs font-bold">
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate">{user.name}</p>
+                <p className="text-xs text-[var(--color-text-muted)] truncate">{user.email}</p>
+              </div>
+            </div>
+            <button
+              onClick={onLogout}
+              className={`p-1.5 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-red-500`}
+              title="Logout"
+            >
+              <LogOut size={14} strokeWidth={2.5} />
+            </button>
+          </div>
         </div>
       )}
     </div>
