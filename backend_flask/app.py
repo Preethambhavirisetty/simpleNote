@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sqlite3
 import os
+import json
 from datetime import datetime
 from contextlib import contextmanager
 
@@ -75,8 +76,18 @@ init_db()
 
 # Helper function to convert Row to dict
 def row_to_dict(row):
-    """Convert sqlite3.Row to dictionary"""
-    return {key: row[key] for key in row.keys()}
+    """Convert sqlite3.Row to dictionary with JSON parsing for content"""
+    result = {key: row[key] for key in row.keys()}
+    
+    # Parse content field from JSON string to object
+    if 'content' in result and result['content']:
+        try:
+            result['content'] = json.loads(result['content'])
+        except (json.JSONDecodeError, TypeError):
+            # If not valid JSON, keep as string (for backward compatibility)
+            pass
+    
+    return result
 
 # API Routes
 
@@ -131,17 +142,20 @@ def create_document():
         if not doc_id or not title:
             return jsonify({'error': 'ID and title are required'}), 400
         
+        # Store content as JSON string (ProseMirror JSON format)
+        content_str = json.dumps(content) if isinstance(content, (dict, list)) else content
+        
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 'INSERT INTO documents (id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-                (doc_id, title, content, now, now)
+                (doc_id, title, content_str, now, now)
             )
             
         return jsonify({
             'id': doc_id,
             'title': title,
-            'content': content,
+            'content': content,  # Return original content object
             'created_at': now,
             'updated_at': now
         }), 201
@@ -160,11 +174,14 @@ def update_document(document_id):
         if not title or content is None:
             return jsonify({'error': 'Title and content are required'}), 400
         
+        # Store content as JSON string (ProseMirror JSON format)
+        content_str = json.dumps(content) if isinstance(content, (dict, list)) else content
+        
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 'UPDATE documents SET title = ?, content = ?, updated_at = ? WHERE id = ? AND is_deleted = 0',
-                (title, content, now, document_id)
+                (title, content_str, now, document_id)
             )
             
             if cursor.rowcount == 0:
@@ -173,7 +190,7 @@ def update_document(document_id):
         return jsonify({
             'id': document_id,
             'title': title,
-            'content': content,
+            'content': content,  # Return original content object
             'updated_at': now
         })
     except Exception as e:

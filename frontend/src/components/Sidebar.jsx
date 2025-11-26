@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Trash2, ChevronLeft, ChevronRight, FileText, Clock } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, Trash2, ChevronLeft, ChevronRight, FileText, Clock, Check, X } from 'lucide-react';
 
 export default function Sidebar({
   documents,
@@ -18,11 +18,33 @@ export default function Sidebar({
   lastSaved
 }) {
   const [editingId, setEditingId] = useState(null);
+  const [editingValue, setEditingValue] = useState('');
+  const inputRef = useRef(null);
+
+  const startEditing = (doc) => {
+    setEditingId(doc.id);
+    setEditingValue(doc.title);
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  const confirmRename = () => {
+    if (editingValue.trim() && editingId) {
+      updateDocTitle(editingId, editingValue.trim());
+    }
+    setEditingId(null);
+    setEditingValue('');
+  };
+
+  const cancelRename = () => {
+    setEditingId(null);
+    setEditingValue('');
+  };
+
   return (
     <div 
-      className={`${glassClass} rounded-lg overflow-hidden transition-all duration-300 ease-in-out flex flex-col border-r-2 border-[var(--color-accent-primary)] ${
-        isCollapsed ? 'w-12 sm:w-16' : 'w-full md:w-72'
-      } md:min-h-0`}
+      className={`scroll-container ${glassClass} rounded-lg overflow-hidden transition-all duration-300 ease-in-out flex flex-col border-r-2 border-[var(--color-accent-primary)] h-full ${
+        isCollapsed ? 'hidden md:flex md:w-14' : 'w-full md:w-72'
+      }`}
     >
       {/* Header */}
       <div className="p-3 border-b border-[var(--color-border-medium)] bg-[var(--color-bg-tertiary)]">
@@ -57,7 +79,7 @@ export default function Sidebar({
             )}
             <button
               onClick={onToggleCollapse}
-              className={`p-1.5 rounded ${hoverClass} transition-all border border-[var(--color-border-medium)]`}
+              className={`${isCollapsed ? "p-2" : "p-1.5"} rounded ${hoverClass} transition-all border border-[var(--color-border-medium)]`}
               title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
             >
               {isCollapsed ? <ChevronRight size={14} strokeWidth={2.5} /> : <ChevronLeft size={14} strokeWidth={2.5} />}
@@ -68,12 +90,12 @@ export default function Sidebar({
 
       {/* Collapsed View */}
       {isCollapsed ? (
-        <div className="flex flex-col gap-2 p-2 overflow-y-auto">
+        <div className="flex-1 min-h-0 flex flex-col gap-2 p-2 overflow-y-auto">
           {documents.map(doc => (
             <button
               key={doc.id}
               onClick={() => setActiveDoc(doc.id)}
-              className={`p-3 rounded-md transition-all border ${
+              className={`p-2 rounded-md transition-all border ${
                 activeDoc === doc.id
                   ? 'bg-[var(--color-accent-primary)] border-[var(--color-accent-primary)] text-[var(--color-bg-primary)]'
                   : `${hoverClass} border-[var(--color-border-medium)]`
@@ -86,7 +108,7 @@ export default function Sidebar({
         </div>
       ) : (
         /* Expanded View */
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className="flex-1 min-h-0 overflow-y-auto p-3">
           <div className="space-y-2">
             {documents.map((doc, index) => (
               <div
@@ -104,24 +126,57 @@ export default function Sidebar({
                   <div className="flex items-start justify-between gap-2">
                     <div
                       onClick={() => setActiveDoc(doc.id)}
-                      onDoubleClick={() => setEditingId(doc.id)}
+                      onDoubleClick={() => startEditing(doc)}
                       className="flex-1 min-w-0"
                     >
-                      <input
-                        type="text"
-                        value={doc.title}
-                        onChange={(e) => updateDocTitle(doc.id, e.target.value)}
-                        onBlur={() => setEditingId(null)}
-                        readOnly={editingId !== doc.id}
-                        className={`bg-transparent border-none outline-none w-full font-semibold text-sm leading-tight ${
-                          activeDoc === doc.id ? 'text-[var(--color-bg-primary)]' : textClass
-                        } ${editingId === doc.id ? 'focus:ring focus:ring-gray-400' : 'cursor-pointer'} rounded px-1 -mx-1 py-1`}
-                        onClick={(e) => {
-                          if (editingId === doc.id) {
-                            e.stopPropagation();
-                          }
-                        }}
-                      />
+                      <div className="flex items-center gap-1">
+                        <input
+                          ref={editingId === doc.id ? inputRef : null}
+                          type="text"
+                          value={editingId === doc.id ? editingValue : doc.title}
+                          onChange={(e) => {
+                            if (editingId === doc.id) {
+                              setEditingValue(e.target.value);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (editingId === doc.id) {
+                              if (e.key === 'Enter') {
+                                confirmRename();
+                              } else if (e.key === 'Escape') {
+                                cancelRename();
+                              }
+                            }
+                          }}
+                          readOnly={editingId !== doc.id}
+                          className={`bg-transparent border-none outline-none flex-1 font-semibold text-sm leading-tight ${
+                            activeDoc === doc.id ? 'text-[var(--color-bg-primary)]' : textClass
+                          } ${editingId === doc.id ? 'focus:ring-2 focus:ring-[var(--color-accent-primary)] px-2 py-1 bg-[var(--color-bg-elevated)]' : 'cursor-pointer px-1 py-1'} rounded -mx-1`}
+                          onClick={(e) => {
+                            if (editingId === doc.id) {
+                              e.stopPropagation();
+                            }
+                          }}
+                        />
+                        {editingId === doc.id && (
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={confirmRename}
+                              className="p-1 rounded-full bg-green-500 hover:bg-green-600 text-white transition-colors shadow-sm"
+                              title="Confirm (Enter)"
+                            >
+                              <Check size={12} strokeWidth={2.5} />
+                            </button>
+                            <button
+                              onClick={cancelRename}
+                              className="p-1 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors shadow-sm"
+                              title="Cancel (Esc)"
+                            >
+                              <X size={12} strokeWidth={2.5} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <div className={`flex items-center gap-2 mt-2 text-xs font-medium ${
                         activeDoc === doc.id ? 'opacity-70' : 'text-[var(--color-text-muted)]'
                       }`}>
@@ -163,7 +218,7 @@ export default function Sidebar({
         <div className="p-2 border-t border-[var(--color-border-medium)]">
           <button
             onClick={addNewDocument}
-            className={`w-full p-3 rounded-md ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
+            className={`w-full p-2 rounded-md ${hoverClass} transition-all border border-[var(--color-border-medium)] hover:border-[var(--color-accent-primary)]`}
             title="New Document"
           >
             <Plus size={18} strokeWidth={2.5} />

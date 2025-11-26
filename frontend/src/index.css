@@ -2,18 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Container */
+.scroll-container {
+  overflow: auto;         /* scrolling enabled */
+  scrollbar-width: 20px;  /* Firefox: still shows only when scrolling */
+  scrollbar-color: darkgray transparent;
+}
+
+/* WebKit (Chrome/Safari/Edge) */
+.scroll-container::-webkit-scrollbar {
+  width: 1px;
+  height: 2px;
+  background: transparent; /* invisible by default */
+}
+
+.scroll-container::-webkit-scrollbar-thumb {
+  background: transparent; /* invisible until hover/scroll */
+}
+
+.scroll-container:hover::-webkit-scrollbar-thumb,
+.scroll-container:active::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.3); /* becomes visible only on scroll/hover */
+  border-radius: 4px;
+}
+
+
 /* Custom text selection color - light purple */
 ::selection {
-  background-color: #e9d5ff; /* light purple */
-  color: #1f2937; /* dark gray for contrast */
+  background-color: lightblue; /* light purple */
+  color: #000000; /* dark gray for contrast */
 }
 
 ::-moz-selection {
-  background-color: #e9d5ff;
-  color: #1f2937;
+  background-color: lightblue;
+  color: #000000;
 }
 
-/* Fix table cell cursor positioning */
+
 table td[contenteditable="true"],
 table th[contenteditable="true"] {
   cursor: text;
@@ -96,6 +121,495 @@ body {
 code {
   font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
   font-size: 0.9em;
+}
+
+/* Markdown Editor Styles */
+.markdown-editor {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+  tab-size: 2;
+}
+
+.markdown-editor::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+/* WYSIWYG Editor Styles */
+.wysiwyg-editor {
+  tab-size: 2;
+  -moz-tab-size: 2;
+}
+
+/* Placeholder for empty contentEditable */
+.wysiwyg-editor:empty:before {
+  content: attr(data-placeholder);
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* TipTap Editor Styles */
+.tiptap-editor {
+  padding: 40px;
+  box-sizing: border-box;
+  height: 100%;
+  width: 100%;
+}
+
+
+.tiptap-editor .ProseMirror {
+  outline: none;
+  min-height: 100%;
+}
+
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: 'Start typing...';
+  float: left;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  pointer-events: none;
+  height: 0;
+}
+
+/* TipTap content styling */
+.tiptap-editor h1 {
+  font-size: 2em;
+  font-weight: bold;
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+  line-height: 1.2;
+  text-decoration: none;
+  border-bottom: none;
+}
+
+.tiptap-editor h2 {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+  line-height: 1.3;
+  text-decoration: none;
+  border-bottom: none;
+}
+
+.tiptap-editor h3 {
+  font-size: 1.17em;
+  font-weight: bold;
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+  line-height: 1.4;
+}
+
+.tiptap-editor p {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.tiptap-editor ul,
+.tiptap-editor ol {
+  padding-left: 1.5em;
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+}
+
+.tiptap-editor ul {
+  list-style-type: disc;
+}
+
+.tiptap-editor ol {
+  list-style-type: decimal;
+}
+
+.tiptap-editor li {
+  margin-top: 0.1em;
+  margin-bottom: 0.1em;
+}
+
+/* Inline code */
+.tiptap-editor code {
+  background-color: #f0f0f0;
+  color: #000000;
+  padding: 0.25em 0.45em;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+  border: 1px solid var(--color-border-light);
+  white-space: nowrap;
+}
+
+/* Block code container */
+.tiptap-editor pre  {
+  background-color: #f0f0f0;
+  color: #000000;
+  padding: 1rem;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-medium);
+  overflow-x: auto;
+  line-height: 1.6;
+  margin: 1rem 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* Code inside <pre> */
+.tiptap-editor pre code {
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: 0.9rem;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+  white-space: pre;
+  border: none;
+}
+
+
+.tiptap-editor blockquote {
+  border-left: 3px solid var(--color-border-medium);
+  padding-left: 1em;
+  margin-left: 0;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.tiptap-editor a {
+  color: var(--color-accent-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Image styling - works with ResizableImage extension */
+.tiptap-editor img {
+  max-width: 100%;
+  border-radius: 5px;
+  margin: 0.5em 0;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tiptap-editor img:hover {
+  box-shadow: 0 0 0 2px var(--color-accent-primary);
+}
+
+
+/* Selected image */
+.tiptap-editor img.ProseMirror-selectednode {
+  outline: 3px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+
+/* Video styling */
+.tiptap-editor video {
+  max-width: 100%;
+  height: auto;
+  border-radius: 5px;
+  margin: 0.5em auto;
+  display: block;
+  cursor: pointer;
+}
+
+/* Mobile toolbar scrollbar styling */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-border-medium);
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-heavy);
+}
+
+.tiptap-editor hr {
+  border: none;
+  border-top: 2px solid var(--color-border-medium);
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+/* Table styles */
+.tiptap-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 0.9em;
+  margin-bottom: 0.9em;
+  overflow: hidden;
+}
+
+.tiptap-editor th,
+.tiptap-editor td {
+  border: 1px solid var(--color-border-medium);
+  padding: 0.5em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.tiptap-editor th {
+  font-weight: bold;
+  background-color: var(--color-bg-secondary);
+}
+
+/* Markdown Preview Styles */
+.markdown-preview {
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+.markdown-preview h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 0.75em;
+  margin-bottom: 0.4em;
+  line-height: 1.25;
+  border-bottom: 2px solid var(--color-border-medium);
+  padding-bottom: 0.25em;
+}
+
+.markdown-preview h1:first-child {
+  margin-top: 0;
+}
+
+.markdown-preview h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.4em;
+  line-height: 1.3;
+  border-bottom: 1px solid var(--color-border-light);
+  padding-bottom: 0.2em;
+}
+
+.markdown-preview h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 0.75em;
+  margin-bottom: 0.4em;
+  line-height: 1.4;
+}
+
+.markdown-preview h4 {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin-top: 0.65em;
+  margin-bottom: 0.35em;
+}
+
+.markdown-preview h5 {
+  font-size: 1em;
+  font-weight: 600;
+  margin-top: 0.6em;
+  margin-bottom: 0.3em;
+}
+
+.markdown-preview h6 {
+  font-size: 0.9em;
+  font-weight: 600;
+  margin-top: 0.6em;
+  margin-bottom: 0.3em;
+  color: var(--color-text-secondary);
+}
+
+.markdown-preview p {
+  margin-bottom: 0.85em;
+  margin-top: 0;
+}
+
+.markdown-preview p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-preview a {
+  color: var(--color-accent-primary);
+  text-decoration: underline;
+  transition: opacity 0.2s;
+}
+
+.markdown-preview a:hover {
+  opacity: 0.7;
+}
+
+.markdown-preview ul,
+.markdown-preview ol {
+  margin-left: 0;
+  margin-bottom: 0.85em;
+  margin-top: 0;
+  padding-left: 2em;
+  list-style-position: outside;
+}
+
+.markdown-preview ul {
+  list-style-type: disc;
+}
+
+.markdown-preview ol {
+  list-style-type: decimal;
+}
+
+.markdown-preview li {
+  margin-bottom: 0.35em;
+  padding-left: 0.5em;
+  display: list-item;
+}
+
+.markdown-preview li:last-child {
+  margin-bottom: 0;
+}
+
+/* Nested lists / sublists */
+.markdown-preview ul ul,
+.markdown-preview ul ol,
+.markdown-preview ol ul,
+.markdown-preview ol ol {
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
+  margin-left: 0;
+  padding-left: 1.5em;
+}
+
+.markdown-preview ul ul {
+  list-style-type: circle;
+}
+
+.markdown-preview ul ul ul {
+  list-style-type: square;
+}
+
+.markdown-preview li > ul,
+.markdown-preview li > ol {
+  margin-top: 0.35em;
+}
+
+.markdown-preview li > p {
+  margin-bottom: 0.35em;
+}
+
+.markdown-preview blockquote {
+  border-left: 3px solid var(--color-border-dark);
+  padding-left: 0.85em;
+  padding-top: 0.15em;
+  padding-bottom: 0.15em;
+  margin-left: 0;
+  margin-right: 0;
+  margin-top: 0;
+  margin-bottom: 0.85em;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.markdown-preview blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-preview code {
+  background: var(--color-bg-tertiary);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+  font-size: 0.88em;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+  border: 1px solid var(--color-border-light);
+}
+
+.markdown-preview pre {
+  background: var(--color-bg-tertiary);
+  padding: 0.85em;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin-top: 0;
+  margin-bottom: 0.85em;
+  border: 1px solid var(--color-border-medium);
+}
+
+.markdown-preview pre code {
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.88em;
+  border: none;
+}
+
+.markdown-preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 0.85em 0;
+  border: 1px solid var(--color-border-light);
+}
+
+.markdown-preview hr {
+  border: none;
+  border-top: 2px solid var(--color-border-medium);
+  margin: 0.4em 0;
+}
+
+.markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-top: 0;
+  margin-bottom: 0.85em;
+  font-size: 0.95em;
+}
+
+.markdown-preview table th,
+.markdown-preview table td {
+  border: 1px solid var(--color-border-medium);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.markdown-preview table th {
+  background: var(--color-bg-tertiary);
+  font-weight: 600;
+}
+
+.markdown-preview input[type="checkbox"] {
+  margin-right: 0.5em;
+  margin-top: 0.15em;
+  vertical-align: top;
+}
+
+/* Task lists (checklists) */
+.markdown-preview li.task-list-item {
+  list-style-type: none;
+  margin-left: -2em;
+  padding-left: 0;
+}
+
+.markdown-preview ul.contains-task-list {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.markdown-preview ul.contains-task-list li {
+  padding-left: 0.25em;
+}
+
+/* Support inline HTML for colors and alignment - don't override inline styles */
+
+/* Better handling of centered/aligned text */
+.markdown-preview div[style*="text-align"] {
+  width: 100%;
+  display: block;
+  margin-bottom: 1em;
+}
+
+.markdown-preview div[style*="text-align: left"] {
+  text-align: left !important;
+}
+
+.markdown-preview div[style*="text-align: center"] {
+  text-align: center !important;
+}
+
+.markdown-preview div[style*="text-align: right"] {
+  text-align: right !important;
 }
 
 /* Custom scrollbar - Black & White */
@@ -273,12 +787,6 @@ button:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--color-accent-primary);
   outline-offset: 2px;
-}
-
-/* Selection */
-::selection {
-  background-color: var(--color-accent-primary);
-  color: var(--color-bg-primary);
 }
 
 /* Glass effect - Black & White */
