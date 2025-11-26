@@ -139,7 +139,6 @@ export default function Toolbar({
         };
 
         recognitionInstance.onend = () => {
-          console.log("🔚 Recognition ended");
 
           if (recognitionRef.current.shouldContinue) {
             try {
@@ -150,7 +149,6 @@ export default function Toolbar({
           } else {
             setIsRecording(false);
             setTranscript("");
-            console.log("✅ Recognition fully stopped");
           }
         };
 
@@ -175,7 +173,6 @@ export default function Toolbar({
       recognitionRef.current.shouldContinue = false; // Prevent auto-restart
       recognitionRef.current.onend = () => {
         // Override onend to prevent restart when stopping manually
-        console.log("✅ Recognition manually stopped");
         setIsRecording(false);
         setTranscript("");
       };
@@ -211,7 +208,6 @@ export default function Toolbar({
     if (isRecording) {
       // STOP IMMEDIATELY
       try {
-        console.log("🛑 STOPPING voice recognition...");
 
         // 1. Set flag to FALSE first (prevents onend from restarting)
         if (recognitionRef.current) {
@@ -224,8 +220,6 @@ export default function Toolbar({
         // 3. Update UI immediately
         setIsRecording(false);
         setTranscript("");
-
-        console.log("✅ Voice stopped instantly");
 
         if (showToast) {
           showToast("Voice stopped", "success", 1000);
@@ -243,7 +237,6 @@ export default function Toolbar({
     } else {
       // START LISTENING
       try {
-        console.log("▶️ STARTING voice recognition...");
 
         // 1. Set flag to TRUE (enables auto-restart in onend)
         if (recognitionRef.current) {
@@ -253,8 +246,6 @@ export default function Toolbar({
         // 2. Start recognition
         recognition.start();
         setIsRecording(true);
-
-        console.log("✅ Voice recognition started");
 
         if (showToast) {
           showToast("Listening... Speak now", "info", 2000);

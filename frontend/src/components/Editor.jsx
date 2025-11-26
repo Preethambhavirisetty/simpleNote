@@ -180,7 +180,6 @@ export default function Editor({
   useEffect(() => {
     if (editor && onEditorReady) {
       onEditorReady(editor);
-      console.log(editor?.extensionManager?.extensions.map((e) => e.name));
     }
   }, [editor, onEditorReady]);
 

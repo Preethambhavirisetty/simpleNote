@@ -168,7 +168,6 @@ export default function App() {
         title: currentDoc.title, 
         content: currentDoc.content 
       });
-      console.log("Document saved successfully");
       setLastSaved(new Date());
       setToast({ message: "Document saved successfully", type: "success", duration: 2000 });
     } catch (error) {
@@ -204,7 +203,6 @@ export default function App() {
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         await api.updateDocument(activeDoc, { title: currentDoc.title, content });
-        console.log("Document saved successfully");
         setLastSaved(new Date());
       } catch (error) {
         console.error("Failed to update document:", error);
