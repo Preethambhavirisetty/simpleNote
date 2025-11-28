@@ -150,7 +150,7 @@ code {
 
 /* TipTap Editor Styles */
 .tiptap-editor {
-  padding: 40px;
+  padding: 35px;
   box-sizing: border-box;
   height: 100%;
   width: 100%;
@@ -227,41 +227,233 @@ code {
 
 /* Inline code */
 .tiptap-editor code {
-  background-color: #f0f0f0;
-  color: #000000;
-  padding: 0.25em 0.45em;
+  background-color: #f4f4f5;
+  color: #18181b;
+  padding: 0.2em 0.4em;
   border-radius: 4px;
-  font-size: 0.85rem;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
-  border: 1px solid var(--color-border-light);
+  font-size: 0.85em;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', 'Consolas', monospace;
+  border: 1px solid #e4e4e7;
   white-space: nowrap;
 }
 
-/* Block code container */
-.tiptap-editor pre  {
-  background-color: #f0f0f0;
-  color: #000000;
-  padding: 1rem;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
-  border-radius: 8px;
-  border: 1px solid var(--color-border-medium);
-  overflow-x: auto;
-  line-height: 1.6;
-  margin: 1rem 0;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+.dark .tiptap-editor code {
+  background-color: #27272a;
+  color: #fafafa;
+  border-color: #3f3f46;
 }
 
-/* Code inside <pre> */
-.tiptap-editor pre code {
-  background: none;
-  padding: 0;
-  color: inherit;
-  font-size: 0.9rem;
-  font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
-  white-space: pre;
+/* Code Block Wrapper (NodeView) */
+.code-block-wrapper {
+  margin: 1rem 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #313244;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Code Block Header */
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+/* Language Selector Button */
+.code-block-lang-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #cdd6f4;
+  background: #313244;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.code-block-lang-btn:hover {
+  background: #45475a;
+}
+
+/* Language Dropdown */
+.code-block-lang-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.25rem;
+  min-width: 140px;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+}
+
+.code-block-lang-option {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: #a6adc8;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.code-block-lang-option:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+
+.code-block-lang-option.active {
+  background: #45475a;
+  color: #cdd6f4;
+}
+
+/* Copy Button */
+.code-block-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #a6adc8;
+  background: transparent;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.code-block-copy-btn:hover {
+  background: #313244;
+  color: #cdd6f4;
+  border-color: #45475a;
+}
+
+/* Code Block with Syntax Highlighting */
+.code-block-wrapper pre {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 1rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', 'Consolas', monospace;
+  overflow-x: auto;
+  line-height: 1.7;
+  margin: 0;
+  border-radius: 0;
   border: none;
 }
 
+/* Code inside <pre> */
+.code-block-wrapper pre code {
+  background: none !important;
+  padding: 0;
+  color: inherit;
+  font-size: 0.875rem;
+  font-family: inherit;
+  white-space: pre;
+  border: none !important;
+  display: block;
+}
+
+/* Fallback for pre without wrapper */
+.tiptap-editor pre:not(.code-block-wrapper pre) {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 1.25rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Monaco', 'Consolas', monospace;
+  border-radius: 12px;
+  border: 1px solid #313244;
+  overflow-x: auto;
+  line-height: 1.7;
+  margin: 1rem 0;
+}
+
+/* Catppuccin Mocha Theme for Syntax Highlighting */
+.code-block-wrapper .hljs-comment,
+.code-block-wrapper .hljs-quote {
+  color: #6c7086;
+  font-style: italic;
+}
+
+.code-block-wrapper .hljs-keyword,
+.code-block-wrapper .hljs-selector-tag,
+.code-block-wrapper .hljs-built_in {
+  color: #cba6f7;
+}
+
+.code-block-wrapper .hljs-string,
+.code-block-wrapper .hljs-doctag,
+.code-block-wrapper .hljs-title,
+.code-block-wrapper .hljs-section,
+.code-block-wrapper .hljs-selector-id {
+  color: #a6e3a1;
+}
+
+.code-block-wrapper .hljs-number,
+.code-block-wrapper .hljs-literal {
+  color: #fab387;
+}
+
+.code-block-wrapper .hljs-variable,
+.code-block-wrapper .hljs-template-variable,
+.code-block-wrapper .hljs-tag .hljs-attr {
+  color: #f38ba8;
+}
+
+.code-block-wrapper .hljs-function,
+.code-block-wrapper .hljs-name {
+  color: #89b4fa;
+}
+
+.code-block-wrapper .hljs-type,
+.code-block-wrapper .hljs-class .hljs-title {
+  color: #f9e2af;
+}
+
+.code-block-wrapper .hljs-attr,
+.code-block-wrapper .hljs-attribute {
+  color: #89dceb;
+}
+
+.code-block-wrapper .hljs-symbol,
+.code-block-wrapper .hljs-bullet,
+.code-block-wrapper .hljs-addition {
+  color: #a6e3a1;
+}
+
+.code-block-wrapper .hljs-deletion {
+  color: #f38ba8;
+}
+
+.code-block-wrapper .hljs-operator,
+.code-block-wrapper .hljs-punctuation {
+  color: #94e2d5;
+}
+
+.code-block-wrapper .hljs-params {
+  color: #f2cdcd;
+}
+
+.code-block-wrapper .hljs-meta {
+  color: #fab387;
+}
+
+.code-block-wrapper .hljs-regexp {
+  color: #f5c2e7;
+}
 
 .tiptap-editor blockquote {
   border-left: 3px solid var(--color-border-medium);
