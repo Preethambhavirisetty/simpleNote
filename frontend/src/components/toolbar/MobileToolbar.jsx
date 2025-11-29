@@ -22,6 +22,7 @@ import {
   Mic,
   Palette,
   Type,
+  RemoveFormatting,
 } from 'lucide-react';
 import { Divider } from '../ui';
 
@@ -119,6 +120,15 @@ export default function MobileToolbar({
           <Strikethrough size={16} strokeWidth={2} />
         </button>
 
+        {/* Clear Formatting */}
+        <button
+          onClick={() => editor.chain().focus().clearNodes().unsetAllMarks().run()}
+          className={`p-2 rounded flex-shrink-0 transition-all border ${hoverClass} border-[var(--color-border-medium)]`}
+          title="Clear Formatting"
+        >
+          <RemoveFormatting size={16} strokeWidth={2} />
+        </button>
+
         <Divider orientation="vertical" />
 
         {/* Headings */}
@@ -213,10 +223,10 @@ export default function MobileToolbar({
 
         <button
           onClick={onShowFontSizeDialog}
-          className={`p-2 rounded flex-shrink-0 transition-all border ${hoverClass} border-[var(--color-border-medium)]`}
+          className={`p-2 rounded flex-shrink-0 transition-all border ${hoverClass} border-[var(--color-border-medium)] flex items-center justify-center w-[36px] h-[36px]`}
           title="Font Size"
         >
-          <span className="text-xs font-bold">Aa</span>
+          <span className="text-[11px] font-bold leading-none">Aa</span>
         </button>
 
         <Divider orientation="vertical" />
