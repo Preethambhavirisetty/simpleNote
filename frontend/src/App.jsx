@@ -133,7 +133,25 @@ export default function App() {
         hoverClass={hoverClass}
       />
 
-      <div className="flex flex-col md:flex-row gap-2 sm:gap-4 h-[calc(100vh-80px)] sm:h-[calc(100vh-108px)]">
+      {/* Mobile Toolbar - positioned at top for mobile */}
+      {documents.length > 0 && currentDoc && (
+        <div className="md:hidden mb-2">
+          <Toolbar
+            editor={editorInstance}
+            currentDoc={currentDoc}
+            glassClass={glassClass}
+            hoverClass={hoverClass}
+            updateDocContent={handleUpdateDocContent}
+            onFileUpload={handleFileUploadWithToast}
+            showToast={showToast}
+            isCollapsed={toolbarCollapsed}
+            onToggleCollapse={() => setToolbarCollapsed(!toolbarCollapsed)}
+            mobileOnly
+          />
+        </div>
+      )}
+
+      <div className="flex flex-col md:flex-row gap-2 sm:gap-4 h-[calc(100vh-140px)] md:h-[calc(100vh-108px)]">
         {/* Mobile Sidebar Overlay */}
         {showMobileSidebar && (
           <div
@@ -145,12 +163,12 @@ export default function App() {
         {/* Sidebar */}
         <div
           className={`
-            fixed md:relative z-50 md:z-auto
-            inset-y-0 left-0
-            w-72 md:w-auto md:h-full
-            transition-transform duration-300 ease-in-out
+          fixed md:relative z-50 md:z-auto
+          inset-y-0 left-0
+          w-72 md:w-auto md:h-full
+          transition-transform duration-300 ease-in-out
             ${showMobileSidebar ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          `}
+        `}
         >
           <Sidebar
             documents={documents}

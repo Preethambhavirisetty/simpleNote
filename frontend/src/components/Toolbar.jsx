@@ -21,6 +21,7 @@ export default function Toolbar({
   showToast,
   isCollapsed,
   onToggleCollapse,
+  mobileOnly = false,
 }) {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showFontFamilyDialog, setShowFontFamilyDialog] = useState(false);
@@ -434,41 +435,45 @@ export default function Toolbar({
 
   return (
     <>
-      {/* Desktop Toolbar */}
-      <DesktopToolbar
-        editor={editor}
-        currentDoc={currentDoc}
-        glassClass={glassClass}
-        hoverClass={hoverClass}
-        isCollapsed={isCollapsed}
-        onToggleCollapse={onToggleCollapse}
-        onShowColorPicker={() => setShowColorPicker(true)}
-        onShowFontFamilyDialog={() => setShowFontFamilyDialog(true)}
-        onShowFontSizeDialog={() => setShowFontSizeDialog(true)}
-        onShowLinkDialog={handleShowLinkDialog}
-        onMediaUpload={handleMediaUpload}
-        onFileUpload={onFileUpload}
-        showToast={showToast}
-      />
+      {/* Desktop Toolbar - hidden when mobileOnly */}
+      {!mobileOnly && (
+        <DesktopToolbar
+          editor={editor}
+          currentDoc={currentDoc}
+          glassClass={glassClass}
+          hoverClass={hoverClass}
+          isCollapsed={isCollapsed}
+          onToggleCollapse={onToggleCollapse}
+          onShowColorPicker={() => setShowColorPicker(true)}
+          onShowFontFamilyDialog={() => setShowFontFamilyDialog(true)}
+          onShowFontSizeDialog={() => setShowFontSizeDialog(true)}
+          onShowLinkDialog={handleShowLinkDialog}
+          onMediaUpload={handleMediaUpload}
+          onFileUpload={onFileUpload}
+          showToast={showToast}
+        />
+      )}
 
-      {/* Mobile Toolbar */}
-      <MobileToolbar
-        editor={editor}
-        glassClass={glassClass}
-        hoverClass={hoverClass}
-        currentDoc={currentDoc}
-        isRecording={isRecording}
-        onVoiceRecording={handleVoiceRecording}
-        onShowColorPicker={() => setShowColorPicker(true)}
-        onShowFontFamilyDialog={() => setShowFontFamilyDialog(true)}
-        onShowFontSizeDialog={() => setShowFontSizeDialog(true)}
-        onShowLinkDialog={handleShowLinkDialog}
-        onMediaUpload={handleMediaUpload}
-        onImport={handleImport}
-        onExportPDF={handleExportPDF}
-        onExportDocx={handleExportDocx}
-        onInsertTable={handleInsertTable}
-      />
+      {/* Mobile Toolbar - shown when mobileOnly or on mobile screens */}
+      {mobileOnly && (
+        <MobileToolbar
+          editor={editor}
+          glassClass={glassClass}
+          hoverClass={hoverClass}
+          currentDoc={currentDoc}
+          isRecording={isRecording}
+          onVoiceRecording={handleVoiceRecording}
+          onShowColorPicker={() => setShowColorPicker(true)}
+          onShowFontFamilyDialog={() => setShowFontFamilyDialog(true)}
+          onShowFontSizeDialog={() => setShowFontSizeDialog(true)}
+          onShowLinkDialog={handleShowLinkDialog}
+          onMediaUpload={handleMediaUpload}
+          onImport={handleImport}
+          onExportPDF={handleExportPDF}
+          onExportDocx={handleExportDocx}
+          onInsertTable={handleInsertTable}
+        />
+      )}
 
       {/* Modals */}
       <ColorPickerModal

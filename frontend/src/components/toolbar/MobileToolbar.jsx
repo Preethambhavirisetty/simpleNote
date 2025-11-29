@@ -68,7 +68,7 @@ export default function MobileToolbar({
 
   return (
     <div
-      className={`md:hidden ${glassClass} border-t border-[var(--color-border-light)] bg-[var(--color-bg-secondary)]/95 backdrop-blur-lg rounded-lg overflow-hidden`}
+      className={`${glassClass} border border-[var(--color-border-light)] bg-[var(--color-bg-secondary)]/95 backdrop-blur-lg rounded-lg overflow-hidden`}
     >
       <div className="flex items-center gap-1 p-2 overflow-x-auto scrollbar-thin scrollbar-thumb-[var(--color-border-medium)] scrollbar-track-transparent">
         {/* Voice */}
