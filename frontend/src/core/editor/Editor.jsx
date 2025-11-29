@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import TextSelectionTooltip from '../../components/TextSelectionTooltip';
 import EditorStatsBar from './EditorStatsBar';
@@ -22,6 +22,8 @@ export default function Editor({
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
   const [tooltipPosition, setTooltipPosition] = useState(null);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const scrollContainerRef = useRef(null);
 
   // Handle Ctrl+S / Cmd+S for manual save
   useEditorKeyboard(onManualSave);
@@ -86,6 +88,37 @@ export default function Editor({
     }
   }, [editor, onEditorReady]);
 
+  // Handle scroll to top button visibility
+  useEffect(() => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const handleScroll = () => {
+      const scrollTop = scrollContainer.scrollTop;
+      setShowScrollToTop(scrollTop > 300); // Show button after scrolling 300px
+    };
+
+    scrollContainer.addEventListener('scroll', handleScroll);
+    
+    // Check initial scroll position
+    handleScroll();
+
+    return () => {
+      scrollContainer.removeEventListener('scroll', handleScroll);
+    };
+  }, [editor]);
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    const scrollContainer = scrollContainerRef.current;
+    if (scrollContainer) {
+      scrollContainer.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+      });
+    }
+  };
+
   // Load document content when currentDoc changes
   useEffect(() => {
     if (editor && currentDoc) {
@@ -132,11 +165,41 @@ export default function Editor({
           lastSaved={lastSaved}
         />
 
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <EditorContent
-            editor={editor}
-            className="flex-1 w-full px-2 py-4 overflow-auto scroll-container tiptap-editor"
-          />
+        <div className="flex flex-col flex-1 overflow-hidden relative">
+          <div
+            ref={scrollContainerRef}
+            className="flex-1 w-full px-2 py-4 overflow-auto scroll-container"
+          >
+            <EditorContent
+              editor={editor}
+              className="w-full tiptap-editor"
+            />
+          </div>
+          
+          {/* Scroll to Top Button */}
+          {showScrollToTop && (
+            <button
+              onClick={scrollToTop}
+              className="absolute bottom-6 right-6 z-10 p-3 rounded-full bg-[var(--color-bg-elevated)] border border-[var(--color-border-light)] shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-110 active:scale-95 group"
+              aria-label="Scroll to top"
+              title="Scroll to top"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-5 w-5 text-[var(--color-text-primary)] group-hover:text-[var(--color-accent-primary)] transition-colors"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M5 10l7-7m0 0l7 7m-7-7v18"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </>
