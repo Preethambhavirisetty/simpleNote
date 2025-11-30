@@ -1,3 +1,4 @@
+# Frontend build stage - only builds static files
 FROM node:18-alpine AS builder
 
 WORKDIR /app
@@ -13,23 +14,37 @@ RUN npm ci --prefer-offline --no-audit
 # Copy source files
 COPY frontend/ .
 
-# Set API URL for production build (passed from docker-compose)
+# Set API URL for production build
 ARG VITE_API_URL="/api"
 ENV VITE_API_URL=$VITE_API_URL
 
-# Build the app (Vite will use VITE_API_URL env var)
+# Build the app
 RUN npm run build
 
-# Production stage
+# Production stage - just serve static files, no routing logic
 FROM nginx:alpine
 
-# Copy built files
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy built files to a temporary location
+COPY --from=builder /app/dist /app/dist
 
-# Copy nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy entrypoint script
+COPY frontend/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-EXPOSE 80
+# Minimal nginx config - only serves static files
+# Main nginx reverse proxy handles all routing, HTTPS, etc.
+RUN echo 'server {' > /etc/nginx/conf.d/default.conf && \
+    echo '    listen 8080;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    server_name _;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    root /usr/share/nginx/html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    index index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    location / {' >> /etc/nginx/conf.d/default.conf && \
+    echo '        try_files $uri $uri/ /index.html;' >> /etc/nginx/conf.d/default.conf && \
+    echo '    }' >> /etc/nginx/conf.d/default.conf && \
+    echo '}' >> /etc/nginx/conf.d/default.conf
 
-CMD ["nginx", "-g", "daemon off;"]
+# Expose internal port (only accessible within Docker network)
+EXPOSE 8080
 
+# Use entrypoint to copy files to shared volume on startup
+ENTRYPOINT ["/entrypoint.sh"]

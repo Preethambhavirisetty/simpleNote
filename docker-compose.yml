@@ -1,12 +1,14 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database - Persistent, never rebuilt
   simplenote-db:
     image: postgres:15-alpine
     container_name: simplenote-db
     restart: unless-stopped
-    ports:
-      - "5433:5432"  # Using 5433 to avoid conflict with existing DB on 5432
+    # Don't expose ports to host in production (only internal network)
+    # ports:
+    #   - "5433:5432"  # Only for local development
     volumes:
       - simplenote-postgres-data:/var/lib/postgresql/data
     environment:
@@ -15,28 +17,34 @@ services:
       - POSTGRES_PASSWORD=simplenote_secure_password_2024
       - PGDATA=/var/lib/postgresql/data/pgdata
     networks:
-      - simplenote-network
+      - simplenote-internal
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U simplenote_user -d simplenote"]
       interval: 10s
       timeout: 5s
       retries: 5
-    mem_limit: 256m
-    cpus: 0.3
+    mem_limit: 512m
+    cpus: 0.5
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+    # Never rebuild this container
+    deploy:
+      restart_policy:
+        condition: on-failure
 
+  # Backend - Python only, no HTTPS, no Nginx
   simplenote-backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
     container_name: simplenote-backend
     restart: unless-stopped
-    ports:
-      - "5002:5002"
+    # Don't expose ports to host - only accessible via nginx
+    expose:
+      - "5002"
     volumes:
       - simplenote-logs:/app/logs
     environment:
@@ -44,42 +52,43 @@ services:
       - PORT=5002
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql://simplenote_user:simplenote_secure_password_2024@simplenote-db:5432/simplenote
-      - SECRET_KEY=7659d6f3c03985717ce4146a0ff56e37cfa41eff15ebf09b168f15426ce9e229b719dccd5dcc1b705113752b29d5679fd985213779dd23b883bf57a7e330e65
+      - SECRET_KEY=${SECRET_KEY:-7659d6f3c03985717ce4146a0ff56e37cfa41eff15ebf09b168f15426ce9e229b719dccd5dcc1b705113752b29d5679fd985213779dd23b883bf57a7e330e65}
     depends_on:
       simplenote-db:
         condition: service_healthy
     networks:
-      - simplenote-network
+      - simplenote-internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5002/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    mem_limit: 256m
-    cpus: 0.5
+    mem_limit: 512m
+    cpus: 1.0
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
+  # Frontend - Builds and serves static files only (no routing, no HTTPS)
   simplenote-frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
       args:
         NODE_OPTIONS: "--max_old_space_size=512"
-        VITE_API_URL: "/api"  # Use relative URL - Nginx will proxy to backend
+        VITE_API_URL: "/api"
     container_name: simplenote-frontend
     restart: unless-stopped
-    ports:
-      - "3002:80"  # Changed from 3001 to 3002
-    depends_on:
-      - simplenote-backend
+    # Share static files with nginx via bind mount
     volumes:
-      - simplenote-nginx-logs:/var/log/nginx
+      - simplenote-frontend-static:/usr/share/nginx/html
+    # Don't expose ports to host - only accessible via nginx
+    expose:
+      - "8080"
     networks:
-      - simplenote-network
+      - simplenote-internal
     mem_limit: 128m
     cpus: 0.3
     logging:
@@ -88,15 +97,81 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Nginx Reverse Proxy - Handles routing, HTTPS, SSL, compression, caching
+  simplenote-nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: simplenote-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # Static files from frontend (shared volume)
+      - simplenote-frontend-static:/usr/share/nginx/html:ro
+      # SSL certificates (read-only, certbot writes to it)
+      - simplenote-certbot-certs:/etc/letsencrypt:ro
+      - simplenote-certbot-www:/var/www/certbot:ro
+      # Nginx logs
+      - simplenote-nginx-logs:/var/log/nginx
+    depends_on:
+      - simplenote-frontend
+      - simplenote-backend
+    networks:
+      - simplenote-internal
+    mem_limit: 128m
+    cpus: 0.5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # Start certificate watcher in background (optional, certbot will handle renewal)
+    # command: sh -c "nginx -g 'daemon off;' & /usr/local/bin/cert-watcher.sh"
+
+  # Certbot - SSL certificate management and auto-renewal
+  simplenote-certbot:
+    image: certbot/certbot
+    container_name: simplenote-certbot
+    volumes:
+      - simplenote-certbot-certs:/etc/letsencrypt
+      - simplenote-certbot-www:/var/www/certbot
+    networks:
+      - simplenote-internal
+    # Renew certificates every 12 hours
+    # Note: Nginx container will detect certificate changes and reload automatically
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet --webroot --webroot-path=/var/www/certbot; sleep 12h & wait $${!}; done;'"
+    mem_limit: 64m
+    cpus: 0.2
+    depends_on:
+      - simplenote-nginx
+
 networks:
-  simplenote-network:
+  simplenote-internal:
     driver: bridge
+    internal: false  # Allow external access through nginx
 
 volumes:
+  # Database - persistent, never deleted
   simplenote-postgres-data:
     driver: local
+  # Logs
   simplenote-logs:
     driver: local
   simplenote-nginx-logs:
     driver: local
-
+  # SSL certificates
+  simplenote-certbot-certs:
+    driver: local
+  simplenote-certbot-www:
+    driver: local
+  # Frontend static files (shared between frontend and nginx)
+  simplenote-frontend-static:
+    driver: local

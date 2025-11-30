@@ -1,16 +1,57 @@
-node_modules
-npm-debug.log
+# Git
 .git
 .gitignore
-*.md
-.env
-.DS_Store
-frontend/dist
-frontend/node_modules
-backend_flask/__pycache__
-backend_flask/*.pyc
-backend_flask/database.db
-*.log
-.vscode
-.idea
 
+# Documentation
+*.md
+!README.md
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Data
+data/
+
+# Flutter
+notelite/.dart_tool/
+notelite/build/
+notelite/.flutter-plugins
+notelite/.flutter-plugins-dependencies

@@ -1,0 +1,25 @@
+# Development docker-compose - HTTP only, no SSL
+version: '3.8'
+
+services:
+  simplenote-db:
+    ports:
+      - "5433:5432"  # Expose for local development
+
+  simplenote-backend:
+    ports:
+      - "5002:5002"  # Expose for local development
+
+  simplenote-frontend:
+    ports:
+      - "8080:8080"  # Expose for local development
+
+  simplenote-nginx:
+    volumes:
+      - simplenote-frontend-static:/usr/share/nginx/html:ro
+      - simplenote-nginx-logs:/var/log/nginx
+      # Use dev config (HTTP only) - override production config
+      - ./nginx/conf.d/default-dev.conf:/etc/nginx/conf.d/default.conf:ro
+      # Remove SSL config
+      - /etc/letsencrypt  # Empty mount to prevent SSL errors
+
