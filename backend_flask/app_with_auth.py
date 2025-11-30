@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 import os
 import json
 from datetime import datetime, timedelta, timezone
@@ -8,6 +9,8 @@ from contextlib import contextmanager
 import jwt as pyjwt
 import bcrypt
 from functools import wraps
+import logging
+from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
@@ -22,14 +25,13 @@ CORS(app, supports_credentials=True, origins=[
 # Configuration
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'simplenote-secret-key-2024-change-in-production')
 
-# Database configuration
-DB_PATH = os.path.join(os.path.dirname(__file__), 'notes.db')
+# Database configuration - PostgreSQL
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://simplenote_user:simplenote_secure_password_2024@localhost:5432/simplenote')
 
 @contextmanager
 def get_db():
     """Context manager for database connections"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     try:
         yield conn
         conn.commit()
@@ -47,71 +49,100 @@ def init_db():
         # Users table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                email TEXT UNIQUE NOT NULL,
+                id VARCHAR(255) PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
         # Documents table - now with user_id
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS documents (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(255) NOT NULL,
                 title TEXT NOT NULL,
-                content TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                is_deleted INTEGER DEFAULT 0,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                content JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_deleted BOOLEAN DEFAULT FALSE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
+        ''')
+        
+        # Create indexes for better performance
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_documents_user_id 
+            ON documents(user_id)
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_documents_updated_at 
+            ON documents(updated_at DESC)
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_documents_is_deleted 
+            ON documents(is_deleted)
         ''')
         
         # AI interactions table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ai_interactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                document_id TEXT NOT NULL,
-                interaction_type TEXT NOT NULL,
+                id SERIAL PRIMARY KEY,
+                document_id VARCHAR(255) NOT NULL,
+                interaction_type VARCHAR(100) NOT NULL,
                 input_text TEXT,
                 output_text TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (document_id) REFERENCES documents(id)
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
             )
         ''')
         
         # Speech sessions table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS speech_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                document_id TEXT NOT NULL,
+                id SERIAL PRIMARY KEY,
+                document_id VARCHAR(255) NOT NULL,
                 transcript TEXT,
                 duration INTEGER,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (document_id) REFERENCES documents(id)
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
             )
         ''')
         
         conn.commit()
-        print("✓ Database initialized successfully with authentication")
+        cursor.close()
+        print("✓ Database initialized successfully with authentication (PostgreSQL)")
 
 # Initialize database on startup
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"⚠️  Database initialization warning: {e}")
+    print("   This is normal if tables already exist or database is not yet available")
 
 # Helper function to convert Row to dict
 def row_to_dict(row):
-    """Convert sqlite3.Row to dictionary with JSON parsing for content"""
-    result = {key: row[key] for key in row.keys()}
+    """Convert RealDictRow to dictionary with JSON parsing for content"""
+    result = dict(row)
     
-    # Parse content field from JSON string to object
+    # Parse content field from JSON string to object (if stored as text)
+    # PostgreSQL JSONB is already parsed, but handle both cases
     if 'content' in result and result['content']:
-        try:
-            result['content'] = json.loads(result['content'])
-        except (json.JSONDecodeError, TypeError):
-            # If not valid JSON, keep as string (for backward compatibility)
-            pass
+        if isinstance(result['content'], str):
+            try:
+                result['content'] = json.loads(result['content'])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    
+    # Convert timestamps to ISO format strings
+    for key in ['created_at', 'updated_at']:
+        if key in result and result[key] and isinstance(result[key], datetime):
+            result[key] = result[key].isoformat()
+    
+    # Convert boolean to integer for compatibility
+    if 'is_deleted' in result:
+        result['is_deleted'] = 1 if result['is_deleted'] else 0
     
     return result
 
@@ -151,7 +182,23 @@ def generate_token(user_id):
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'ok', 'message': 'Flask server is running with authentication'})
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
+            cursor.close()
+        return jsonify({
+            'status': 'ok', 
+            'message': 'Flask server is running with authentication (PostgreSQL)',
+            'database': 'connected'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'ok',
+            'message': 'Flask server is running with authentication (PostgreSQL)',
+            'database': 'disconnected',
+            'error': str(e)
+        }), 200
 
 @app.route('/api/auth/register', methods=['POST'])
 def register():
@@ -173,19 +220,19 @@ def register():
         
         # Generate user ID
         user_id = f"user_{int(datetime.now().timestamp() * 1000)}"
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc)
         
         with get_db() as conn:
             cursor = conn.cursor()
             
             # Check if email already exists
-            cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+            cursor.execute('SELECT id FROM users WHERE email = %s', (email,))
             if cursor.fetchone():
                 return jsonify({'error': 'Email already registered'}), 409
             
             # Create user
             cursor.execute(
-                'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+                'INSERT INTO users (id, name, email, password_hash, created_at) VALUES (%s, %s, %s, %s, %s)',
                 (user_id, name, email, password_hash, now)
             )
         
@@ -214,6 +261,8 @@ def register():
         
     except Exception as e:
         print(f"Registration error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Registration failed'}), 500
 
 @app.route('/api/auth/login', methods=['POST'])
@@ -229,7 +278,7 @@ def login():
         
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+            cursor.execute('SELECT * FROM users WHERE email = %s', (email,))
             user = cursor.fetchone()
             
             if not user:
@@ -272,7 +321,6 @@ def login():
 def logout():
     """Logout user"""
     response = make_response(jsonify({'message': 'Logged out successfully'}))
-    # response.set_cookie('auth_token', '', expires=0)
     response.delete_cookie('auth_token')
     return response
 
@@ -283,7 +331,7 @@ def get_current_user():
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT id, name, email, created_at FROM users WHERE id = ?', (request.user_id,))
+            cursor.execute('SELECT id, name, email, created_at FROM users WHERE id = %s', (request.user_id,))
             user = cursor.fetchone()
             
             if not user:
@@ -303,12 +351,15 @@ def get_documents():
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT * FROM documents WHERE user_id = ? AND is_deleted = 0 ORDER BY updated_at DESC',
+                'SELECT * FROM documents WHERE user_id = %s AND is_deleted = FALSE ORDER BY updated_at DESC',
                 (request.user_id,)
             )
             documents = [row_to_dict(row) for row in cursor.fetchall()]
             return jsonify(documents)
     except Exception as e:
+        print(f"Error fetching documents: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents/<document_id>', methods=['GET'])
@@ -319,7 +370,7 @@ def get_document(document_id):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT * FROM documents WHERE id = ? AND user_id = ? AND is_deleted = 0',
+                'SELECT * FROM documents WHERE id = %s AND user_id = %s AND is_deleted = FALSE',
                 (document_id, request.user_id)
             )
             document = cursor.fetchone()
@@ -340,19 +391,23 @@ def create_document():
         doc_id = data.get('id')
         title = data.get('title')
         content = data.get('content', '')
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc)
         
         if not doc_id or not title:
             return jsonify({'error': 'ID and title are required'}), 400
         
-        # Store content as JSON string (ProseMirror JSON format)
-        content_str = json.dumps(content) if isinstance(content, (dict, list)) else content
+        # Store content as JSONB (PostgreSQL native JSON)
+        # Convert to JSON string if it's a dict/list, otherwise store as-is
+        if isinstance(content, (dict, list)):
+            content_json = json.dumps(content)
+        else:
+            content_json = content
         
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO documents (id, user_id, title, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-                (doc_id, request.user_id, title, content_str, now, now)
+                'INSERT INTO documents (id, user_id, title, content, created_at, updated_at) VALUES (%s, %s, %s, %s::jsonb, %s, %s)',
+                (doc_id, request.user_id, title, content_json, now, now)
             )
             
         return jsonify({
@@ -360,10 +415,13 @@ def create_document():
             'user_id': request.user_id,
             'title': title,
             'content': content,  # Return original content object
-            'created_at': now,
-            'updated_at': now
+            'created_at': now.isoformat(),
+            'updated_at': now.isoformat()
         }), 201
     except Exception as e:
+        print(f"Error creating document: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents/<document_id>', methods=['PUT'])
@@ -374,19 +432,22 @@ def update_document(document_id):
         data = request.get_json()
         title = data.get('title')
         content = data.get('content')
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc)
         
         if not title or content is None:
             return jsonify({'error': 'Title and content are required'}), 400
         
-        # Store content as JSON string (ProseMirror JSON format)
-        content_str = json.dumps(content) if isinstance(content, (dict, list)) else content
+        # Store content as JSONB
+        if isinstance(content, (dict, list)):
+            content_json = json.dumps(content)
+        else:
+            content_json = content
         
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'UPDATE documents SET title = ?, content = ?, updated_at = ? WHERE id = ? AND user_id = ? AND is_deleted = 0',
-                (title, content_str, now, document_id, request.user_id)
+                'UPDATE documents SET title = %s, content = %s::jsonb, updated_at = %s WHERE id = %s AND user_id = %s AND is_deleted = FALSE',
+                (title, content_json, now, document_id, request.user_id)
             )
             
             if cursor.rowcount == 0:
@@ -396,9 +457,12 @@ def update_document(document_id):
             'id': document_id,
             'title': title,
             'content': content,  # Return original content object
-            'updated_at': now
+            'updated_at': now.isoformat()
         })
     except Exception as e:
+        print(f"Error updating document: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/documents/<document_id>', methods=['DELETE'])
@@ -409,7 +473,7 @@ def delete_document(document_id):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'UPDATE documents SET is_deleted = 1 WHERE id = ? AND user_id = ?',
+                'UPDATE documents SET is_deleted = TRUE WHERE id = %s AND user_id = %s',
                 (document_id, request.user_id)
             )
             
@@ -430,12 +494,12 @@ def summarize_text():
         data = request.get_json()
         document_id = data.get('documentId')
         selected_text = data.get('selectedText')
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc)
         
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO ai_interactions (document_id, interaction_type, input_text, output_text, created_at) VALUES (?, ?, ?, ?, ?)',
+                'INSERT INTO ai_interactions (document_id, interaction_type, input_text, output_text, created_at) VALUES (%s, %s, %s, %s, %s)',
                 (document_id, 'summarize', selected_text, 'AI summarization will be implemented here', now)
             )
         
@@ -455,12 +519,12 @@ def rewrite_text():
         document_id = data.get('documentId')
         selected_text = data.get('selectedText')
         style = data.get('style', 'professional')
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc)
         
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO ai_interactions (document_id, interaction_type, input_text, output_text, created_at) VALUES (?, ?, ?, ?, ?)',
+                'INSERT INTO ai_interactions (document_id, interaction_type, input_text, output_text, created_at) VALUES (%s, %s, %s, %s, %s)',
                 (document_id, f'rewrite_{style}', selected_text, 'AI rewriting will be implemented here', now)
             )
         
@@ -482,11 +546,21 @@ def internal_error(error):
     return jsonify({'error': 'Internal server error'}), 500
 
 if __name__ == '__main__':
-    print("🚀 Starting Flask backend server with authentication...")
+    # Setup logging
+    os.makedirs('/app/logs', exist_ok=True)
+    file_handler = RotatingFileHandler('/app/logs/app.log', maxBytes=10240000, backupCount=3)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+    app.logger.setLevel(logging.INFO)
+    
+    print("🚀 Starting Flask backend server with authentication (PostgreSQL)...")
     print("📍 Server running at: http://localhost:5002")
     print("📊 API endpoints available at: http://localhost:5002/api")
     print("🔐 Authentication: JWT with HTTP-only cookies")
+    print("💾 Database: PostgreSQL")
     print("✨ Press Ctrl+C to stop")
     print()
     app.run(debug=True, host='0.0.0.0', port=5002)
-
