@@ -461,3 +461,12 @@ make help           # All commands
 **Built with ❤️ for productivity**
 
 🚀 Happy note-taking!
+
+Inside .ssh/config/
+# EC2 SimpleNote Server
+Host simplenote-ec2
+	HostName ec2-44-192-13-139.compute-1.amazonaws.com
+	User ubuntu
+	IdentityFile /Users/ramchandrab/Downloads/simpnote-ssh.pem
+	StrictHostKeyChecking no
+	UserKnownHostsFile /dev/null

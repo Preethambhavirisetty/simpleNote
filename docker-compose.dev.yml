@@ -1,25 +1,82 @@
-# Development docker-compose - HTTP only, no SSL
-version: '3.8'
+version: "3.8"
 
 services:
+  # Postgres Database
   simplenote-db:
+    image: postgres:15-alpine
+    container_name: simplenote-db
+    restart: unless-stopped
     ports:
-      - "5433:5432"  # Expose for local development
-
-  simplenote-backend:
-    ports:
-      - "5002:5002"  # Expose for local development
-
-  simplenote-frontend:
-    ports:
-      - "8080:8080"  # Expose for local development
-
-  simplenote-nginx:
+      - "5434:5432"  # Allow local DB browsing (e.g., TablePlus, DBeaver)
+    environment:
+      POSTGRES_DB: simplenote
+      POSTGRES_USER: simplenote_user
+      POSTGRES_PASSWORD: simplenote_secure_password_2024
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - simplenote-frontend-static:/usr/share/nginx/html:ro
-      - simplenote-nginx-logs:/var/log/nginx
-      # Use dev config (HTTP only) - override production config
-      - ./nginx/conf.d/default-dev.conf:/etc/nginx/conf.d/default.conf:ro
-      # Remove SSL config
-      - /etc/letsencrypt  # Empty mount to prevent SSL errors
+      - simplenote-postgres-data:/var/lib/postgresql/data
+    networks:
+      - simplenote-devnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U simplenote_user -d simplenote"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  # Backend (Flask) with auto-reload for dev
+  simplenote-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: simplenote-backend
+    restart: unless-stopped
+    ports:
+      - "5002:5002"   # Accessible locally via http://localhost:5002
+    environment:
+      FLASK_ENV: development
+      PYTHONUNBUFFERED: 1
+      PORT: 5002
+      DATABASE_URL: postgresql://simplenote_user:simplenote_secure_password_2024@simplenote-db:5432/simplenote
+      SECRET_KEY: dev-secret-key
+    volumes:
+      - ./backend_flask:/app  # Mount backend_flask to /app for live reload
+      - ./wait-for-db.sh:/wait-for-db.sh:ro  # Keep wait script available
+      - simplenote-logs:/app/logs
+    depends_on:
+      simplenote-db:
+        condition: service_healthy
+    networks:
+      - simplenote-devnet
+
+  # Frontend (Vite dev server)
+  simplenote-frontend:
+    image: node:18
+    container_name: simplenote-frontend
+    restart: unless-stopped
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3000"
+    ports:
+      - "3000:3000"  # Accessible locally via http://localhost:5173
+    volumes:
+      - ./frontend:/app  # Mount frontend directory for live reload
+      - frontend-node-modules:/app/node_modules  # Named volume for node_modules
+    environment:
+      - NODE_OPTIONS=--max_old_space_size=512
+      - VITE_API_URL=http://localhost:5002/api
+      - VITE_BACKEND_URL=http://simplenote-backend:5002
+    networks:
+      - simplenote-devnet
+    depends_on:
+      - simplenote-backend
+
+networks:
+  simplenote-devnet:
+    driver: bridge
+
+volumes:
+  simplenote-postgres-data:
+    driver: local
+  simplenote-logs:
+    driver: local
+  frontend-node-modules:
+    driver: local

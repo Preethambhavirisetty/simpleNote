@@ -397,11 +397,26 @@ def create_document():
             return jsonify({'error': 'ID and title are required'}), 400
         
         # Store content as JSONB (PostgreSQL native JSON)
-        # Convert to JSON string if it's a dict/list, otherwise store as-is
-        if isinstance(content, (dict, list)):
+        # Handle empty content first
+        if content is None or content == '':
+            content_json = '{}'
+        elif isinstance(content, (dict, list)):
             content_json = json.dumps(content)
+        elif isinstance(content, str):
+            # If it's a string, validate it's valid JSON
+            if content.strip() == '':
+                content_json = '{}'
+            else:
+                try:
+                    # Validate it's valid JSON
+                    json.loads(content)
+                    content_json = content
+                except (json.JSONDecodeError, TypeError):
+                    # If not valid JSON, wrap it as a string value
+                    content_json = json.dumps(content)
         else:
-            content_json = content
+            # For any other type, convert to JSON
+            content_json = json.dumps(content)
         
         with get_db() as conn:
             cursor = conn.cursor()
@@ -437,11 +452,27 @@ def update_document(document_id):
         if not title or content is None:
             return jsonify({'error': 'Title and content are required'}), 400
         
-        # Store content as JSONB
-        if isinstance(content, (dict, list)):
+        # Store content as JSONB (PostgreSQL native JSON)
+        # Handle empty content first
+        if content is None or content == '':
+            content_json = '{}'
+        elif isinstance(content, (dict, list)):
             content_json = json.dumps(content)
+        elif isinstance(content, str):
+            # If it's a string, validate it's valid JSON
+            if content.strip() == '':
+                content_json = '{}'
+            else:
+                try:
+                    # Validate it's valid JSON
+                    json.loads(content)
+                    content_json = content
+                except (json.JSONDecodeError, TypeError):
+                    # If not valid JSON, wrap it as a string value
+                    content_json = json.dumps(content)
         else:
-            content_json = content
+            # For any other type, convert to JSON
+            content_json = json.dumps(content)
         
         with get_db() as conn:
             cursor = conn.cursor()
