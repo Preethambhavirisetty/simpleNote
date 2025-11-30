@@ -41,12 +41,108 @@ def get_db():
     finally:
         conn.close()
 
+def migrate_users_table():
+    """Migrate users table from integer ID to VARCHAR ID if needed"""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        
+        # Check if users table exists and what type the id column is
+        cursor.execute("""
+            SELECT data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'users' AND column_name = 'id'
+        """)
+        result = cursor.fetchone()
+        
+        if result and result[0] == 'integer':
+            print("Migrating users table from integer to VARCHAR ID...")
+            try:
+                # Drop foreign key constraint from documents table first
+                cursor.execute("""
+                    ALTER TABLE documents 
+                    DROP CONSTRAINT IF EXISTS documents_user_id_fkey
+                """)
+                
+                # Get existing users with integer IDs
+                cursor.execute("SELECT id, name, email, password_hash, created_at FROM users")
+                existing_users = cursor.fetchall()
+                
+                # Create a temporary table with VARCHAR ID
+                cursor.execute('''
+                    CREATE TABLE users_new (
+                        id VARCHAR(255) PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Copy users with converted IDs
+                id_mapping = {}  # old_id -> new_id
+                for user in existing_users:
+                    old_id, name, email, password_hash, created_at = user
+                    new_id = f"user_{old_id}"
+                    id_mapping[old_id] = new_id
+                    cursor.execute('''
+                        INSERT INTO users_new (id, name, email, password_hash, created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                    ''', (new_id, name, email, password_hash, created_at))
+                
+                # Update documents table - first alter column type
+                cursor.execute("ALTER TABLE documents ALTER COLUMN user_id TYPE VARCHAR(255) USING user_id::text")
+                
+                # Update document user_ids to match new user IDs
+                for old_id, new_id in id_mapping.items():
+                    cursor.execute(
+                        "UPDATE documents SET user_id = %s WHERE user_id = %s",
+                        (new_id, str(old_id))
+                    )
+                
+                # Drop old users table and rename new one
+                cursor.execute("DROP TABLE users CASCADE")
+                cursor.execute("ALTER TABLE users_new RENAME TO users")
+                
+                # Recreate foreign key constraint
+                cursor.execute('''
+                    ALTER TABLE documents
+                    ADD CONSTRAINT documents_user_id_fkey
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ''')
+                
+                # Create indexes
+                cursor.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
+                ''')
+                
+                conn.commit()
+                print("✓ Users table migrated successfully from integer to VARCHAR ID")
+            except Exception as e:
+                conn.rollback()
+                print(f"Migration error: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+
 def init_db():
     """Initialize database with required tables"""
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Users table
+        # Check if users table exists and needs migration
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'users'
+            )
+        """)
+        users_table_exists = cursor.fetchone()[0]
+        
+        # Migrate if needed (only if table exists with integer ID)
+        if users_table_exists:
+            migrate_users_table()
+        
+        # Users table - create if doesn't exist
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id VARCHAR(255) PRIMARY KEY,
@@ -55,6 +151,11 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+        ''')
+        
+        # Create index for email if it doesn't exist
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
         ''')
         
         # Documents table - now with user_id
@@ -70,6 +171,43 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         ''')
+        
+        # Migrate documents table - add missing columns if needed
+        # Check if is_deleted column exists
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.columns 
+                WHERE table_name = 'documents' AND column_name = 'is_deleted'
+            )
+        """)
+        has_is_deleted = cursor.fetchone()[0]
+        
+        if not has_is_deleted:
+            print("Adding missing 'is_deleted' column to documents table...")
+            cursor.execute('''
+                ALTER TABLE documents 
+                ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE
+            ''')
+        
+        # Check if content column is JSONB type
+        cursor.execute("""
+            SELECT data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'documents' AND column_name = 'content'
+        """)
+        content_type_result = cursor.fetchone()
+        
+        if content_type_result and content_type_result[0] != 'jsonb':
+            print(f"Migrating documents.content from {content_type_result[0]} to JSONB...")
+            # Try to convert TEXT to JSONB
+            try:
+                cursor.execute('''
+                    ALTER TABLE documents 
+                    ALTER COLUMN content TYPE JSONB USING content::jsonb
+                ''')
+            except Exception as e:
+                print(f"Warning: Could not convert content to JSONB: {e}")
+                print("Keeping content as TEXT")
         
         # Create indexes for better performance
         cursor.execute('''
@@ -252,8 +390,8 @@ def register():
             'auth_token',
             token,
             httponly=True,
-            secure=False,  # Set to True in production with HTTPS
-            samesite='Lax',
+            secure=True,  # Set to True in production with HTTPS
+            samesite='None', # samesite='Lax',
             max_age=60*60*24*7  # 7 days
         )
         
