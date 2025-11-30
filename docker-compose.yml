@@ -1,4 +1,4 @@
-version: '3.8'
+# Docker Compose file - version removed (obsolete in newer versions)
 
 services:
   # PostgreSQL Database - Persistent, never rebuilt
