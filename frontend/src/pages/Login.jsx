@@ -47,8 +47,8 @@ export default function Login() {
     <div className="min-h-screen bg-white flex items-center justify-center px-4">
       <div className="max-w-md w-full">
         {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center mb-2">
+        <div className="text-center mb-7">
+          <div className="flex items-center justify-center mb-1">
             <Logo size="xl" showText={true} />
           </div>
           <p className="text-xl text-gray-600">Sign in to your account</p>

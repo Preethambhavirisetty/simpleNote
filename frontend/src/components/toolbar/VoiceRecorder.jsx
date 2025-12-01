@@ -118,7 +118,7 @@ export default function VoiceRecorder({ editor, showToast, hoverClass }) {
   return (
     <div className="mb-4">
       <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)] mb-2 pb-1 border-b border-[var(--color-border-light)]">
-        Voice
+        Speech-to-Text
       </div>
 
       <button

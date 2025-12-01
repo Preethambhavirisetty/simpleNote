@@ -109,7 +109,7 @@ export default function Landing() {
             Ready to Get Started?
           </h3>
           <p className="text-xl text-gray-300 mb-10">
-            Join NoteLite today and experience modern note-taking.
+            Join NoteLite today and experience the simplicity of note-taking.
           </p>
           <button
             onClick={() => navigate('/register')}
@@ -121,8 +121,8 @@ export default function Landing() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-200 py-8">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-gray-600">
+      <footer className="py-1 bg-gray-900 text-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center font-light text-sm leading-7 tracking-wide">
           <p>&copy; 2025 NoteLite. Built with ❤️ for productivity.</p>
         </div>
       </footer>

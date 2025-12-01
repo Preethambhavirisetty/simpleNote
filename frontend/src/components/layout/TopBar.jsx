@@ -30,7 +30,7 @@ export default function TopBar({
           {showMobileSidebar ? <X size={18} /> : <Menu size={18} />}
         </button>
 
-        <Logo size="sm" showText={true} />
+        <Logo size="md" showText={true} />
         {hasActiveDoc && (
           <>
             <div className="hidden md:block h-6 w-px bg-[var(--color-border-light)]"></div>
