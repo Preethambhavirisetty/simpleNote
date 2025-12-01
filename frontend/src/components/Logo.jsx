@@ -13,14 +13,14 @@ export default function Logo({ size = 'md', showText = false, className = '' }) 
     sm: 'text-md',      // Perfect for 13" MacBook Pro
     md: 'text-lg',      // Slightly smaller for compact views
     lg: 'text-xl',      // Larger for prominent placement
-    xl: 'text-3xl',     // Extra large for hero sections
+    xl: 'text-2xl',     // Extra large for hero sections
   };
 
   const imageSizes = {
     sm: 'w-12 h-12',    // Perfect for 13" MacBook Pro (48px)
     md: 'w-14 h-14',    // Slightly smaller for compact views (40px)
     lg: 'w-16 h-16',    // Larger for prominent placement (64px)
-    xl: 'w-24 h-24',    // Extra large for hero sections (96px)
+    xl: 'w-20 h-20',    // Extra large for hero sections (96px)
   };
 
   return (

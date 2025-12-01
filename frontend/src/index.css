@@ -60,7 +60,7 @@ table th[contenteditable="true"]:focus {
   --color-bg-elevated: #ffffff;
   --color-accent-primary: #000000;
   --color-accent-secondary: #1a1a1a;
-  --color-text-primary: #000000;
+  --color-text-primary: #554e4e; /* Changed from #000000 to #554e4e */ 
   --color-text-secondary: #404040;
   --color-text-muted: #737373;
   --color-border-light: #e5e5e5;

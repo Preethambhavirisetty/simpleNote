@@ -18,7 +18,7 @@ export default function TopBar({
 }) {
   return (
     <div
-      className={`${glassClass} rounded-lg p-1.5 sm:p-2 mb-1.5 sm:mb-4 flex justify-between items-center relative z-50 border-b border-[var(--color-border-medium)]`}
+      className={`${glassClass} rounded-lg p-1.5 sm:p-2 mb-1.5 sm:mb-3 flex justify-between items-center relative z-50 border-b border-[var(--color-border-medium)]`}
     >
       <div className="flex items-center gap-2 sm:gap-4">
         {/* Mobile Hamburger Menu */}

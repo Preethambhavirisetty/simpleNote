@@ -119,7 +119,7 @@ export default function App() {
   }
 
   return (
-    <div className={`min-h-screen ${bgClass} ${textClass} p-2 sm:p-4 transition-all duration-300`}>
+    <div className={`min-h-screen ${bgClass} ${textClass} p-2 sm:p-2 transition-all duration-300`}>
       {/* Top Bar */}
       <TopBar
         user={user}
