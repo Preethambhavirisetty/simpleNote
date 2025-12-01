@@ -99,7 +99,10 @@ export default function App() {
   const handleSelectDoc = useCallback(
     (docId) => {
       setActiveDoc(docId);
-      setShowMobileSidebar(false);
+      // Close mobile sidebar when document is selected
+      if (window.innerWidth < 768) {
+        setShowMobileSidebar(false);
+      }
     },
     [setActiveDoc]
   );

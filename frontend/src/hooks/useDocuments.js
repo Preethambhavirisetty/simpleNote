@@ -92,39 +92,48 @@ export function useDocuments() {
   };
 
   const updateDocContent = useCallback(
-    async (content, showToast) => {
+    async (content, showToast, isUserEdit = true) => {
       if (!currentDoc) return;
 
       const now = new Date().toISOString();
       const updatedDoc = { ...currentDoc, content, updated_at: now };
 
-      // Update local state immediately for responsive UI
-      setDocuments((docs) => {
-        const filtered = docs.filter((doc) => doc.id !== activeDoc);
-        return [updatedDoc, ...filtered];
-      });
+      // Only move document to top when user actually edits (not when loading)
+      if (isUserEdit) {
+        setDocuments((docs) => {
+          const filtered = docs.filter((doc) => doc.id !== activeDoc);
+          return [updatedDoc, ...filtered];
+        });
 
-      // Clear existing timeout
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
-      // Show saving indicator
-      setIsSaving(true);
-      setLastSaved(null);
-
-      // Debounce the actual API call by 1 second
-      saveTimeoutRef.current = setTimeout(async () => {
-        try {
-          await api.updateDocument(activeDoc, { title: currentDoc.title, content });
-          setLastSaved(new Date());
-        } catch (error) {
-          console.error('Failed to update document:', error);
-          showToast?.('Failed to save document', 'error', 3000);
-        } finally {
-          setIsSaving(false);
+        // Clear existing timeout
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
         }
-      }, 1000);
+
+        // Show saving indicator
+        setIsSaving(true);
+        setLastSaved(null);
+
+        // Debounce the actual API call by 5 seconds
+        saveTimeoutRef.current = setTimeout(async () => {
+          try {
+            await api.updateDocument(activeDoc, { title: currentDoc.title, content });
+            setLastSaved(new Date());
+          } catch (error) {
+            console.error('Failed to update document:', error);
+            showToast?.('Failed to save document', 'error', 3000);
+          } finally {
+            setIsSaving(false);
+          }
+        }, 5000);
+      } else {
+        // Just update content in place without moving to top or triggering save
+        setDocuments((docs) => {
+          return docs.map((doc) => 
+            doc.id === activeDoc ? updatedDoc : doc
+          );
+        });
+      }
     },
     [currentDoc, activeDoc]
   );

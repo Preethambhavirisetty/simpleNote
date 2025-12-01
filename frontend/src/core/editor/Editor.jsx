@@ -24,6 +24,7 @@ export default function Editor({
   const [tooltipPosition, setTooltipPosition] = useState(null);
   const [showScrollToTop, setShowScrollToTop] = useState(false);
   const scrollContainerRef = useRef(null);
+  const isLoadingContentRef = useRef(false);
 
   // Handle Ctrl+S / Cmd+S for manual save
   useEditorKeyboard(onManualSave);
@@ -44,6 +45,11 @@ export default function Editor({
       handlePaste: handleImagePaste,
     },
     onUpdate: ({ editor }) => {
+      // Don't trigger update if we're just loading content
+      if (isLoadingContentRef.current) {
+        updateCounts(editor);
+        return;
+      }
       const json = editor.getJSON();
       updateDocContent(json);
       updateCounts(editor);
@@ -122,6 +128,9 @@ export default function Editor({
   // Load document content when currentDoc changes
   useEffect(() => {
     if (editor && currentDoc) {
+      // Set flag to prevent updateDocContent from moving document to top
+      isLoadingContentRef.current = true;
+      
       // Defer content setting to avoid flushSync warning
       const timeoutId = setTimeout(() => {
         if (editor && !editor.isDestroyed) {
@@ -129,10 +138,20 @@ export default function Editor({
           editor.commands.setContent(content, false);
           updateCounts(editor);
           editor.commands.focus('end');
+          
+          // Reset flag after a short delay to allow any pending updates to complete
+          setTimeout(() => {
+            isLoadingContentRef.current = false;
+          }, 100);
+        } else {
+          isLoadingContentRef.current = false;
         }
       }, 0);
       
-      return () => clearTimeout(timeoutId);
+      return () => {
+        clearTimeout(timeoutId);
+        isLoadingContentRef.current = false;
+      };
     }
   }, [currentDoc?.id, editor]);
 

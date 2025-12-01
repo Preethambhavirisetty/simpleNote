@@ -1,5 +1,6 @@
 import React from 'react';
 import { Moon, Sun, LogOut, User, Menu, X } from 'lucide-react';
+import Logo from '../Logo';
 
 export default function TopBar({
   user,
@@ -29,9 +30,7 @@ export default function TopBar({
           {showMobileSidebar ? <X size={18} /> : <Menu size={18} />}
         </button>
 
-        <h1 className="text-lg font-bold tracking-tight sm:text-2xl">
-          SimpleNote
-        </h1>
+        <Logo size="sm" showText={true} />
         {hasActiveDoc && (
           <>
             <div className="hidden md:block h-6 w-px bg-[var(--color-border-light)]"></div>

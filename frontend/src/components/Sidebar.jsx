@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import SidebarHeader from './sidebar/SidebarHeader';
 import DocumentItem from './sidebar/DocumentItem';
 import CollapsedDocumentList from './sidebar/CollapsedDocumentList';
+import DocumentSearch from './sidebar/DocumentSearch';
 
 export default function Sidebar({
   documents,
@@ -49,7 +50,12 @@ export default function Sidebar({
     >
       <SidebarHeader
         isCollapsed={isCollapsed}
-        onToggleCollapse={onToggleCollapse}
+        onToggleCollapse={(e) => {
+          // On mobile, don't collapse - let TopBar handle closing
+          if (window.innerWidth >= 768) {
+            onToggleCollapse(e);
+          }
+        }}
         onAddDocument={addNewDocument}
         isSaving={isSaving}
         lastSaved={lastSaved}
@@ -78,29 +84,37 @@ export default function Sidebar({
         </>
       ) : (
         /* Expanded View */
-        <div className="flex-1 min-h-0 overflow-y-auto p-3">
-          <div className="space-y-2">
-            {documents.map((doc, index) => (
-              <DocumentItem
-                key={doc.id}
-                doc={doc}
-                isActive={activeDoc === doc.id}
-                isEditing={editingId === doc.id}
-                editingValue={editingValue}
-                onSelect={() => setActiveDoc(doc.id)}
-                onStartEditing={startEditing}
-                onEditChange={setEditingValue}
-                onConfirmRename={confirmRename}
-                onCancelRename={cancelRename}
-                onDelete={deleteDocument}
-                canDelete={documents.length > 1}
-                hoverClass={hoverClass}
-                textClass={textClass}
-                index={index}
-              />
-            ))}
+        <>
+          <DocumentSearch
+            documents={documents}
+            onSelectDoc={setActiveDoc}
+            hoverClass={hoverClass}
+            textClass={textClass}
+          />
+          <div className="flex-1 min-h-0 overflow-y-auto p-3">
+            <div className="space-y-2">
+              {documents.map((doc, index) => (
+                <DocumentItem
+                  key={doc.id}
+                  doc={doc}
+                  isActive={activeDoc === doc.id}
+                  isEditing={editingId === doc.id}
+                  editingValue={editingValue}
+                  onSelect={() => setActiveDoc(doc.id)}
+                  onStartEditing={startEditing}
+                  onEditChange={setEditingValue}
+                  onConfirmRename={confirmRename}
+                  onCancelRename={cancelRename}
+                  onDelete={deleteDocument}
+                  canDelete={documents.length > 1}
+                  hoverClass={hoverClass}
+                  textClass={textClass}
+                  index={index}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   );

@@ -49,41 +49,43 @@ export default function DesktopToolbar({
 
       {/* Toolbar Content */}
       {!isCollapsed && (
-        <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(100vh-200px)]">
-          <VoiceRecorder
-            editor={editor}
-            showToast={showToast}
-            hoverClass={hoverClass}
-          />
+        <div className="overflow-y-auto max-h-[calc(100vh-200px)]">
+          <div className="p-4 space-y-4">
+            <VoiceRecorder
+              editor={editor}
+              showToast={showToast}
+              hoverClass={hoverClass}
+            />
 
-          <TextStyleButtons
-            editor={editor}
-            hoverClass={hoverClass}
-            onShowColorPicker={onShowColorPicker}
-            onShowFontFamilyDialog={onShowFontFamilyDialog}
-            onShowFontSizeDialog={onShowFontSizeDialog}
-          />
+            <TextStyleButtons
+              editor={editor}
+              hoverClass={hoverClass}
+              onShowColorPicker={onShowColorPicker}
+              onShowFontFamilyDialog={onShowFontFamilyDialog}
+              onShowFontSizeDialog={onShowFontSizeDialog}
+            />
 
-          <HeadingButtons editor={editor} hoverClass={hoverClass} />
+            <HeadingButtons editor={editor} hoverClass={hoverClass} />
 
-          <AlignmentButtons editor={editor} hoverClass={hoverClass} />
+            <AlignmentButtons editor={editor} hoverClass={hoverClass} />
 
-          <ListButtons editor={editor} hoverClass={hoverClass} />
+            <ListButtons editor={editor} hoverClass={hoverClass} />
 
-          <InsertButtons
-            editor={editor}
-            hoverClass={hoverClass}
-            onShowLinkDialog={onShowLinkDialog}
-            onMediaUpload={onMediaUpload}
-            showToast={showToast}
-          />
+            <InsertButtons
+              editor={editor}
+              hoverClass={hoverClass}
+              onShowLinkDialog={onShowLinkDialog}
+              onMediaUpload={onMediaUpload}
+              showToast={showToast}
+            />
 
-          <FileOperations
-            currentDoc={currentDoc}
-            hoverClass={hoverClass}
-            onFileUpload={onFileUpload}
-            showToast={showToast}
-          />
+            <FileOperations
+              currentDoc={currentDoc}
+              hoverClass={hoverClass}
+              onFileUpload={onFileUpload}
+              showToast={showToast}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { API_BASE_URL } from '../services/api';
+import Logo from '../components/Logo';
 
 
 export default function Register() {
@@ -66,9 +67,8 @@ export default function Register() {
       <div className="max-w-md w-full">
         {/* Logo */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center space-x-2 mb-2">
-            <span className="text-4xl">📝</span>
-            <h1 className="text-3xl font-bold">SimpleNote</h1>
+          <div className="flex items-center justify-center mb-2">
+            <Logo size="lg" showText={true} />
           </div>
           <p className="text-gray-600">Create your account</p>
         </div>
