@@ -68,20 +68,20 @@ export default function Register() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-2">
-            <Logo size="lg" showText={true} />
+            <Logo size="xl" showText={true} />
           </div>
-          <p className="text-gray-600">Create your account</p>
+          <p className="text-xl text-gray-600">Create your account</p>
         </div>
 
         {/* Form */}
-        <div className="border border-gray-200 p-8">
+        <div className="border border-gray-200 p-8 shadow-lg rounded-md">
           {error && (
             <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-800 text-sm">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6 rounded-md">
             <div>
               <label className="block text-sm font-medium mb-2">
                 Name
@@ -91,7 +91,7 @@ export default function Register() {
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900 rounded-md"
                 placeholder="John Doe"
               />
             </div>
@@ -105,7 +105,7 @@ export default function Register() {
                 required
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900 rounded-md"
                 placeholder="you@example.com"
               />
             </div>
@@ -119,7 +119,7 @@ export default function Register() {
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900 rounded-md"
                 placeholder="••••••••"
               />
               <p className="text-xs text-gray-600 mt-1">At least 6 characters</p>
@@ -134,7 +134,7 @@ export default function Register() {
                 required
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900"
+                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900 rounded-md"
                 placeholder="••••••••"
               />
             </div>
@@ -142,7 +142,7 @@ export default function Register() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:bg-gray-400"
+              className="w-full py-3 bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:bg-gray-400 rounded-md"
             >
               {loading ? 'Creating account...' : 'Sign Up'}
             </button>

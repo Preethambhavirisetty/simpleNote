@@ -14,7 +14,7 @@ export default function SidebarHeader({
       <div className="flex items-center justify-between">
         {!isCollapsed && (
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-bold tracking-tight uppercase">My Documents</h2>
+            <h2 className="text-sm font-bold tracking-tight">My Documents</h2>
           </div>
         )}
         <div className="flex items-center gap-2">
