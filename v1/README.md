@@ -1,3 +1,6 @@
+run: podman compose -f docker-compose.dev.yml up
+maybe keep postgres up and running locally
+
 # SimpleNote 📝
 
 A modern, feature-rich note-taking application with AI integration, built with React and Flask.
