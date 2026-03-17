@@ -15,10 +15,17 @@ class TokenService:
         data_encode.update({"exp": token_expiry})
         return jwt.encode(data_encode, SECRET_KEY, algorithm=HASH_ALGORITHM)
 
-    def create_assign_http_only_cookie(self, response: Response, user_id) -> bool:
+    def create_assign_http_only_cookie(
+        self, response: Response, user_id, email: str, role: list
+    ) -> bool:
         try:
+            data = {
+                "sub": str(user_id),
+                "email": email,
+                "role": role,
+            }
             token_expires_in = timedelta(days=2)
-            token = self.create_access_token(data={"sub": str(user_id)}, expires_in=token_expires_in)
+            token = self.create_access_token(data=data, expires_in=token_expires_in)
             cookie_ttl_seconds = int(token_expires_in.total_seconds())
             response.set_cookie(
                 key="access_token",

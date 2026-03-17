@@ -88,6 +88,22 @@ app/
     blocks.py
 ```
 
+```
+Auth Service
+   │
+   ├── PostgreSQL (users)
+   │
+   └── JWT tokens
+
+API Service
+   │
+   ├── MongoDB
+   │      folders
+   │      notes
+   │      blocks
+   │
+   └── get_current_user() dependency
+```
 
 
 

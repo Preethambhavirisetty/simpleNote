@@ -10,9 +10,17 @@ def init_postgres(db_url: str) -> None:
     """Create engine, session factory, and tables. Called once at app startup."""
     global engine, SessionLocal
     from app.db.postgres.base import Base
-    import app.db.postgres.models.user  # noqa: F401 — registers User model with Base
+    # import app.db.postgres.models.user  # noqa: F401 — registers User model with Base
+    import app.db.postgres.models
 
-    engine = create_engine(db_url)
+    engine = create_engine(
+        db_url,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        future=True
+    )
+
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, class_=Session)
 
     # Verify connection is reachable at startup
