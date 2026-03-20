@@ -1,6 +1,5 @@
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-import app.db.postgres.session as pg_session
 from app.db.postgres.repos.user import UserRepository
 from app.schema.users import UserLoginRequest, UserRegisterRequest, UserCreate, Role
 from app.exceptions.base import AppException

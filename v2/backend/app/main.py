@@ -1,35 +1,20 @@
 import collections
 from contextlib import asynccontextmanager
-from typing import Any
-from beanie import init_beanie
+
 from fastapi import FastAPI, Request
-from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.api.v1.api import api_router
-from app.schema.notes import Notes
-from app.schema.blocks import Blocks
-from app.core.config import MONGO_DB_URL, COLLECTION_NAME, POSTGRES_DB_URL
+from app.core.config import POSTGRES_DB_URL
 from app.db.postgres.session import init_postgres, dispose_postgres
 from app.exceptions.handlers import register_exceptions
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Postgres
-    if POSTGRES_DB_URL:
-        init_postgres(POSTGRES_DB_URL)
-
-    # Mongo (Notes + Blocks)
-    client: AsyncIOMotorClient[Any] = AsyncIOMotorClient(MONGO_DB_URL)
-    await init_beanie(
-        database=client.get_database(COLLECTION_NAME),  # type: ignore[arg-type]
-        document_models=[Notes, Blocks],
-    )
-
+    init_postgres(POSTGRES_DB_URL)
     yield
-
     dispose_postgres()
-    client.close()
+
 
 app = FastAPI(lifespan=lifespan)
 

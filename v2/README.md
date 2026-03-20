@@ -15,8 +15,10 @@ podman run -d \
 podman logs -f simple-note-postgres
 
 For prod:
-pip install alembic
-alembic init alembic
+- Set up Alembic — create_all won't handle future schema changes
+  - pip install alembic
+  - alembic init alembic
+- Set secure=True on the cookie in token.py (currently False for local HTTP dev)
 
 ```
 project_root/
@@ -43,133 +45,52 @@ project_root/
 └── pyproject.toml          # Dependency management (Poetry/Pip)
 ```
 
-```
-app/
-  api/
-    v1/
-      endpoints/
-        users.py
-        billing.py
-        notes.py
-        folders.py
-        blocks.py
-  deps/
-    auth.py
-  core/
-    config.py
-    security.py
 
-  db/
-    postgres/
-      session.py
-      base.py
-      models/
-        user.py
-        billing.py
-      repositories/
-        user_repo.py
-        billing_repo.py
-    mongo/
-      client.py
-      documents/
-        notes.py
-        folders.py
-        blocks.py
-      repositories/
-        notes_repo.py
-        folders_repo.py
-        blocks_repo.py
+### Endpoints:
 
-  services/
-    auth.py
-    billing.py
-    notes.py
-    folders.py
-    blocks.py
-```
+- Auth: (`/api/auth`)
+  - `POST   /register`          — Register a new user, sets HTTP-only cookie
+  - `POST   /login`             — Login, sets HTTP-only cookie
+  - `DELETE /logout`            — Logout, clears cookie · *requires auth*
+  - `PATCH  /change-password`   — Change own password · *requires auth*
+  - `POST   /forgot-password`   — Request a 6-digit OTP reset code (sent via email)
+  - `POST   /reset-password`    — Reset password using OTP code · max 5 attempts · 15 min expiry
 
-```
-Auth Service
-   │
-   ├── PostgreSQL (users)
-   │
-   └── JWT tokens
+- User: (`/api/users`)
+  - Own profile · *requires auth*
+    - `GET    /me`              — Get own profile
+    - `PATCH  /me`              — Update own name / email
+    - `DELETE /me`              — Delete own account
 
-API Service
-   │
-   ├── MongoDB
-   │      folders
-   │      notes
-   │      blocks
-   │
-   └── get_current_user() dependency
-```
+  - Admin only · *requires `admin` role*
+    - `GET    /`                — List all users · supports `?skip=&limit=`
+    - `GET    /{user_id}`       — Get any user by id
+    - `PATCH  /{user_id}`       — Update any user's name / email
+    - `DELETE /{user_id}`       — Delete any user
+    - `PATCH  /{user_id}/roles`       — Assign roles to a user
+    - `PATCH  /{user_id}/activate`    — Activate a user account
+    - `PATCH  /{user_id}/deactivate`  — Deactivate a user account
 
+- Folder: (`/api/folders`) · *requires auth*
+  - `GET    /`                        — List own folders · pinned first · supports `?skip=&limit=`
+  - `POST   /`                        — Create folder · 409 if name already exists
+  - `GET    /{folder_id}`             — Get folder by id
+  - `PATCH  /{folder_id}`             — Update folder name / is_pinned · 409 if new name conflicts
+  - `DELETE /{folder_id}`             — Delete folder · notes become unfiled (not deleted)
 
+- Notes: (`/api/notes`) · *requires auth*
+  - `GET    /`                        — List own notes · supports `?folder_id`, `?pinned_only`, `?search`, `?skip`, `?limit`
+  - `POST   /`                        — Create note · content_text auto-extracted from TipTap JSON
+  - `GET    /{note_id}`               — Get note with tags
+  - `PATCH  /{note_id}`               — Update note · content_text auto-updated when content changes
+  - `PATCH  /{note_id}/move`          — Move note to a folder or inbox (`folder_id: null`)
+  - `DELETE /{note_id}`               — Delete note
+  - `POST   /{note_id}/tags/{tag_id}` — Add tag to note · 409 if already tagged
+  - `DELETE /{note_id}/tags/{tag_id}` — Remove tag from note
 
-
-
-
-
-
-To use Beanie effectively in your FastAPI routes, you treat your classes (like User or Notes) as the interface to the database.
-Here is how you perform CRUD operations. Note that all methods are async because Beanie is built on top of the Motor driver.
-1. Create (Insert)
-You just initialize the class and call .insert().
-
-@app.post("/users")async def create_user(user_data: User):
-    # .insert() saves it to MongoDB and returns the created document
-    await user_data.insert()
-    return user_data
-
-2. Read (Find)
-Beanie provides a very readable API for searching.
-
-@app.get("/notes/{note_id}")async def get_note(note_id: UUID):
-    # Find a single document by its ID
-    note = await Notes.get(note_id)
-    if not note:
-        return {"error": "Not found"}
-    return note
-
-@app.get("/notes/user/{user_id}")async def get_user_notes(user_id: UUID):
-    # Find multiple documents with a filter
-    notes = await Notes.find(Notes.user_id == user_id).to_list()
-    return notes
-
-3. Update
-You can modify the object in Python and then sync it to the database.
-
-@app.patch("/notes/{note_id}/archive")async def archive_note(note_id: UUID):
-    note = await Notes.get(note_id)
-    if note:
-        note.isArchived = True
-        note.updatedAt = datetime.now(timezone.utc)
-        await note.save() # Saves the changes
-    return note
-
-4. Delete
-
-@app.delete("/notes/{note_id}")async def delete_note(note_id: UUID):
-    note = await Notes.get(note_id)
-    if note:
-        await note.delete()
-    return {"message": "Deleted successfully"}
-
-Pro-Tip: Beanie vs. Pydantic
-In Beanie, your model must inherit from Document instead of BaseModel to get these database methods.
-
-from beanie import Document
-class User(Document):
-    # ... your fields here ...
-    class Settings:
-        name = "users" # The MongoDB collection name
-
-Why this is "Stable" for Scaling:
-
-* Query Engine: Beanie uses MongoDB's native query operators, which are highly optimized.
-* Validation: It validates data before it hits the database, preventing "corrupt" documents.
-* Integration: It works perfectly with FastAPI's dependency injection system.
-
-Do you want to see how to add custom indexes to these models to speed up your searches as your data grows?
-
+- Tags: (`/api/tags`) · *requires auth*
+  - `GET    /`                        — List own tags · alphabetical
+  - `POST   /`                        — Create tag · 409 if name already exists
+  - `GET    /{tag_id}`                — Get tag by id
+  - `PATCH  /{tag_id}`                — Rename tag · 409 if new name conflicts
+  - `DELETE /{tag_id}`                — Delete tag · removed from all notes automatically

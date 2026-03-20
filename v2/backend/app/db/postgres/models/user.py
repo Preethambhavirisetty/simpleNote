@@ -1,9 +1,10 @@
+from typing import List
 from datetime import datetime, timezone
 from uuid import UUID as PyUUID, uuid4
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.postgres.base import Base
 from app.schema.users import Role
@@ -33,3 +34,7 @@ class User(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+    folders: Mapped[List["Folder"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    notes: Mapped[List["Note"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    tags: Mapped[List["Tag"]] = relationship(back_populates="user", cascade="all, delete-orphan")

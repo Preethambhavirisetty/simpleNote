@@ -1,7 +1,7 @@
 from fastapi import Depends, APIRouter
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from app.schema.users import UserChangePassword, UserRegisterRequest, UserLoginRequest, UserUpdate
+from app.schema.users import UserChangePassword, UserRegisterRequest, UserLoginRequest
 from app.services.auth import AuthService
 from app.deps.auth import get_current_user
 from app.exceptions.handlers import success_response
