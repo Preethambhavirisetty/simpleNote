@@ -160,3 +160,181 @@ To block merges when tests fail, go to **Settings → Branches → Add rule** fo
 2. Add `Tests (pytest)` as a required check
 3. Optionally add `Lint (ruff)` too
 4. Enable **"Require branches to be up to date before merging"**
+
+
+### Vector DB support
+You’re already 80% there — you just need to add embeddings + indexing on top of your existing table.
+
+Let’s walk through a **practical FastAPI + PostgreSQL setup** using **pgvector**.
+
+---
+
+# 1. Update your PostgreSQL schema
+
+First, enable pgvector:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Now modify your table:
+
+```sql
+ALTER TABLE etl_data
+ADD COLUMN embedding vector(1536);  -- 1536 for OpenAI embeddings
+```
+
+> 1536 is the dimension used by many models from OpenAI (e.g. text-embedding models)
+
+---
+
+# 2. Generate embeddings in FastAPI
+
+Install dependencies:
+
+```bash
+pip install openai psycopg2-binary sqlalchemy
+```
+
+Example embedding function:
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+
+def get_embedding(text: str):
+    response = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return response.data[0].embedding
+```
+
+---
+
+# 3. Store embeddings when inserting data
+
+Your FastAPI model might look like:
+
+```python
+from sqlalchemy import Column, Integer, Text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+class ETLData(Base):
+    __tablename__ = "etl_data"
+
+    id = Column(Integer, primary_key=True)
+    text = Column(Text)
+    embedding = Column(ARRAY(float))  # or use pgvector type
+```
+
+Insert with embedding:
+
+```python
+def insert_data(session, text):
+    embedding = get_embedding(text)
+
+    row = ETLData(
+        text=text,
+        embedding=embedding
+    )
+    session.add(row)
+    session.commit()
+```
+
+---
+
+# 4. Create a vector index (IMPORTANT)
+
+This makes similarity search fast:
+
+```sql
+CREATE INDEX ON etl_data
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+---
+
+# 5. Query similar text (vector search)
+
+Raw SQL example:
+
+```sql
+SELECT id, text
+FROM etl_data
+ORDER BY embedding <-> '[0.1, 0.2, ...]'
+LIMIT 5;
+```
+
+In Python:
+
+```python
+def search_similar(session, query_text):
+    query_embedding = get_embedding(query_text)
+
+    results = session.execute("""
+        SELECT id, text
+        FROM etl_data
+        ORDER BY embedding <-> :embedding
+        LIMIT 5
+    """, {"embedding": query_embedding})
+
+    return results.fetchall()
+```
+
+---
+
+# 6. Expose via FastAPI endpoint
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/search")
+def search(q: str):
+    results = search_similar(session, q)
+    return [{"id": r[0], "text": r[1]} for r in results]
+```
+
+---
+
+# Key ideas (what’s actually happening)
+
+* Your `text` → converted into **vector embedding**
+* Stored in PostgreSQL
+* Queries also converted into embeddings
+* Database finds **closest vectors (semantic similarity)**
+
+---
+
+# Common upgrades (next steps)
+
+Once this works, you can improve it:
+
+* Chunk long text before embedding
+* Add metadata filters (`WHERE source = 'x'`)
+* Use hybrid search (text + vector)
+* Cache embeddings to reduce API cost
+* Try HNSW index (better than IVFFlat in newer pgvector)
+
+---
+
+# TL;DR
+
+You turned this:
+
+```
+text → stored in DB
+```
+
+into:
+
+```
+text → embedding → stored → similarity search
+```
