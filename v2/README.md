@@ -20,6 +20,20 @@ For prod:
   - alembic init alembic
 - Set secure=True on the cookie in token.py (currently False for local HTTP dev)
 
+BE:
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements
+uvicorn app.main:app --port 3001 --reload
+
+FE:
+npm i
+npm run dev
+
+Tests:
+python -m pytest tests/ -v
+
+
 ```
 project_root/
 ├── app/
