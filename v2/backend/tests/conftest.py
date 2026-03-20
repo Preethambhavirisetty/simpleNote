@@ -16,7 +16,6 @@ from app.exceptions.base import AppException
 from app.main import app
 from app.schema.base import ErrorCode
 
-
 # ── Object factories ──────────────────────────────────────────────────────────
 
 def make_user(**kwargs) -> SimpleNamespace:

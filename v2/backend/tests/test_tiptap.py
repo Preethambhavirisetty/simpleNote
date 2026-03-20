@@ -3,10 +3,7 @@ Unit tests for app.core.tiptap.extract_text.
 
 All tests are pure – no DB, no HTTP, no mocks needed.
 """
-import pytest
-
 from app.core.tiptap import extract_text
-
 
 # ── Input guard ───────────────────────────────────────────────────────────────
 

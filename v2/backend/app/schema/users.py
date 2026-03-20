@@ -1,7 +1,8 @@
-from uuid import UUID
 from enum import Enum
 from typing import List, Optional
-from pydantic import Field, EmailStr, BaseModel, field_validator
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class Role(str, Enum):

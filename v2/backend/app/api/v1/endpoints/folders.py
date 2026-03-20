@@ -10,7 +10,6 @@ from app.exceptions.handlers import success_response
 from app.schema.folder import FolderCreate, FolderUpdate
 from app.services.folders import FolderService
 
-
 router = APIRouter(prefix="/folders", tags=["folders"])
 
 

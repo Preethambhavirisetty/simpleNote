@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from uuid import UUID
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.postgres.models.note import Note
-from app.db.postgres.models.tag import NoteTags, Tag
+from app.db.postgres.models.tag import NoteTags
 from app.schema.note import NoteCreate, NoteUpdate
 
 

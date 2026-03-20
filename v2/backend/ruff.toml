@@ -1,0 +1,16 @@
+# Raise the line-length to 120; FastAPI signatures are naturally wide.
+line-length = 120
+
+[lint]
+# E = pycodestyle errors, F = pyflakes, W = pycodestyle warnings, I = isort
+select = ["E", "F", "W", "I"]
+
+[lint.per-file-ignores]
+# SQLAlchemy 2.0 uses string forward-references in relationship() type hints
+# (e.g. Mapped["User"]).  Ruff F821 incorrectly flags these as undefined names
+# because it cannot follow SQLAlchemy's runtime string resolution.
+"app/db/postgres/models/*.py" = ["F821"]
+
+# session.py imports the models package solely for its side-effect of
+# registering all ORM classes with the shared metadata Base.
+"app/db/postgres/session.py" = ["F401"]

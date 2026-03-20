@@ -1,8 +1,17 @@
-from typing import List
 from datetime import datetime, timezone
-from uuid import UUID as PyUUID, uuid4
+from typing import List
+from uuid import UUID as PyUUID
+from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 

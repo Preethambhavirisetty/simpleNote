@@ -11,7 +11,6 @@ from app.schema.base import ErrorCode
 from app.schema.tag import TagCreate, TagUpdate
 from tests.conftest import make_tag
 
-
 # ── TagService unit tests ─────────────────────────────────────────────────────
 
 @pytest.fixture

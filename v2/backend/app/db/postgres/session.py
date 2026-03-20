@@ -1,5 +1,6 @@
 from collections.abc import Generator
-from sqlalchemy import create_engine, Engine, text
+
+from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 engine: Engine | None = None
@@ -9,9 +10,9 @@ SessionLocal: sessionmaker[Session] | None = None
 def init_postgres(db_url: str) -> None:
     """Create engine, session factory, and tables. Called once at app startup."""
     global engine, SessionLocal
-    from app.db.postgres.base import Base
     # import app.db.postgres.models.user  # noqa: F401 — registers User model with Base
     import app.db.postgres.models
+    from app.db.postgres.base import Base
 
     engine = create_engine(
         db_url,

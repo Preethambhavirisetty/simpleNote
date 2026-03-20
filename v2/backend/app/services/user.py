@@ -1,11 +1,12 @@
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from app.core.security import hash_password, check_password
+
+from app.core.security import check_password, hash_password
 from app.db.postgres.repos.user import UserRepository
-from app.schema.users import UserCreate, UserUpdate, UserAssignRoles, UserChangePassword, Role
 from app.exceptions.base import AppException
 from app.schema.base import ErrorCode
+from app.schema.users import UserAssignRoles, UserChangePassword, UserCreate, UserUpdate
 
 
 class UserService:

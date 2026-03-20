@@ -1,8 +1,10 @@
-from fastapi import Request, HTTPException 
-from fastapi.responses import JSONResponse
+from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from app.schema.base import ErrorCode
+from fastapi.responses import JSONResponse
+
 from app.exceptions.base import AppException
+from app.schema.base import ErrorCode
+
 
 def register_exceptions(app):
 
@@ -17,7 +19,7 @@ def register_exceptions(app):
                 "error": {"code": exc.error_code}
             }
         )
-    
+
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
         return JSONResponse(

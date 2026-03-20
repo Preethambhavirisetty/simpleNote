@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import base, auth, users, folders, notes, tags
+from app.api.v1.endpoints import auth, base, folders, notes, tags, users
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(base.router)

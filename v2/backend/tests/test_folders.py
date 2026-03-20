@@ -11,7 +11,6 @@ from app.schema.base import ErrorCode
 from app.schema.folder import FolderCreate, FolderUpdate
 from tests.conftest import make_folder
 
-
 # ── FolderService unit tests ──────────────────────────────────────────────────
 
 @pytest.fixture

@@ -12,7 +12,6 @@ from app.schema.base import ErrorCode
 from app.schema.users import UserAssignRoles, UserUpdate
 from app.services.user import UserService
 
-
 router = APIRouter(prefix="/users", tags=["users"])
 
 

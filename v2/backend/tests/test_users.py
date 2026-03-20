@@ -11,7 +11,6 @@ from app.schema.base import ErrorCode
 from app.schema.users import UserAssignRoles, UserChangePassword, UserUpdate
 from tests.conftest import make_user
 
-
 # ── UserService unit tests ────────────────────────────────────────────────────
 
 @pytest.fixture

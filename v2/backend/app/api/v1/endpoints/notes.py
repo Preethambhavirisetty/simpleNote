@@ -11,7 +11,6 @@ from app.exceptions.handlers import success_response
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 from app.services.notes import NoteService
 
-
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 

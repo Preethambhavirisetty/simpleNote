@@ -1,13 +1,13 @@
-from fastapi import Depends, APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from app.schema.users import UserChangePassword, UserRegisterRequest, UserLoginRequest
-from app.services.auth import AuthService
+
+from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
 from app.exceptions.handlers import success_response
+from app.schema.users import UserChangePassword, UserLoginRequest, UserRegisterRequest
+from app.services.auth import AuthService
 from app.services.user import UserService
-from app.db.postgres.session import get_postgres_session
-
 
 router = APIRouter(prefix='/auth', tags=["auth"])
 
@@ -50,7 +50,7 @@ async def logout(response: Response, auth_service: AuthService = Depends(get_aut
 
 @router.patch('/change-password')
 async def change_password(
-    payload: UserChangePassword, 
+    payload: UserChangePassword,
     current_user = Depends(get_current_user),
     user_service = Depends(get_user_service),
     db: Session = Depends(get_postgres_session)

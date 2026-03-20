@@ -11,7 +11,6 @@ from app.schema.base import ErrorCode
 from app.schema.users import UserLoginRequest, UserRegisterRequest
 from tests.conftest import make_user
 
-
 # ── AuthService unit tests ────────────────────────────────────────────────────
 
 @pytest.fixture

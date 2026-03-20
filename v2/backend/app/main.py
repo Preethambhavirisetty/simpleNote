@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request
 
 from app.api.v1.api import api_router
 from app.core.config import POSTGRES_DB_URL
-from app.db.postgres.session import init_postgres, dispose_postgres
+from app.db.postgres.session import dispose_postgres, init_postgres
 from app.exceptions.handlers import register_exceptions
 
 

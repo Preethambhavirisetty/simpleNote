@@ -10,7 +10,6 @@ from app.exceptions.handlers import success_response
 from app.schema.tag import TagCreate, TagUpdate
 from app.services.tags import TagService
 
-
 router = APIRouter(prefix="/tags", tags=["tags"])
 
 

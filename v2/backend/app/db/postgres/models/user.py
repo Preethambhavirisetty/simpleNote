@@ -1,6 +1,7 @@
-from typing import List
 from datetime import datetime, timezone
-from uuid import UUID as PyUUID, uuid4
+from typing import List
+from uuid import UUID as PyUUID
+from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, String
 from sqlalchemy.dialects.postgresql import ARRAY, UUID

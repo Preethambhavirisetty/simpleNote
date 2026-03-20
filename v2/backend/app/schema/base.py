@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ErrorCode(str, Enum):
     USER_NOT_FOUND = "USER_NOT_FOUND"
     UNAUTHORIZED = "UNAUTHORIZED"

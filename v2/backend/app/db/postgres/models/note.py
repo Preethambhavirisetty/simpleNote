@@ -1,9 +1,10 @@
-from typing import Any, List, Optional
 from datetime import datetime, timezone
-from uuid import UUID as PyUUID, uuid4
+from typing import Any, List, Optional
+from uuid import UUID as PyUUID
+from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.postgres.base import Base
