@@ -17,8 +17,7 @@ class Note(Base):
         Index("ix_notes_user_updated", "user_id", "updated_at"),
         # Folder view: all notes inside a specific folder
         Index("ix_notes_user_folder", "user_id", "folder_id"),
-        # Partial index: pinned notes — only indexes rows where is_pinned=true,
-        # keeping the index tiny regardless of total note count
+        # Partial index: pinned notes — only indexes rows where is_pinned=true
         Index(
             "ix_notes_user_pinned",
             "user_id",
@@ -38,12 +37,15 @@ class Note(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    folder_id: Mapped[Optional[PyUUID]] = mapped_column(
+    # folder_id is required — every note must live inside a folder.
+    # Deleting a folder cascades and deletes its notes.
+    folder_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("folders.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("folders.id", ondelete="CASCADE"),
+        nullable=False,
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Raw TipTap JSON document
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     # Plain text derived from content — used for full-text search and previews
@@ -63,5 +65,5 @@ class Note(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="notes")
-    folder: Mapped[Optional["Folder"]] = relationship(back_populates="notes")
+    folder: Mapped["Folder"] = relationship(back_populates="notes")
     tags: Mapped[List["Tag"]] = relationship(secondary="notetags", back_populates="notes")

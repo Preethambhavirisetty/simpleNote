@@ -24,6 +24,11 @@ podman ps
 # database name
 podman exec -it notelite-postgres psql -U postgres -c "\l"
 
+# Drop tables
+podman exec -it notelite-postgres psql -U postgres -d notelite -c "
+DROP TABLE IF EXISTS notetags CASCADE;
+DROP TABLE IF EXISTS notes CASCADE;
+" 2>&1
 
 For prod:
 - Set up Alembic — create_all won't handle future schema changes
@@ -36,6 +41,11 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements
 uvicorn app.main:app --port 3001 --reload
+
+Agent:
+uvicorn main:app --port 3002
+QUEUE service: docker run -d -p 6379:6379 redis
+celery -A apis.worker:worker_app worker -l info -Q ingestion -P solo
 
 FE:
 npm i
@@ -338,3 +348,246 @@ into:
 ```
 text → embedding → stored → similarity search
 ```
+
+
+### Options
+You’re thinking about exactly the right problem: **future portability**. The short answer is:
+
+> Yes — embeddings are portable, databases are not.
+
+So your strategy should be: **decouple embedding generation from storage**.
+
+---
+
+# Core idea
+
+Whether you use:
+
+* pgvector (inside PostgreSQL)
+* or Qdrant
+
+👉 the **embedding vectors themselves stay the same**
+
+---
+
+# Scenario 1: Start with PostgreSQL → move to Qdrant later
+
+This is totally fine. Here’s what happens:
+
+### What you already have
+
+* `text`
+* `embedding` (e.g. `[0.123, 0.456, ...]`)
+
+### Migration process
+
+You simply:
+
+1. Export data from PostgreSQL
+2. Insert into Qdrant
+
+Example:
+
+```python
+points = [
+    {
+        "id": row.id,
+        "vector": row.embedding,
+        "payload": {"text": row.text}
+    }
+    for row in pg_rows
+]
+
+qdrant.upsert(collection_name="etl_data", points=points)
+```
+
+👉 No need to recompute embeddings (unless you change models)
+
+---
+
+# Scenario 2: Start directly with Qdrant
+
+Then yes — you skip pgvector entirely:
+
+```python
+embedding = get_embedding(text)
+
+qdrant.upsert(
+    collection_name="etl_data",
+    points=[{
+        "id": id,
+        "vector": embedding,
+        "payload": {"text": text}
+    }]
+)
+```
+
+---
+
+# The real architectural decision
+
+The key is **don’t tie your app to the database**.
+
+Instead of this:
+
+```python
+# BAD (tight coupling)
+def search():
+    return pgvector_query(...)
+```
+
+Do this:
+
+```python
+# GOOD (abstraction layer)
+class VectorStore:
+    def search(self, query: str):
+        pass
+```
+
+Then implement:
+
+```python
+class PGVectorStore(VectorStore): ...
+class QdrantStore(VectorStore): ...
+```
+
+👉 Now switching DB = swapping implementation
+
+---
+
+# Important gotchas (people miss these)
+
+## 1. Embedding model lock-in
+
+If you switch models from OpenAI (or others):
+
+* Old embeddings ≠ new embeddings
+* You MUST recompute everything
+
+This is the **real migration cost**, not the DB.
+
+---
+
+## 2. Index differences
+
+* pgvector → IVFFlat / HNSW (basic)
+* Qdrant → optimized ANN, filtering, sharding
+
+👉 After migration, you’ll need to **rebuild indexes**, but not vectors
+
+---
+
+## 3. Hybrid queries
+
+PostgreSQL advantage:
+
+```sql
+WHERE category = 'finance'
+ORDER BY embedding <-> query
+```
+
+Qdrant:
+
+* Uses payload filters instead
+* Slightly different query style
+
+---
+
+# Practical recommendation (what I’d actually do)
+
+### If you're early stage / MVP:
+
+Start with:
+
+* PostgreSQL + pgvector
+
+Why:
+
+* Simpler infra
+* One database
+* Easier debugging
+
+---
+
+### If you expect scale / heavy search:
+
+Start with:
+
+* Qdrant
+
+Why:
+
+* Better performance
+* Built for vector workloads
+
+---
+
+# Best practice (this is the key takeaway)
+
+Store **both**:
+
+* Raw text
+* Embedding vector
+
+AND optionally:
+
+* Original source / metadata
+
+This gives you:
+
+* Easy migration
+* Ability to re-index anywhere
+* Flexibility to switch tools
+
+---
+
+# Clean mental model
+
+Think of it like this:
+
+```text
+[text] --(embedding model)--> [vector] --(database)--> search
+```
+
+* Left side = AI model (hard to change)
+* Right side = database (easy to change)
+
+---
+
+If you want, I can show:
+
+* A **clean interface design** for swapping pgvector ↔ Qdrant
+* Or a **real migration script** from PostgreSQL → Qdrant with batching and retries
+
+
+write:
+  - work
+    - learnings
+      - text
+        - subtext1 json -> save
+          - extract text from json => content(derived text) - CLEAR
+          - if len(content) < 500: no chunking - CLEAR
+          - else:
+              - create semantic chunks + embed each chunk - CLEAR
+                <!-- - generate short summary for each chunk - UNCLEAR
+                - aggregate all summaries - UNCLEAR
+                - embed consolidated summary - UNCLEAR -->
+              - batch upsert all embedded chunks + embeded summary to vector DB - CLEAR
+          - write subtext1 json & derived text - CLEAR
+        - subtext1 + subtext2
+        - subtext1 + subtext2 + subtext3
+        ...
+
+chat:
+  - user prompt like "when did i go to trip last time?"
+  - embed the query - CLEAR
+  <!-- - get metadata -> how? - LATER
+  - get user intent -> how? - LATER
+  - generate confidence score for user's query; - LATER -->
+  - query vector DB with filters(userid) - CLEAR
+  - 
+
+  <!-- - [edgecase] if low score like between 1 - 10%, then vague fallback to "could you elaborate on what you are referring to?" then give clarifying questions
+  - [edgecase] if confidence score is still low but > 10%, then query vector DB over all the available notes, get top k, then summarize and give response -->
+

@@ -1,6 +1,10 @@
 """
 Shared fixtures and factory helpers for all test modules.
 """
+# ---------------------------------------------------------------------------
+# NOTE: Celery dispatch is patched globally via the `no_celery` fixture so
+# that no Redis connection is attempted during the test suite.
+# ---------------------------------------------------------------------------
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Generator
@@ -52,8 +56,9 @@ def make_note(**kwargs) -> SimpleNamespace:
     n = SimpleNamespace(
         id=uuid4(),
         user_id=uuid4(),
-        folder_id=None,
+        folder_id=uuid4(),          # required — notes must belong to a folder
         title="My Note",
+        description=None,
         content={"type": "doc", "content": []},
         content_text="",
         is_pinned=False,
@@ -77,6 +82,16 @@ def make_tag(**kwargs) -> SimpleNamespace:
     for k, v in kwargs.items():
         setattr(t, k, v)
     return t
+
+
+# ── Celery stub ───────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def no_celery():
+    """Prevent any Celery task dispatch from reaching Redis during tests."""
+    with patch("app.services.notes._dispatch_ingest"), \
+         patch("app.services.notes._dispatch_delete"):
+        yield
 
 
 # ── Auth fixtures ─────────────────────────────────────────────────────────────

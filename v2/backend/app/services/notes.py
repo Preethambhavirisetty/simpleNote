@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.celery import celery_app
+from app.core.config import INGESTION_TASK_STRING
 from app.core.tiptap import extract_text
+from app.db.postgres.repos.folder import FolderRepository
 from app.db.postgres.repos.note import NoteRepository
 from app.db.postgres.repos.tag import TagRepository
 from app.exceptions.base import AppException
@@ -11,10 +16,27 @@ from app.schema.base import ErrorCode
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 
 
+def _dispatch_ingest(payload: dict) -> None:
+    """Send an upsert ingestion task to the queue."""
+    celery_app.send_task(
+        INGESTION_TASK_STRING,
+        kwargs={"action": "upsert", **payload},
+    )
+
+
+def _dispatch_delete(payload: dict) -> None:
+    """Send a delete ingestion task to remove the vector from the store."""
+    celery_app.send_task(
+        INGESTION_TASK_STRING,
+        kwargs={"action": "delete", **payload},
+    )
+
+
 class NoteService:
     def __init__(self):
         self.repo = NoteRepository()
         self.tag_repo = TagRepository()
+        self.folder_repo = FolderRepository()
 
     def _get_or_404(self, db: Session, note_id: UUID, user_id: UUID):
         note = self.repo.get_by_id(db, note_id, user_id)
@@ -26,11 +48,30 @@ class NoteService:
             )
         return note
 
-    def create(self, db: Session, user_id: UUID, payload: NoteCreate):
+    def _ingestion_payload(self, db: Session, note, user_role: list[str]) -> dict:
+        """Build the full payload sent to the ingestion queue."""
+        folder = self.folder_repo.get_by_id(db, note.folder_id, note.user_id)
+        return {
+            "userid": str(note.user_id),
+            "folder_id": str(note.folder_id),
+            "note_id": str(note.id),
+            "role": user_role[0] if user_role else "user",
+            # tenant_id is user_id until a multi-tenant model is introduced
+            "tenant_id": str(note.user_id),
+            "folder_title": folder.name if folder else "",
+            "note_title": note.title,
+            "description": note.description or "",
+            "tags": [t.name for t in note.tags],
+            "text": note.content_text or "",
+        }
+
+    def create(self, db: Session, user_id: UUID, payload: NoteCreate, user_role: list[str]):
         content_text = extract_text(payload.content)
         note = self.repo.create(db, user_id, payload, content_text)
-        db.commit()
+        db.commit()           # commit first — note must exist before the worker runs
         db.refresh(note)
+        if content_text:
+            _dispatch_ingest(self._ingestion_payload(db, note, user_role))
         return note
 
     def list(
@@ -55,12 +96,14 @@ class NoteService:
     def get(self, db: Session, note_id: UUID, user_id: UUID):
         return self._get_or_404(db, note_id, user_id)
 
-    def update(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteUpdate):
+    def update(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteUpdate, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
         content_text = extract_text(payload.content) if payload.content is not None else None
         self.repo.update(db, note, payload, content_text)
         db.commit()
         db.refresh(note)
+        if content_text:        # content changed -> re-embed
+            _dispatch_ingest(self._ingestion_payload(db, note, user_role))
         return note
 
     def move(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteMoveRequest):
@@ -70,10 +113,19 @@ class NoteService:
         db.refresh(note)
         return note
 
-    def delete(self, db: Session, note_id: UUID, user_id: UUID):
+    def delete(self, db: Session, note_id: UUID, user_id: UUID, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
+        # Build payload before deleting so we still have note attributes
+        del_payload = {
+            "userid": str(note.user_id),
+            "folder_id": str(note.folder_id),
+            "note_id": str(note.id),
+            "role": user_role[0] if user_role else "user",
+            "tenant_id": str(note.user_id),
+        }
         self.repo.delete(db, note)
         db.commit()
+        _dispatch_delete(del_payload)   # remove vector after DB row is gone
 
     # ── Tags on a note ────────────────────────────────────────────────────────
 

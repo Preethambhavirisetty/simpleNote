@@ -22,8 +22,9 @@ def _note_dict(note: Note) -> dict:
     return {
         "id": str(note.id),
         "user_id": str(note.user_id),
-        "folder_id": str(note.folder_id) if note.folder_id else None,
+        "folder_id": str(note.folder_id),
         "title": note.title,
+        "description": note.description,
         "content": note.content,
         "content_text": note.content_text,
         "is_pinned": note.is_pinned,
@@ -63,7 +64,7 @@ def create_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    note = service.create(db, current_user.id, payload)
+    note = service.create(db, current_user.id, payload, current_user.role)
     return success_response(_note_dict(note), "Note created")
 
 
@@ -86,7 +87,7 @@ def update_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    note = service.update(db, note_id, current_user.id, payload)
+    note = service.update(db, note_id, current_user.id, payload, current_user.role)
     return success_response(_note_dict(note), "Note updated")
 
 
@@ -109,7 +110,7 @@ def delete_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    service.delete(db, note_id, current_user.id)
+    service.delete(db, note_id, current_user.id, current_user.role)
     return success_response(None, "Note deleted")
 
 

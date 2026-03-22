@@ -4,3 +4,4 @@
 __pycache__
 _others
 *.pyc
+.DS_STORE

@@ -1,5 +1,8 @@
 """
 Tests for NoteService unit tests and /api/notes/* endpoints.
+
+Celery dispatch helpers (_dispatch_ingest, _dispatch_delete) are patched at the
+module level in every test so no Redis connection is attempted.
 """
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -10,6 +13,11 @@ from app.exceptions.base import AppException
 from app.schema.base import ErrorCode
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 from tests.conftest import make_note, make_tag
+
+# Suppress all Celery send_task calls for the entire test module.
+pytestmark = [
+    pytest.mark.usefixtures("no_celery"),
+]
 
 _SIMPLE_DOC = {
     "type": "doc",
@@ -33,16 +41,18 @@ def note_service():
     svc = NoteService()
     svc.repo = MagicMock()
     svc.tag_repo = MagicMock()
+    svc.folder_repo = MagicMock()
     return svc
 
 
 class TestNoteServiceCreate:
     def test_create_extracts_content_text(self, note_service, mock_db, current_user):
-        created = make_note(user_id=current_user.id, title="T", content=_SIMPLE_DOC)
+        folder_id = uuid4()
+        created = make_note(user_id=current_user.id, folder_id=folder_id, title="T", content=_SIMPLE_DOC)
         note_service.repo.create.return_value = created
 
-        payload = NoteCreate(title="T", content=_SIMPLE_DOC)
-        result = note_service.create(mock_db, current_user.id, payload)
+        payload = NoteCreate(title="T", folder_id=folder_id, content=_SIMPLE_DOC)
+        result = note_service.create(mock_db, current_user.id, payload, current_user.role)
 
         # repo.create(db, user_id, data, content_text) → content_text is args[3]
         call_args = note_service.repo.create.call_args
@@ -51,11 +61,12 @@ class TestNoteServiceCreate:
         assert result.title == "T"
 
     def test_create_with_empty_doc_extracts_empty_text(self, note_service, mock_db, current_user):
-        created = make_note(content=_EMPTY_DOC)
+        folder_id = uuid4()
+        created = make_note(folder_id=folder_id, content=_EMPTY_DOC)
         note_service.repo.create.return_value = created
 
-        payload = NoteCreate(title="Empty", content=_EMPTY_DOC)
-        note_service.create(mock_db, current_user.id, payload)
+        payload = NoteCreate(title="Empty", folder_id=folder_id, content=_EMPTY_DOC)
+        note_service.create(mock_db, current_user.id, payload, current_user.role)
 
         call_args = note_service.repo.create.call_args
         content_text_arg = call_args.args[3]
@@ -95,7 +106,7 @@ class TestNoteServiceUpdate:
         note_service.repo.get_by_id.return_value = note
 
         payload = NoteUpdate(content=_SIMPLE_DOC)
-        note_service.update(mock_db, note.id, current_user.id, payload)
+        note_service.update(mock_db, note.id, current_user.id, payload, current_user.role)
 
         # repo.update(db, note, payload, content_text) → content_text is args[3]
         update_call = note_service.repo.update.call_args
@@ -107,7 +118,7 @@ class TestNoteServiceUpdate:
         note_service.repo.get_by_id.return_value = note
 
         payload = NoteUpdate(title="New Title")
-        note_service.update(mock_db, note.id, current_user.id, payload)
+        note_service.update(mock_db, note.id, current_user.id, payload, current_user.role)
 
         update_call = note_service.repo.update.call_args
         content_text_arg = update_call.args[3]
@@ -115,24 +126,15 @@ class TestNoteServiceUpdate:
 
 
 class TestNoteServiceMove:
-    def test_move_to_folder(self, note_service, mock_db, current_user):
+    def test_move_to_different_folder(self, note_service, mock_db, current_user):
         note = make_note(user_id=current_user.id)
         note_service.repo.get_by_id.return_value = note
-        folder_id = uuid4()
+        new_folder_id = uuid4()
 
-        note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=folder_id))
+        note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=new_folder_id))
 
-        assert note.folder_id == folder_id
+        assert note.folder_id == new_folder_id
         mock_db.commit.assert_called_once()
-
-    def test_move_to_inbox(self, note_service, mock_db, current_user):
-        folder_id = uuid4()
-        note = make_note(user_id=current_user.id, folder_id=folder_id)
-        note_service.repo.get_by_id.return_value = note
-
-        note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=None))
-
-        assert note.folder_id is None
 
 
 class TestNoteServiceTagOperations:
@@ -198,7 +200,7 @@ class TestNoteServiceDelete:
         note = make_note(user_id=current_user.id)
         note_service.repo.get_by_id.return_value = note
 
-        note_service.delete(mock_db, note.id, current_user.id)
+        note_service.delete(mock_db, note.id, current_user.id, current_user.role)
 
         note_service.repo.delete.assert_called_once_with(mock_db, note)
         mock_db.commit.assert_called_once()
@@ -207,7 +209,7 @@ class TestNoteServiceDelete:
         note_service.repo.get_by_id.return_value = None
 
         with pytest.raises(AppException) as exc:
-            note_service.delete(mock_db, uuid4(), current_user.id)
+            note_service.delete(mock_db, uuid4(), current_user.id, current_user.role)
 
         assert exc.value.status_code == 404
 
@@ -258,30 +260,38 @@ class TestListNotesEndpoint:
 
 class TestCreateNoteEndpoint:
     def test_requires_auth(self, unauthed_client):
-        resp = unauthed_client.post("/api/notes/", json={"title": "T", "content": _SIMPLE_DOC})
+        folder_id = str(uuid4())
+        resp = unauthed_client.post("/api/notes/", json={"title": "T", "folder_id": folder_id, "content": _SIMPLE_DOC})
         assert resp.status_code == 401
 
     def test_success(self, client):
         from app.services.notes import NoteService
 
-        note = make_note(title="T", content=_SIMPLE_DOC, content_text="Hello world")
+        folder_id = uuid4()
+        note = make_note(folder_id=folder_id, title="T", content=_SIMPLE_DOC, content_text="Hello world")
         with patch.object(NoteService, "create", return_value=note):
-            resp = client.post("/api/notes/", json={"title": "T", "content": _SIMPLE_DOC})
+            resp = client.post("/api/notes/", json={"title": "T", "folder_id": str(folder_id), "content": _SIMPLE_DOC})
 
         assert resp.status_code == 200
         assert resp.json()["data"]["title"] == "T"
 
     def test_missing_title_returns_422(self, client):
-        resp = client.post("/api/notes/", json={"content": _SIMPLE_DOC})
+        resp = client.post("/api/notes/", json={"folder_id": str(uuid4()), "content": _SIMPLE_DOC})
+        assert resp.status_code == 422
+
+    def test_missing_folder_id_returns_422(self, client):
+        """folder_id is now required — omitting it must return 422."""
+        resp = client.post("/api/notes/", json={"title": "T", "content": _SIMPLE_DOC})
         assert resp.status_code == 422
 
     def test_content_defaults_to_empty_dict(self, client):
         """Omitting content is valid – it defaults to an empty dict."""
         from app.services.notes import NoteService
 
-        note = make_note(title="T", content={}, content_text="")
+        folder_id = uuid4()
+        note = make_note(folder_id=folder_id, title="T", content={}, content_text="")
         with patch.object(NoteService, "create", return_value=note):
-            resp = client.post("/api/notes/", json={"title": "T"})
+            resp = client.post("/api/notes/", json={"title": "T", "folder_id": str(folder_id)})
 
         assert resp.status_code == 200
 
@@ -344,18 +354,13 @@ class TestMoveNoteEndpoint:
         assert resp.status_code == 200
         assert resp.json()["data"]["folder_id"] == str(folder_id)
 
-    def test_move_to_inbox_with_null_folder(self, client):
-        from app.services.notes import NoteService
-
-        note = make_note(folder_id=None)
-        with patch.object(NoteService, "move", return_value=note):
-            resp = client.patch(
-                f"/api/notes/{note.id}/move",
-                json={"folder_id": None},
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["data"]["folder_id"] is None
+    def test_move_missing_folder_id_returns_422(self, client):
+        """folder_id is required in NoteMoveRequest."""
+        resp = client.patch(
+            f"/api/notes/{uuid4()}/move",
+            json={"folder_id": None},
+        )
+        assert resp.status_code == 422
 
 
 class TestDeleteNoteEndpoint:
