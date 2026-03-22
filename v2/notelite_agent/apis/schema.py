@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class IngestionRequest(BaseModel):
-    userid: str = Field(..., example="SAMPLEUSER01")
+    user_id: str = Field(..., example="SAMPLEUSER01")
     role: str = Field("user", example="user")
     tenant_id: Optional[str] = Field(None, example="TENANT01")
     folder_id: str = Field(..., example="SAMPLESFOLDER01")
@@ -40,7 +40,7 @@ class IngestionRequest(BaseModel):
     def to_ingestion_payload(self) -> dict:
         """Transforms request to ingestion payload used by chunking/storage pipeline."""
         return {
-            "userid": self.userid,
+            "user_id": self.user_id,
             "role": self.role,
             "tenant_id": self.tenant_id,
             "folder_id": self.folder_id,
@@ -54,14 +54,14 @@ class IngestionRequest(BaseModel):
 
     def generate_stable_id(self, chunk_index: int) -> str:
         """Generates a consistent hash for Qdrant upserts."""
-        base_string = f"{self.userid}_{self.folder_id}_{self.note_id}_{chunk_index}"
+        base_string = f"{self.user_id}_{self.folder_id}_{self.note_id}_{chunk_index}"
         return hashlib.sha256(base_string.encode()).hexdigest()
 
 
 class RetrieveRequest(BaseModel):
     query: str = Field(...)
     k: int = Field(5, ge=1, le=50)
-    userid: str = Field(..., example="SAMPLEUSER01")
+    user_id: str = Field(..., example="SAMPLEUSER01")
     role: str = Field("user", example="user")
     tenant_id: Optional[str] = Field(None, example="TENANT01")
 

@@ -36,7 +36,7 @@ def _run_ingestion(data):
     init_llama_index_settings()
     doc_id, llama_docs = get_document_objects(data)
     access_context = AccessContext(
-        user_id=data["userid"],
+        user_id=data["user_id"],
         role=data["role"],
         tenant_id=data.get("tenant_id"),
     )
@@ -57,7 +57,7 @@ def _run_delete(user_id, note_id, role="user", tenant_id=None):
     with VectorStore() as db:
         db.delete_documents(
             access_context=access_context,
-            filter={"userid": user_id, "note_id": note_id},
+            filter={"user_id": user_id, "note_id": note_id},
         )
 
 
@@ -101,18 +101,18 @@ def ingest_in_background(self, data=None, **kwargs):
 
     if action == "delete":
         _run_delete(
-            user_id=payload["userid"],
+            user_id=payload["user_id"],
             note_id=payload["note_id"],
             role=payload.get("role", "user"),
             tenant_id=payload.get("tenant_id"),
         )
         return {
-            "message": f"delete completed for {payload['userid']}:{payload['note_id']}",
+            "message": f"delete completed for {payload['user_id']}:{payload['note_id']}",
             "action": "delete",
         }
 
     _run_ingestion(payload)
     return {
-        "message": f"ingestion completed for {payload['userid']}",
+        "message": f"ingestion completed for {payload['user_id']}",
         "action": "upsert",
     }

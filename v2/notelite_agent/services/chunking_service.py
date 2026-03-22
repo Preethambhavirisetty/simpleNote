@@ -414,14 +414,14 @@ def get_document_objects(data):
     full_text = data['text']
     chunks = split_into_sections(full_text)
     tenant_id = data.get("tenant_id")
-    doc_id = f"{data['userid']}-{data['folder_id']}-{data['note_id']}"
+    doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
     llama_docs = [
         LlamaDocument(
-            id_= hashlib.sha256(f"{data['userid']}-{data['folder_id']}-{data['note_id']}-{chunk}".encode()).hexdigest(),
+            id_= hashlib.sha256(f"{data['user_id']}-{data['folder_id']}-{data['note_id']}-{chunk}".encode()).hexdigest(),
             text=chunk,
             metadata={
                 "doc_id": doc_id,
-                "userid": data['userid'],
+                "user_id": data['user_id'],
                 "tenant_id": tenant_id,
                 "folder_id": data['folder_id'],
                 "note_id": data['note_id'],
@@ -429,10 +429,10 @@ def get_document_objects(data):
                 "note_title": data['note_title'],
                 "description": data['description'],
                 "tags": ','.join(data['tags']),
-                "chunkid": idx
+                "chunk_id": idx
             },
-            excluded_embed_metadata_keys=['userid', 'folder_id', 'note_id', 'chunkid'],
-            excluded_llm_metadata_keys=['userid', 'folder_id', 'note_id', 'chunkid'],
+            excluded_embed_metadata_keys=['user_id', 'folder_id', 'note_id', 'chunk_id'],
+            excluded_llm_metadata_keys=['user_id', 'folder_id', 'note_id', 'chunk_id'],
             metadata_template="{key}: {value}",
             text_template="""Context Information:
 {metadata_str}

@@ -91,7 +91,7 @@ class VectorStore:
 
         if not access_context.is_admin:
             for doc in documents:
-                if doc.metadata.get("userid") != access_context.user_id:
+                if doc.metadata.get("user_id") != access_context.user_id:
                     raise PermissionError("Users can only upsert their own documents.")
 
         self._handler.upsert(documents, doc_id, self._persist_directory)
@@ -137,12 +137,12 @@ class VectorStore:
         top = sorted(indices, key=lambda i: scores[i], reverse=True)[:k]
         return [self._bm25_docs[i] for i in top if scores[i] > 0]
     
-    def get_all_document_for_user(self, access_context, userid):
+    def get_all_document_for_user(self, access_context, user_id):
         if not isinstance(access_context, AccessContext):
             raise TypeError("access_context must be an AccessContext instance.")
         if access_context.role != "admin":
             raise PermissionError("Must be admin to access this resource")
-        scoped_filter = access_context.apply_scope({"userid": userid})
+        scoped_filter = access_context.apply_scope({"user_id": user_id})
         return self._handler.get_all_documents(filter=scoped_filter)
 
     def retrieve_documents(

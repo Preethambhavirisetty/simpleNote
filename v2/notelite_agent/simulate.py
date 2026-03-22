@@ -8,7 +8,7 @@ from core.contracts import AccessContext
 def ingest(data, reset=False):
     doc_id, llama_docs = get_document_objects(data)
     access_context = AccessContext(
-        user_id=data["userid"],
+        user_id=data["user_id"],
         role=data["role"],
         tenant_id=data.get("tenant_id"),
     )
@@ -24,8 +24,8 @@ def ingest(data, reset=False):
         print(f"Data upserted successfully, user points: {user_points}")
 
 
-def ask(query, userid, role, k=7):
-    access_context = AccessContext(user_id=userid, role=role)
+def ask(query, user_id, role, k=7):
+    access_context = AccessContext(user_id=user_id, role=role)
     with VectorStore() as db:
         results = db.retrieve_documents(
             query,
@@ -41,7 +41,7 @@ def simulate_diff_users_ingestion(users):
     for idx, (data_file, data) in enumerate(users):
         with open(data_file, 'r') as f:
             ingest({**data, "text": f.read()})
-            print(f"Data has been ingested for user {data['userid']}")
+            print(f"Data has been ingested for user {data['user_id']}")
 
 if __name__ == '__main__':
     init_llama_index_settings()
@@ -49,7 +49,7 @@ if __name__ == '__main__':
 
 
     data1 = {
-        "userid": "SAMPLEUSER01",
+        "user_id": "SAMPLEUSER01",
         "role": "user",
         "tenant_id": "TENANT01",
         "folder_id": "SAMPLESFOLDER01",
@@ -60,7 +60,7 @@ if __name__ == '__main__':
         "tags": ["tag1", "tag2"]
     }
     data2 = {
-        "userid": "SAMPLEUSER02",
+        "user_id": "SAMPLEUSER02",
         "role": "admin",
         "tenant_id": "TENANT01",
         "folder_id": "SAMPLESFOLDER02",

@@ -24,10 +24,10 @@ class AccessContext:
         if not self.tenant_id:
             raise ValueError("AccessContext.tenant_id is required for non-admin requests.")
 
-        if "userid" in scope and scope["userid"] != self.user_id:
+        if "user_id" in scope and scope["user_id"] != self.user_id:
             raise PermissionError("Users can only access their own data.")
         if "tenant_id" in scope and scope["tenant_id"] != self.tenant_id:
             raise PermissionError("Users can only access their own tenant data.")
 
-        scope["userid"] = self.user_id
+        scope["user_id"] = self.user_id
         return scope
