@@ -59,6 +59,8 @@ class TestNoteServiceCreate:
         content_text_arg = call_args.args[3]
         assert content_text_arg == "Hello world"
         assert result.title == "T"
+        # version must be set to 1 after first creation
+        assert result.version == 1
 
     def test_create_with_empty_doc_extracts_empty_text(self, note_service, mock_db, current_user):
         folder_id = uuid4()
@@ -102,7 +104,7 @@ class TestNoteServiceGet:
 
 class TestNoteServiceUpdate:
     def test_update_with_content_re_extracts_text(self, note_service, mock_db, current_user):
-        note = make_note(user_id=current_user.id)
+        note = make_note(user_id=current_user.id, version=1)
         note_service.repo.get_by_id.return_value = note
 
         payload = NoteUpdate(content=_SIMPLE_DOC)
@@ -112,6 +114,8 @@ class TestNoteServiceUpdate:
         update_call = note_service.repo.update.call_args
         content_text_arg = update_call.args[3]
         assert content_text_arg == "Hello world"
+        # version must be bumped before commit
+        assert note.version == 2
 
     def test_update_without_content_passes_none_text(self, note_service, mock_db, current_user):
         note = make_note(user_id=current_user.id)

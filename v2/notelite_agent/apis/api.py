@@ -1,10 +1,31 @@
-from fastapi import APIRouter
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
+
 from apis.schema import IngestionRequest, RetrieveRequest
 from apis.worker import ingest_in_background, worker_app
+from core.config import AGENT_API_KEY
 from core.contracts import AccessContext
 from services.storage_service import VectorStore
 
-router = APIRouter(prefix="/api", tags=["ingestion","retrieval"])
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def _require_api_key(key: str | None = Security(_api_key_header)) -> None:
+    """Reject requests that don't carry the correct shared secret."""
+    if not key or not secrets.compare_digest(key, AGENT_API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
+
+
+router = APIRouter(
+    prefix="/api",
+    tags=["ingestion", "retrieval"],
+    dependencies=[Depends(_require_api_key)],   # applied to every route in this router
+)
 
 
 @router.get("/status/{task_id}")

@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from contextlib import contextmanager
 
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,5 +48,25 @@ def get_postgres_session() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    finally:
+        db.close()
+
+
+@contextmanager
+def get_standalone_session() -> Generator[Session, None, None]:
+    """Context-manager session for use outside the request lifecycle (e.g. Celery tasks).
+
+    Lazily initialises the Postgres connection if the worker hasn't called init_postgres yet.
+    """
+    if SessionLocal is None:
+        from app.core.config import POSTGRES_DB_URL  # avoid circular import at module level
+
+        init_postgres(POSTGRES_DB_URL)
+    db = SessionLocal()  # type: ignore[misc]
+    try:
+        yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

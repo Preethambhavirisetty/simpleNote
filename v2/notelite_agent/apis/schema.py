@@ -13,7 +13,9 @@ class IngestionRequest(BaseModel):
     note_title: str = Field(..., min_length=1, example="SAMPLE NOTE TITLE1")
     description: Optional[str] = Field(None, example="SAMPLE DESCRIPTION 1")
     tags: List[str] = Field(default_factory=list, example=["tag1", "tag2"])
-    text: str = Field(..., min_length=1, example="Sample text for ingestion")
+    # 500 KB of plain text is well above any real note; beyond this the worker
+    # risks OOM and the embedding / chunking pipeline slows significantly.
+    text: str = Field(..., min_length=1, max_length=512_000, example="Sample text for ingestion")
 
     @field_validator('tags')
     @classmethod

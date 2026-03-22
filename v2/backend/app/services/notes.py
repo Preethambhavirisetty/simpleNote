@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.celery import celery_app
-from app.core.config import INGESTION_TASK_STRING
+from app.core.config import INGESTION_TASK_STRING, NOTE_SIZE_QUEUE, NOTE_SIZE_TASK_STRING
 from app.core.tiptap import extract_text
 from app.db.postgres.repos.folder import FolderRepository
 from app.db.postgres.repos.note import NoteRepository
@@ -17,7 +17,7 @@ from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 
 
 def _dispatch_ingest(payload: dict) -> None:
-    """Send an upsert ingestion task to the queue."""
+    """Send an upsert ingestion task to the notelite_agent queue."""
     celery_app.send_task(
         INGESTION_TASK_STRING,
         kwargs={"action": "upsert", **payload},
@@ -29,6 +29,15 @@ def _dispatch_delete(payload: dict) -> None:
     celery_app.send_task(
         INGESTION_TASK_STRING,
         kwargs={"action": "delete", **payload},
+    )
+
+
+def _dispatch_compute_size(note_id: UUID, content_text: str) -> None:
+    """Offload note_size computation to the backend's own Celery worker."""
+    celery_app.send_task(
+        NOTE_SIZE_TASK_STRING,
+        kwargs={"note_id": str(note_id), "content_text": content_text},
+        queue=NOTE_SIZE_QUEUE,
     )
 
 
@@ -49,7 +58,12 @@ class NoteService:
         return note
 
     def _ingestion_payload(self, db: Session, note, user_role: list[str]) -> dict:
-        """Build the full payload sent to the ingestion queue."""
+        """Build the full payload sent to the ingestion queue.
+
+        Includes `version` so the agent can skip stale tasks:
+        if the received version < the version currently in the DB, the content
+        has already been superseded and the agent should discard the task.
+        """
         folder = self.folder_repo.get_by_id(db, note.folder_id, note.user_id)
         return {
             "userid": str(note.user_id),
@@ -62,16 +76,23 @@ class NoteService:
             "note_title": note.title,
             "description": note.description or "",
             "tags": [t.name for t in note.tags],
-            "text": note.content_text or "",
+            "content_text": note.content_text or "",
+            # The agent compares this against its own stored version to detect
+            # out-of-order deliveries.
+            "version": note.version,
         }
 
     def create(self, db: Session, user_id: UUID, payload: NoteCreate, user_role: list[str]):
         content_text = extract_text(payload.content)
         note = self.repo.create(db, user_id, payload, content_text)
-        db.commit()           # commit first — note must exist before the worker runs
+        # Version 1 marks the first persisted state of the note.
+        note.version = 1
+        db.commit()           # commit first — note must exist before workers run
         db.refresh(note)
+
         if content_text:
             _dispatch_ingest(self._ingestion_payload(db, note, user_role))
+            _dispatch_compute_size(note.id, content_text)
         return note
 
     def list(
@@ -99,11 +120,16 @@ class NoteService:
     def update(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteUpdate, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
         content_text = extract_text(payload.content) if payload.content is not None else None
+        # Bump version before the update so the committed row carries the new version
+        # and any in-flight ingestion tasks with older versions are discarded by the agent.
+        note.version += 1
         self.repo.update(db, note, payload, content_text)
         db.commit()
         db.refresh(note)
-        if content_text:        # content changed -> re-embed
+
+        if content_text:        # content changed -> re-embed + recompute size
             _dispatch_ingest(self._ingestion_payload(db, note, user_role))
+            _dispatch_compute_size(note.id, content_text)
         return note
 
     def move(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteMoveRequest):
@@ -122,6 +148,7 @@ class NoteService:
             "note_id": str(note.id),
             "role": user_role[0] if user_role else "user",
             "tenant_id": str(note.user_id),
+            "version": note.version,
         }
         self.repo.delete(db, note)
         db.commit()

@@ -9,12 +9,22 @@ podman run -d \
 
 podman logs -f notelite-postgres
 
+
+**Secure ingestion queue pipeline**
+python3 -c "import secrets; print(secrets.token_hex(32))"
+podman exec -it myredis redis-cli CONFIG SET requirepass "433452754217808211124" -> OK
+
+**Set this later on cloud instance**
+bind 127.0.0.1 -::1
+requirepass <your-password>
+
 ## Transitioned from simplenote to notelite
 **Rename while container is running**
-podman exec -it simple-note-postgres psql -U postgres -c "ALTER DATABASE simplenote RENAME TO notelite;"
+podman exec -it notelite-postgres psql -U postgres -d notelite -c "ALTER DATABASE simplenote RENAME TO notelite;"
+podman exec -it notelite-postgres psql -U postgres -d notelite -c "SELECT * FROM users;"
 
 **Rename the container:**
-podman stop simple-note-postgres
+podman stop notelite-postgres
 podman rename simple-note-postgres notelite-postgres
 podman start notelite-postgres
 
@@ -23,6 +33,8 @@ podman ps
 
 # database name
 podman exec -it notelite-postgres psql -U postgres -c "\l"
+podman exec -it mypostgres psql -U postgres -c "\l+" -> gives the size of db
+
 
 # Drop tables
 podman exec -it notelite-postgres psql -U postgres -d notelite -c "
@@ -51,8 +63,28 @@ FE:
 npm i
 npm run dev
 
-Tests:
+Tests
 python -m pytest tests/ -v
+
+Devops:
+If you are running Redis inside a Docker/Podman container, "binding to localhost" is usually handled by how you map your ports. To stay safe, ensure your port mapping looks like this in your docker-compose.yml or run command:
+127.0.0.1:6379:6379 (This forces the container to only accept traffic from the host machine's loopback interface).
+
+
+=> We could look at how to mask sensitive data (like emails or SSNs) before sending it to the LLM for embedding. Would that be a useful security layer for your project?
+
+Encryption/decryption flow
+BE - QUEUE - AGENT
+  FE --POST notes/-> BE
+                     |-- extract notes from clear_json(tiptap), clear_text
+                     |-- encrypt clear_text with Fernet, cipher_text
+                     |-- encrypt clear_json with Fernet, cipher_json
+                     |-- save cipher_text and cipher_json to db 
+                     |----- instead of clear_text and clear_json
+                     |-- send clear_text to agent ----------------> [ QUEUE ] ----> AGENT(with celery) picks task from the QUEUE
+                                                                                      |-- chunks -> generate embeddings
+                                                                                      |-- encrypt clear chunk text and attach it to points
+                                                                                      |-- retrieval request -> top-k chunks -> decrypts chunk's text, combine it and give it to llm for processing
 
 
 ```
@@ -585,7 +617,7 @@ chat:
   <!-- - get metadata -> how? - LATER
   - get user intent -> how? - LATER
   - generate confidence score for user's query; - LATER -->
-  - query vector DB with filters(userid) - CLEAR
+  - query vector DB with filters(user_id) - CLEAR
   - 
 
   <!-- - [edgecase] if low score like between 1 - 10%, then vague fallback to "could you elaborate on what you are referring to?" then give clarifying questions

@@ -50,6 +50,8 @@ class Note(Base):
     content: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
     # Plain text derived from content — used for full-text search and previews
     content_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(default=0)
+    note_size: Mapped[int] = mapped_column(default=0)
     is_memory_included: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

@@ -61,6 +61,8 @@ def make_note(**kwargs) -> SimpleNamespace:
         description=None,
         content={"type": "doc", "content": []},
         content_text="",
+        version=1,
+        note_size=0,
         is_pinned=False,
         is_memory_included=False,
         tags=[],
@@ -90,7 +92,8 @@ def make_tag(**kwargs) -> SimpleNamespace:
 def no_celery():
     """Prevent any Celery task dispatch from reaching Redis during tests."""
     with patch("app.services.notes._dispatch_ingest"), \
-         patch("app.services.notes._dispatch_delete"):
+         patch("app.services.notes._dispatch_delete"), \
+         patch("app.services.notes._dispatch_compute_size"):
         yield
 
 

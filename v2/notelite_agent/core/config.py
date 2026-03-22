@@ -30,7 +30,15 @@ LLM_CONTEXT_WINDOW = int(_require_env("LLM_CONTEXT_WINDOW"))
 EMBEDDING_DEVICE = _require_env("EMBEDDING_DEVICE")
 
 MESSAGE_BROKER_URL = _require_env("MESSAGE_BROKER_URL")
-INGESTION_TASK_STRING=_require_env("INGESTION_TASK_STRING")
+INGESTION_TASK_STRING = _require_env("INGESTION_TASK_STRING")
+
+# Shared secret for agent HTTP endpoints.  Set the same value in the backend's .env
+# and send it as the `X-API-Key` header on every request to /ingest, /get-context, /retrieve.
+AGENT_API_KEY = _require_env("AGENT_API_KEY")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", MESSAGE_BROKER_URL)
 INGESTION_QUEUE = os.getenv("INGESTION_QUEUE", "ingestion")
+
+# Used only for version guard checks — read-only, one query per upsert task.
+# Accepts the same URL format as the backend (postgresql+psycopg://... is normalised automatically).
+POSTGRES_DB_URL = _require_env("POSTGRES_DB_URL")
 
