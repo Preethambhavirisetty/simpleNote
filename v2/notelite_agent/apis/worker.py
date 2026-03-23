@@ -9,6 +9,7 @@ from core.config import (
     INGESTION_QUEUE,
 )
 from core.pg import fetch_note_version
+from core.schema import IngestionTaskPayload
 from core.settings import init_llama_index_settings
 from services.storage_service import VectorStore
 from services.chunking_service import get_document_objects
@@ -66,44 +67,24 @@ def _run_delete(user_id, note_id, role="user", tenant_id=None):
         )
 
 
-def _normalize_ingestion_payload(data=None, **kwargs):
-    """
-    Supports both payload styles:
-    1) Direct /ingest API: single `data` dict with `user_id` key.
-    2) Backend Celery kwargs: note_id, userid (no underscore), content_text, action, version, ...
+def _normalize_ingestion_payload(data=None, **kwargs) -> dict:
+    """Validate and normalise raw task kwargs against the canonical IngestionTaskPayload schema.
 
-    Key normalisation applied here:
-    - The backend dispatches `userid` (no underscore).  Rename to `user_id` so the
-      rest of the pipeline (`get_document_objects`, `_run_ingestion`, etc.) can
-      always rely on `data["user_id"]`.
+    Accepts two call styles:
+    1) Direct /ingest HTTP API  → ``data`` is already a validated dict (user_id key).
+    2) Backend Celery dispatch  → kwargs spread from the backend payload dict (userid key).
+
+    All field-name aliasing (userid → user_id, list role → str, action lowercase) is
+    handled inside IngestionTaskPayload's @model_validator.  Any unrecognised extra
+    fields are silently ignored (schema Config: extra="ignore").
     """
+    raw: dict = {}
     if isinstance(data, dict) and data:
-        payload = dict(data)
-    else:
-        payload = {}
-
+        raw = dict(data)
     if kwargs:
-        payload.update(kwargs)
+        raw.update(kwargs)
 
-    # Normalise backend key name → pipeline key name.
-    # Done before setdefault so "userid" always wins when "user_id" is absent.
-    if "user_id" not in payload and "userid" in payload:
-        payload["user_id"] = payload.pop("userid")
-
-    payload.setdefault("user_id", "UNKNOWN_USER")
-    payload.setdefault("role", "user")
-    payload.setdefault("tenant_id", None)
-    payload.setdefault("folder_id", "BE_FOLDER_UNKNOWN")
-    payload.setdefault("note_id", "BE_NOTE_UNKNOWN")
-    payload.setdefault("folder_title", "Untitled Folder")
-    payload.setdefault("note_title", "Untitled Note")
-    payload.setdefault("description", "")
-    payload.setdefault("tags", [])
-    payload.setdefault("action", "upsert")
-    # version is None when the task originates from the direct /ingest API endpoint
-    # (no version supplied).  None means "no guard — always ingest".
-    payload.setdefault("version", None)
-    return payload
+    return IngestionTaskPayload(**raw).model_dump()
 
 
 def _is_stale(note_id: str, user_id: str, payload_version) -> bool:
@@ -152,32 +133,33 @@ def _is_stale(note_id: str, user_id: str, payload_version) -> bool:
 )
 def ingest_in_background(self, data=None, **kwargs):
     payload = _normalize_ingestion_payload(data, **kwargs)
-    action = str(payload.get("action", "upsert")).lower()
-    note_id = payload.get("note_id", "BE_NOTE_UNKNOWN")
+    action = payload["action"]          # guaranteed lowercase by schema
+    note_id = payload["note_id"]
+    user_id = payload["user_id"]
 
     if action == "delete":
         # Delete is always honoured regardless of version — the note is gone.
         _run_delete(
-            user_id=payload["user_id"],
+            user_id=user_id,
             note_id=note_id,
-            role=payload.get("role", "user"),
-            tenant_id=payload.get("tenant_id"),
+            role=payload["role"],
+            tenant_id=payload["tenant_id"],
         )
         return {
-            "message": f"delete completed for {payload['user_id']}:{note_id}",
+            "message": f"delete completed for {user_id}:{note_id}",
             "action": "delete",
         }
 
     # ── Version guard ─────────────────────────────────────────────────────────
-    if _is_stale(note_id, payload["user_id"], payload.get("version")):
+    if _is_stale(note_id, user_id, payload["version"]):
         return {
             "message": f"skipped stale task for note {note_id}",
             "action": "skip",
-            "payload_version": payload.get("version"),
+            "payload_version": payload["version"],
         }
 
     _run_ingestion(payload)
     return {
-        "message": f"ingestion completed for {payload['user_id']}",
+        "message": f"ingestion completed for {user_id}",
         "action": "upsert",
     }

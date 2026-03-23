@@ -1,93 +1,146 @@
+"""
+Simulation script — observe how the Celery ingestion queue handles concurrent
+note creation across multiple users.
 
-from services.storage_service import VectorStore
-from services.chunking_service import get_document_objects
-from core.settings import init_llama_index_settings
-from core.contracts import AccessContext
+Flow per simulated user:
+  1. Register (sets auth cookie automatically)
+  2. Create a folder
+  3. Create a note inside that folder  ← triggers queue dispatch
+  4. Print result
+
+Run:
+  python3 simulate.py          # 5 users (default)
+  python3 simulate.py 10       # 10 concurrent users
+"""
+import asyncio
+import sys
+import httpx
+
+BACKEND_URL = "http://localhost:3001/api"
+
+# httpx timeout: registration + note creation can be slow on first run
+TIMEOUT = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+
+NOTE_CONTENT = {
+    "type": "doc",
+    "content": [
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        'The "System Failure" Stress Test\n'
+                        "text\nUPLOADED_FILE_FINAL_v2_USE_THIS_ONE.txt\n"
+                        "User: @Marketing_Lead | Date: 2026-05-12\n\n"
+                        "1. CAMPAIGN OVERVIEW\n"
+                        'We are launching "Project Zenith." It\'s going to be huge.\n\n'
+                        "2. AUDIENCE SEGMENTATION (DRAFT)\n"
+                        "* Tier 1: Early Adopters\n"
+                        "    - Age: 18-24\n"
+                        '    - Interest: Tech, AI, "Crypto"\n'
+                        "* Tier 2: Enterprise\n"
+                        "    - Size: 500+ Employees\n\n"
+                        "BUDGET BREAKDOWN\n"
+                        "Ads $50,000 Approved @John\n"
+                        "Social $12,000 Pending @Sarah\n"
+                        "Influencers $30,000 Review @Mike\n\n"
+                        "TO-DO LIST\n"
+                        "Design the logo\n"
+                        "Hire a copywriter\n"
+                        "Prepare the @Legal_Team brief\n\n"
+                        "[END OF TRANSMISSION]"
+                    ),
+                }
+            ],
+        }
+    ],
+}
 
 
-def ingest(data, reset=False):
-    doc_id, llama_docs = get_document_objects(data)
-    access_context = AccessContext(
-        user_id=data["user_id"],
-        role=data["role"],
-        tenant_id=data.get("tenant_id"),
+async def simulate_user(user_index: int, client: httpx.AsyncClient) -> None:
+    """Run the full register → folder → note flow for one simulated user."""
+    tag = f"[user-{user_index}]"
+    email = f"sim_user_{user_index}@notelite.dev"
+    password = "Simulate123!"
+    name = f"SimUser{user_index}"
+
+    # ── 1. Register (also logs in — sets the auth cookie) ────────────────────
+    reg_resp = await client.post(
+        f"{BACKEND_URL}/auth/register",
+        json={"name": name, "email": email, "password": password, "role": ["standard_user"]},
+    )
+    if reg_resp.status_code not in (200, 201):
+        # User likely already exists from a previous run — try logging in instead
+        print(f"{tag} register returned {reg_resp.status_code}, trying login...")
+        login_resp = await client.post(
+            f"{BACKEND_URL}/auth/login",
+            json={"email": email, "password": password},
+        )
+        if login_resp.status_code not in (200, 201):
+            print(f"{tag} login also failed ({login_resp.status_code}): {login_resp.text[:200]}")
+            return
+        print(f"{tag} logged in ✓")
+    else:
+        print(f"{tag} registered ✓")
+
+    # ── 2. Create a folder ────────────────────────────────────────────────────
+    folder_resp = await client.post(
+        f"{BACKEND_URL}/folders/",
+        json={"name": f"SimFolder-{user_index}"},
+    )
+    if folder_resp.status_code not in (200, 201):
+        print(f"{tag} folder creation failed ({folder_resp.status_code}): {folder_resp.text[:200]}")
+        return
+    folder_id = folder_resp.json()["data"]["id"]
+    print(f"{tag} folder created: {folder_id}")
+
+    # ── 3. Create a note (this triggers the ingestion + compute_note_size queue dispatch) ──
+    note_resp = await client.post(
+        f"{BACKEND_URL}/notes/",
+        json={
+            "title": f"Stress-test note #{user_index}",
+            "folder_id": folder_id,
+            "description": f"Simulation note for user {user_index}",
+            "content": NOTE_CONTENT,
+            "is_pinned": False,
+        },
+    )
+    if note_resp.status_code not in (200, 201):
+        print(f"{tag} note creation failed ({note_resp.status_code}): {note_resp.text[:200]}")
+        return
+
+    data = note_resp.json()["data"]
+    print(
+        f"{tag} note created ✓  "
+        f"note_id={data['id']}  version={data.get('version', '?')}  "
+        f"→ ingestion task dispatched to queue"
     )
 
-    with VectorStore() as db:
-        db.upsert(
-            llama_docs,
-            doc_id,
-            access_context=access_context,
-            reset=reset,
-        )
-        user_points = db.document_count(access_context=access_context)
-        print(f"Data upserted successfully, user points: {user_points}")
+
+async def run_simulation(count: int) -> None:
+    print(f"\n{'─'*60}")
+    print(f"  Simulating {count} concurrent users against {BACKEND_URL}")
+    print(f"{'─'*60}\n")
+
+    # Each user gets their own client so cookies don't bleed between users.
+    async def _run(i: int) -> None:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            try:
+                await simulate_user(i, client)
+            except httpx.ConnectError:
+                print(f"[user-{i}] ✗ Could not connect to {BACKEND_URL} — is the backend running?")
+            except httpx.ReadTimeout:
+                print(f"[user-{i}] ✗ Request timed out — backend may be overloaded or slow to start")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[user-{i}] ✗ Unexpected error: {exc}")
+
+    await asyncio.gather(*[_run(i+1000) for i in range(count)])
+    print(f"\n{'─'*60}")
+    print("  All users done. Watch the Celery worker logs to see the queue drain.")
+    print(f"{'─'*60}\n")
 
 
-def ask(query, user_id, role, k=7):
-    access_context = AccessContext(user_id=user_id, role=role)
-    with VectorStore() as db:
-        results = db.retrieve_documents(
-            query,
-            k=k,
-            access_context=access_context,
-        )
-
-    context = "\n\n".join(doc.text for doc in results)
-    print(context)
-
-
-def simulate_diff_users_ingestion(users):
-    for idx, (data_file, data) in enumerate(users):
-        with open(data_file, 'r') as f:
-            ingest({**data, "text": f.read()})
-            print(f"Data has been ingested for user {data['user_id']}")
-
-if __name__ == '__main__':
-    init_llama_index_settings()
-
-
-
-    data1 = {
-        "user_id": "SAMPLEUSER01",
-        "role": "user",
-        "tenant_id": "TENANT01",
-        "folder_id": "SAMPLESFOLDER01",
-        "note_id": "SAMPLENOTE01",
-        "folder_title": "SAMPLE FOLDER TITLE1",
-        "note_title": "SAMPLE NOTE TITLE1",
-        "description": "SAMPLE DESCRIPTION 1",
-        "tags": ["tag1", "tag2"]
-    }
-    data2 = {
-        "user_id": "SAMPLEUSER02",
-        "role": "admin",
-        "tenant_id": "TENANT01",
-        "folder_id": "SAMPLESFOLDER02",
-        "note_id": "SAMPLENOTE02",
-        "folder_title": "SAMPLE FOLDER TITLE2",
-        "note_title": "SAMPLE NOTE TITLE2",
-        "description": "SAMPLE DESCRIPTION 2",
-        "tags": ["tag1", "tag2"]
-    }
-
-
-
-    # simulate_diff_users_ingestion([
-    #     ("data1.txt", data1),
-    #     ("data2.txt", data2)
-    # ])
-
-    # # sample_query = "How to calibrate thremal sensors for deck4?"
-    # # sample_query = "there is a code where we need to make a next step"
-    # sample_query = "total how many people are working?"
-    # print("\nQuestion:", sample_query)
-    # answer = ask(sample_query, "SAMPLEUSER02", "user", k=5)
-
-    with VectorStore() as store:
-        admin_context = AccessContext(user_id="SYSTEM", role="admin", tenant_id="TENANT01")
-        points_count = store.document_count(access_context=admin_context)
-        all_docs = store.get_all_document_for_user(admin_context, "SAMPLEUSER02")
-        for doc in all_docs:
-            print(doc.metadata)
-        print(f"Total points (admin): {points_count} / {len(all_docs)}")
+if __name__ == "__main__":
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 5
+    asyncio.run(run_simulation(n))

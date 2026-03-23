@@ -58,6 +58,7 @@ Agent:
 uvicorn main:app --port 3002
 QUEUE service: docker run -d -p 6379:6379 redis
 celery -A apis.worker:worker_app worker -l info -Q ingestion -P solo
+celery -A app.tasks.notes worker -Q note_size --loglevel=info
 
 FE:
 npm i
@@ -622,4 +623,13 @@ chat:
 
   <!-- - [edgecase] if low score like between 1 - 10%, then vague fallback to "could you elaborate on what you are referring to?" then give clarifying questions
   - [edgecase] if confidence score is still low but > 10%, then query vector DB over all the available notes, get top k, then summarize and give response -->
+
+
+
+### Challenges:
+
+**Was it a leak?**
+Partially, yes — through a transaction state issue.
+
+Without the explicit rollback() in the except branch, when a request raised an exception (e.g. duplicate-email on register), the session was closed with an uncommitted, dirty transaction still attached. SQLAlchemy's pool fires reset_on_return (a silent rollback) when the connection returns, but under high concurrency this reset adds latency. While the pool was waiting on those resets, new requests couldn't get connections — the pool drained.
 

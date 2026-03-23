@@ -1,0 +1,28 @@
+# Two instances: embedding (phi) and summarization (mistral/llama).
+# Mount model dir and set LLAMA_MODEL_PATH per service.
+# Optional: set API_KEY for both to enable auth.
+
+services:
+  embedding:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      SERVICE_MODE: embedding
+      LLAMA_MODEL_PATH: /models/embedding.gguf
+      API_KEY: ${API_KEY:-}
+    volumes:
+      - ./models:/models:ro
+    command: ["/bin/sh", "-c", "exec /app/inference_api --mode=embedding ${API_KEY:+--api-key=$API_KEY}"]
+
+  summarization:
+    build: .
+    ports:
+      - "8082:8081"
+    environment:
+      SERVICE_MODE: summarization
+      LLAMA_MODEL_PATH: /models/summarization.gguf
+      API_KEY: ${API_KEY:-}
+    volumes:
+      - ./models:/models:ro
+    command: ["/bin/sh", "-c", "exec /app/inference_api --mode=summarization ${API_KEY:+--api-key=$API_KEY}"]

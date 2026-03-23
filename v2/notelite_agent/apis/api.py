@@ -8,6 +8,7 @@ from apis.worker import ingest_in_background, worker_app
 from core.config import AGENT_API_KEY
 from core.contracts import AccessContext
 from services.storage_service import VectorStore
+from llama_index.core import Settings
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -107,4 +108,12 @@ def ask_llm(request: RetrieveRequest):
         )
 
     context = "\n\n".join(doc.text for doc in results)
-    return {"response": "SAMPLE RESPONSE FOR NOW, WILL ADD WHEN LLM SERVICE IS UP AND RUNNING"}
+    prompt = (
+        "System: You are a factual assistant. Answer the Question using ONLY the provided Context. "
+        "If the answer is not explicitly in the context, respond with: 'I am sorry, but I do not have enough information in your blogs to answer that.'\n\n"
+        f"Context:\n{context}\n\n"
+        f"Question: {request.query}\n"
+        "Answer:"
+    )
+    response = Settings.llm.complete(prompt)
+    return response.text

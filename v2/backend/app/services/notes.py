@@ -76,7 +76,7 @@ class NoteService:
             "note_title": note.title,
             "description": note.description or "",
             "tags": [t.name for t in note.tags],
-            "content_text": note.content_text or "",
+            "text": note.content_text or "",
             # The agent compares this against its own stored version to detect
             # out-of-order deliveries.
             "version": note.version,
