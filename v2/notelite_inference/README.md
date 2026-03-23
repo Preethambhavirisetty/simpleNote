@@ -96,130 +96,285 @@ use LongRoPE or Flash Attention: This ensures that as your "Context" grows, the 
 
 -> measure success by Tokens Per Second (TPS) rather than total time.
 
+**Endpoints with requests & response structures**
+
+> All endpoints that mutate state or invoke inference require the `Authorization: Bearer <key>` or `X-Api-Key: <key>` header when the server is started with `--api-key`. Auth-free by default.
+
+---
+
+### `GET /ping`
+Liveness probe. No auth required.
+
+```
+Response 200  text/plain
+pong
+```
+
+---
+
+### `GET /health`
+Readiness probe. No auth required.
+
+```json
+// Response 200
+{ "status": "ok", "service": "inference-api" }
+```
+
+---
+
+### `GET /v1/models`
+Lists models known to this server. Used by OpenAI-compatible clients (e.g. LlamaIndex `OpenAILike`) on startup.
+
+```json
+// Response 200
+{
+  "object": "list",
+  "data": [
+    { "id": "llama-3.1-8b",  "object": "model", "created": 0, "owned_by": "notelite" },
+    { "id": "mistral-7b",    "object": "model", "created": 0, "owned_by": "notelite" },
+    { "id": "gpt-3.5-turbo", "object": "model", "created": 0, "owned_by": "notelite" }
+  ]
+}
+```
+
+---
+
+### `POST /v1/chat/completions` _(summarization mode only)_
+
+OpenAI-compatible chat completion. The agent's LlamaIndex `OpenAILike` client hits this endpoint.
+
+**Query params**
+
+| Param | Values | Default |
+|-------|--------|---------|
+| `purpose` | `summary` \| `query_parsing` | resolved from `model` field |
+
+Model routing (when `purpose` is not set explicitly):
+- `model: "mistral*"` → `query_parsing` → loads Mistral 7B (greedy, temp=0)
+- anything else (incl. `"gpt-3.5-turbo"`) → `summary` → loads Llama-3.1-8B (temp=0.4)
+
+**Request**
+
+```json
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    { "role": "system",    "content": "You are a helpful assistant." },
+    { "role": "user",      "content": "Summarise the following notes:\n\n..." },
+    { "role": "assistant", "content": "Here is a summary: ..." },
+    { "role": "user",      "content": "What was the main topic?" }
+  ],
+  "temperature": 0.4,
+  "max_tokens": 512,
+  "stream": false
+}
+```
+
+`messages` is the only required field. `temperature` and `max_tokens` override the server-side sampling preset when provided.
+
+**Response 200**
+
+```json
+{
+  "id": "chatcmpl-68123abc",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-3.5-turbo",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": "The main topic was project planning and budget allocation."
+    },
+    "finish_reason": "stop"
+  }],
+  "usage": { "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0 }
+}
+```
+
+**Error responses**
+
+| Code | Reason |
+|------|--------|
+| 400  | Missing or malformed `messages` array |
+| 401  | Invalid or missing API key |
+| 413  | Request body > 128 KB |
+| 500  | Model load failure or inference error |
+| 501  | `stream: true` requested (not yet supported) |
+
+**Example — curl**
+
+```bash
+curl -s http://localhost:8081/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {"role": "user", "content": "What is 2 + 2?"}
+    ],
+    "temperature": 0.4,
+    "max_tokens": 128
+  }' | python3 -m json.tool
+```
+
+**Example — query_parsing (Mistral, greedy)**
+
+```bash
+curl -s "http://localhost:8081/v1/chat/completions?purpose=query_parsing" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mistral-7b",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a JSON-only intent parser. Output a single valid JSON object, no extra text."
+      },
+      {
+        "role": "user",
+        "content": "Summarise power consumption for site RCDN lab rcdn05-g41 row A over the past 6 months."
+      }
+    ],
+    "temperature": 0.0,
+    "max_tokens": 256
+  }'
+```
+
+---
+
+### `POST /embed` _(embedding mode only)_
+
+Returns the embedding vector for a plain-text body.
+
+**Request**
+
+```
+POST /embed
+Content-Type: text/plain          (or omit; body is treated as raw text)
+
+The quick brown fox jumps over the lazy dog.
+```
+
+**Response 200**
+
+```json
+{
+  "embedding": [0.0142, -0.0381, 0.0274, "..."]
+}
+```
+
+**Error responses**
+
+| Code | Reason |
+|------|--------|
+| 400  | Empty body |
+| 401  | Invalid or missing API key |
+| 413  | Body > 65 536 bytes |
+| 500  | Embedding failed |
+
+**Example — curl**
+
+```bash
+curl -s http://localhost:8081/embed \
+  -H "Content-Type: text/plain" \
+  --data "The quick brown fox jumps over the lazy dog." \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'dims={len(d[\"embedding\"])}')"
+```
+
+---
 
 
-- **Embedding** on port **8081** (model: `LLAMA_MODEL_PATH` / `models/embedding.gguf`).
-- **Summarization** on port **8082** (model: `LLAMA_MODEL_PATH` / `models/summarization.gguf`).
+**⚠️ Bug note (fixed):** An earlier test produced garbled output with `<|eot_id|><|start_header_id|>assistant<|end_header_id|>` appearing inline and the model never stopping. Root cause: `llama_tokenize` was called with `parse_special=false`, so the Llama-3 special tokens in the chat template were tokenized as individual characters instead of their single-token IDs. The model never received a proper chat-format prompt and never generated a real EOG token. Fixed by using `parse_special=true` when a chat template is active (i.e. `add_bos=false`) and moving the `llama_vocab_is_eog` check before the output append.
 
-Place your GGUF models in `./models/` and name them `embedding.gguf` and `summarization.gguf`, or set `LLAMA_MODEL_PATH` per service in `docker-compose.yml`.
+**Test request (use this after rebuilding):**
+
+```bash
+curl -s http://localhost:8081/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-3.5-turbo",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a factual assistant. Answer using only the provided context. If the answer is not in the context, say you do not know."
+      },
+      {
+        "role": "user",
+        "content": "Context:\nProject Zenith targets early adopters aged 18-24 interested in tech and AI. The ads budget is $50,000 (approved) and social budget is $12,000 (pending).\n\nQuestion: What is the total approved budget and who is the target audience?"
+      }
+    ],
+    "temperature": 0.4,
+    "max_tokens": 256
+  }' | python3 -m json.tool
+```
+
+**Expected response (clean, no special tokens in content):**
+
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "created": 1700000000,
+  "model": "gpt-3.5-turbo",
+  "choices": [{
+    "index": 0,
+    "message": {
+      "role": "assistant",
+      "content": "The total approved budget is $50,000 (ads). The target audience is early adopters aged 18–24 with interests in tech and AI."
+    },
+    "finish_reason": "stop"
+  }],
+  "usage": { "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0 }
+}
+
+Sample Request:
+{
+  "model": "llama-3.1-8b",
+  "messages": [
+    { 
+      "role": "system", 
+      "content": "You are a personal assistant. Answer ONLY using the provided context. Connect information across different blogs to answer accurately." 
+    },
+    { 
+      "role": "user", 
+      "content": "CONTEXT:\nBlog 1 (Jan 2024): 'Moving Day' - Just finished unpacking at my new place in Seattle. The rain is constant but the coffee is great.\nBlog 2 (Feb 2024): 'Work Update' - Started a new role at 'Vertex Corp'. My commute is only 10 minutes by foot now.\n\nQUESTION:\nBased on my blogs, what city is 'Vertex Corp' located in, and how do you know?" 
+    }
+  ],
+  "temperature": 0.1
+}
+
+Response:
+{
+    "id": "chatcmpl-69c09727",
+    "object": "chat.completion",
+    "created": 1774229287,
+    "model": "llama-3.1-8b",
+    "choices": [
+        {
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Based on the blogs, I can infer that 'Vertex Corp' is located in Seattle. This is because in Blog 1, you mention that you've just moved to Seattle and are unpacking at your new place, and in Blog 2, you mention that your commute to work is only 10 minutes by foot, implying that your workplace is nearby."
+            },
+            "finish_reason": "stop"
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+    }
+}
 
 
-If we give more context related to questions, it can give clear "clarifying questions"
-
-Test 1: to mistral model
+Agent's retrieve:
 Request:
-Prompt:
 {
-    "prompt": "summarize the power consumption from the site RCDN lab rcdn05-g41 and row A for the past 6 months",
-    "history": [
-        {
-            "role": "user",
-            "content": "You are a user prompt parser. Schema: site (string or null), lab (string or null), row (string or null), intent_type (string or null), aggregation (string or null), quarter (string or null), parsing_confidence (number from 0.0 to 1.0), clarity_level ('high' or 'medium' or 'low'), clarifying_questions (array of strings). Output only the JSON object. Use null for any field that is not explicitly stated or cannot be inferred. Do not include any explanation, extra text, markdown, or placeholder or descriptive strings."
-        },
-        {
-            "role": "assistant",
-            "content": "Of course, I can assist with that. Please send me the prompt you want parsed, and I will reply with only the JSON output, nothing else."
-        }
-    ]
-}
-
-Output:
- {
-"site": "RCDN",
-"lab": "rcdn05-g41",
-"row": "A",
-"intent_type": "summarize power consumption",
-"aggregation": "6 months",
-"quarter": null,
-"parsing_confidence": 0.95,
-"clarity_level": "high",
-"clarifying_questions": []
-}
-
-Test 2: to mistral
-Request:
-Prompt:
-{
-    "prompt": "whi are y=u",
-    "history": [
-        {
-            "role": "user",
-            "content": "You are a user prompt parser. Schema: site (string or null), lab (string or null), row (string or null), intent_type (string or null), aggregation (string or null), quarter (string or null), parsing_confidence (number from 0.0 to 1.0), clarity_level ('high' or 'medium' or 'low'), clarifying_questions (array of strings). Output only the JSON object. Use null for any field that is not explicitly stated or cannot be inferred. Do not include any explanation, extra text, markdown, or placeholder or descriptive strings."
-        },
-        {
-            "role": "assistant",
-            "content": "Of course, I can assist with that. Please send me the prompt you want parsed, and I will reply with only the JSON output, nothing else."
-        }
-    ]
+    "query": "Based on my blogs, what city is 'Vertex Corp' located in, and how do you know?",
+    "k": 5,
+    "user_id": "SAMPLEUSER01",
+    "role": "user",
+    "tenant_id": "TENANT01"
 }
 
 Response:
- {
-"site": null,
-"lab": null,
-"row": null,
-"intent_type": "unknown",
-"aggregation": null,
-"quarter": null,
-"parsing_confidence": 0.0,
-"clarity_level": "low",
-"clarifying_questions": ["Can you please clarify what 'whi are y=u' means?"]
-}
-
-Test 3:
-{
-    "prompt": "What sites are available?",
-    "history": [
-        {
-            "role": "user",
-            "content": "You are a user prompt parser. Schema: site (string or null), lab (string or null), row (string or null), intent_type (string or null), aggregation (string or null), quarter (string or null), parsing_confidence (number from 0.0 to 1.0), clarity_level ('high' or 'medium' or 'low'), clarifying_questions (array of strings). Output only the JSON object. Use null for any field that is not explicitly stated or cannot be inferred. Do not include any explanation, extra text, markdown, or placeholder or descriptive strings."
-        },
-        {
-            "role": "assistant",
-            "content": "Of course, I can assist with that. Please send me the prompt you want parsed, and I will reply with only the JSON output and make sure to include all fields even though it is null, nothing else."
-        }
-    ]
-}
-
-Response:
- {
-"site": null,
-"lab": null,
-"row": null,
-"intent_type": "informational",
-"aggregation": null,
-"quarter": null,
-"parsing_confidence": 1.0,
-"clarity_level": "medium",
-"clarifying_questions": []
-}
-
-Regarding your question, I cannot provide an answer based on the provided conversation alone. The conversation only includes the instruction for me to parse and output a JSON object. To answer your question, you would need to provide the specific sites you are inquiring about.
-
-Test 3:
-{
-    "prompt": "What labs are available in site rtp?",
-    "history": [
-        {
-            "role": "user",
-            "content": "You are a user prompt parser. Schema: site (string or null), lab (string or null), row (string or null), intent_type (string or null), aggregation (string or null), quarter (string or null), parsing_confidence (number from 0.0 to 1.0), clarity_level ('high' or 'medium' or 'low'), clarifying_questions (array of strings). Output only the JSON object. Use null for any field that is not explicitly stated or cannot be inferred. Do not include any explanation, extra text, markdown, or placeholder or descriptive strings."
-        },
-        {
-            "role": "assistant",
-            "content": "Of course, I can assist with that. Please send me the prompt you want parsed, and I will reply with only the JSON output, nothing else."
-        }
-    ]
-}
-
-Response:
- {
-"site": "rtp",
-"lab": null,
-"row": null,
-"intent_type": "informational",
-"aggregation": null,
-"quarter": null,
-"parsing_confidence": 0.85,
-"clarity_level": "medium",
-"clarifying_questions": ["Which specific labs are you asking about?"]
-}
+"Relevant facts:\n\n* Blog 1 (Jan 2024) mentions the writer has moved to Seattle.\n* Blog 2 (Feb 2024) mentions the writer's commute is 10 minutes by foot.\n\nReasoning:\n\n* Since the writer's commute is 10 minutes by foot, it implies they are walking to work from their home.\n* In Blog 1, the writer mentions they have moved to Seattle and are unpacking at their new place.\n* Given that the writer is walking to work, it is likely that their workplace is in the same city as their home.\n* Therefore, since the writer's home is in Seattle, it is reasonable to conclude that 'Vertex Corp' is also located in Seattle.\n\nFinal answer:\n\n'Vertex Corp' is located in Seattle."

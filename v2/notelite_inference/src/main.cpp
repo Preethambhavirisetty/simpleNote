@@ -48,10 +48,23 @@ int main(int argc, char** argv) {
 
     suppress_llama_internal_logs();
 
+    // Port: --port=N  |  PORT env var  |  default 8081
+    int port = 8081;
+    for (int i = 1; i < argc; i++) {
+        if (std::strncmp(argv[i], "--port=", 7) == 0) {
+            port = std::atoi(argv[i] + 7);
+        } else if (std::strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            port = std::atoi(argv[++i]);
+        }
+    }
+    const char* env_port = std::getenv("PORT");
+    if (env_port && env_port[0]) port = std::atoi(env_port);
+
     httplib::Server svr;
     register_routes(svr, mode, api_key);
 
-    std::cout << "Server: http://localhost:8081 (mode=" << (mode == ServiceMode::Embedding ? "embedding" : "summarization") << ")\n";
-    svr.listen("0.0.0.0", 8081);
+    std::cout << "Server: http://0.0.0.0:" << port
+              << " (mode=" << (mode == ServiceMode::Embedding ? "embedding" : "summarization") << ")\n";
+    svr.listen("0.0.0.0", port);
     return 0;
 }

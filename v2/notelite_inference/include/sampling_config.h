@@ -49,6 +49,22 @@ namespace SamplingPresets {
         .max_predict = 512
     };
 
+    // Reasoning (Llama-3.1-8B-Instruct) ─────────────────────────────────────
+    // Near-deterministic for consistent step-by-step output.
+    // No repetition penalty: reasoning naturally reuses key terms (penalising
+    // them breaks logical chains).  Token budget is generous enough for CoT but
+    // capped to avoid rambling.
+    static const SamplingConfig REASONING = {
+        .temperature = 0.15f,
+        .top_p = 0.9f,
+        .top_k = 0,              // top_p alone is sufficient at near-zero temp
+        .repetition_penalty = 1.0f,
+        .repeat_last_n = 0,
+        .min_tokens = 0,
+        .max_tokens = 1024,
+        .max_predict = 1024
+    };
+
     // For query_parsing: low temp for deterministic, structured output
     static const SamplingConfig BALANCED_0_1 = {
         .temperature = 0.0f,

@@ -9,6 +9,7 @@ from core.config import AGENT_API_KEY
 from core.contracts import AccessContext
 from services.storage_service import VectorStore
 from llama_index.core import Settings
+from llama_index.core.llms import ChatMessage, MessageRole
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -93,7 +94,7 @@ def get_context(request: RetrieveRequest):
     return {"context": context}
 
 
-@router.post('/retrieve')
+@router.post('/chat')
 def ask_llm(request: RetrieveRequest):
     access_context = AccessContext(
         user_id=request.user_id,
@@ -108,12 +109,22 @@ def ask_llm(request: RetrieveRequest):
         )
 
     context = "\n\n".join(doc.text for doc in results)
-    prompt = (
-        "System: You are a factual assistant. Answer the Question using ONLY the provided Context. "
-        "If the answer is not explicitly in the context, respond with: 'I am sorry, but I do not have enough information in your blogs to answer that.'\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {request.query}\n"
-        "Answer:"
-    )
-    response = Settings.llm.complete(prompt)
-    return response.text
+
+    # Use chat() with explicit roles so the server applies the Llama-3.1
+    # chat template correctly (system → user → assistant turn).
+    # The system message primes chain-of-thought; the user message contains
+    # the grounding context and the question.
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=(
+                "You are a personal assistant. Answer ONLY using the provided context. Connect information across different notes to answer accurately."
+            ),
+        ),
+        ChatMessage(
+            role=MessageRole.USER,
+            content=f"Context:\n{context}\n\nQuestion: {request.query}",
+        ),
+    ]
+    response = Settings.llm.chat(messages)
+    return response.message.content
