@@ -110,10 +110,28 @@ def ask_llm(request: RetrieveRequest):
 
     context = "\n\n".join(doc.text for doc in results)
 
-    # Use chat() with explicit roles so the server applies the Llama-3.1
-    # chat template correctly (system → user → assistant turn).
-    # The system message primes chain-of-thought; the user message contains
-    # the grounding context and the question.
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=(
+                "You are a helpful personal assistant that answers questions about the user's notes.\n\n"
+                "Rules:\n"
+                "- Answer using ONLY information from the provided context. Never use outside knowledge.\n"
+                "- Be conversational and direct — write naturally, like explaining to a friend.\n"
+                "- If the context does not contain enough information, say so honestly in one sentence.\n"
+                "- Do not invent details, steps, or facts not present in the context."
+            ),
+        ),
+        ChatMessage(
+            role=MessageRole.USER,
+            content=f"Context from my notes:\n{context}\n\nQuestion: {request.query}",
+        ),
+    ]
+    response = Settings.llm.chat(messages)
+    return {"answer": response.message.content}
+
+
+""" Backup prompt
     messages = [
         ChatMessage(
             role=MessageRole.SYSTEM,
@@ -122,9 +140,8 @@ def ask_llm(request: RetrieveRequest):
                 "Follow every rule exactly:\n\n"
                 "1. NEVER use knowledge from outside the provided context. If it is not in the context, it does not exist.\n"
                 "2. Do NOT add, invent, or embellish any step, fact, or detail that is not explicitly stated in the context.\n"
-                "If an item is listed in the context but its use is not described, do not invent a use for it."
-                "3. If the context contains conflicting rules, identify the conflict. Use the specific/emergency guidance as an exception to the general/safety guidance."
-                "If the context provides a priority (e.g., 'survival is the top priority'), follow that hierarchy. If no hierarchy exists, state that the rules are in direct conflict."
+                "3. If the context contains conflicting rules or guidance, state both sides and the conflict clearly. "
+                "Do NOT resolve the conflict using outside knowledge or personal judgment.\n"
                 "4. If the context lacks enough information to answer, respond with exactly: "
                 "'The provided context does not contain enough information to answer this question.'\n\n"
                 "Always structure your response in this exact format:\n"
@@ -142,11 +159,10 @@ def ask_llm(request: RetrieveRequest):
             ),
         ),
     ]
-    response = Settings.llm.chat(messages)
-    return response.message.content
+"""
 
 
-""" Backup prompt
+""" Failed
     messages = [
         ChatMessage(
             role=MessageRole.SYSTEM,
@@ -155,8 +171,9 @@ def ask_llm(request: RetrieveRequest):
                 "Follow every rule exactly:\n\n"
                 "1. NEVER use knowledge from outside the provided context. If it is not in the context, it does not exist.\n"
                 "2. Do NOT add, invent, or embellish any step, fact, or detail that is not explicitly stated in the context.\n"
-                "3. If the context contains conflicting rules or guidance, state both sides and the conflict clearly. "
-                "Do NOT resolve the conflict using outside knowledge or personal judgment.\n"
+                "If an item is listed in the context but its use is not described, do not invent a use for it."
+                "3. If the context contains conflicting rules, identify the conflict. Use the specific/emergency guidance as an exception to the general/safety guidance."
+                "If the context provides a priority (e.g., 'survival is the top priority'), follow that hierarchy. If no hierarchy exists, state that the rules are in direct conflict."
                 "4. If the context lacks enough information to answer, respond with exactly: "
                 "'The provided context does not contain enough information to answer this question.'\n\n"
                 "Always structure your response in this exact format:\n"

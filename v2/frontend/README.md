@@ -4,6 +4,9 @@ cd frontend
 npm install -D tailwindcss@3 postcss autoprefixer
 npx tailwindcss init -p
 
+lsof -ti :8081 | xargs kill -9
+./build/inference_api
+
 ```
 src/
 ├── api/

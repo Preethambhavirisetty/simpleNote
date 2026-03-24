@@ -34,7 +34,9 @@ export const useChatStore = create(
             tenant_id: user?.id,
           })
 
-          const answer = data?.answer ?? data?.result ?? JSON.stringify(data)
+          const answer = typeof data === 'string'
+            ? data
+            : data?.answer ?? data?.result ?? JSON.stringify(data)
           _updateLastMsg(set, { content: answer, isLoading: false })
         } catch (err) {
           _updateLastMsg(set, {

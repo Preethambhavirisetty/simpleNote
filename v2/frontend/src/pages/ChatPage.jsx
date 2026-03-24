@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useChatStore } from '@/stores/chatStore'
+import ReactMarkdown from 'react-markdown';
 
 // ---------- Message bubble ----------
 
@@ -28,7 +29,10 @@ function Message({ msg }) {
             ))}
           </span>
         ) : (
-          <span className="whitespace-pre-wrap">{msg.content}</span>
+          // <span className="whitespace-pre-wrap">{msg.content}</span>
+          <div className="prose prose-sm max-w-none">
+            <ReactMarkdown>{msg.content}</ReactMarkdown>
+          </div>
         )}
         {msg.isStreaming && !msg.isLoading && (
           <span className="ml-0.5 animate-pulse text-indigo-300">▋</span>

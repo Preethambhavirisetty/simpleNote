@@ -61,6 +61,7 @@ def init_llama_index_settings():
         temperature=0.4,          # match BALANCED_0 preset for consistent results
         max_tokens=512,
         is_function_calling_model=False,
+        timeout=300.0,            # cold model load (~30s) + inference can exceed default 60s
     )
 
     Settings.embed_model = HuggingFaceEmbedding(
