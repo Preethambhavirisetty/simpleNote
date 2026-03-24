@@ -118,13 +118,60 @@ def ask_llm(request: RetrieveRequest):
         ChatMessage(
             role=MessageRole.SYSTEM,
             content=(
-                "You are a personal assistant. Answer ONLY using the provided context. Connect information across different notes to answer accurately."
+                "You are a strict note-retrieval assistant. Your only source of truth is the context below. "
+                "Follow every rule exactly:\n\n"
+                "1. NEVER use knowledge from outside the provided context. If it is not in the context, it does not exist.\n"
+                "2. Do NOT add, invent, or embellish any step, fact, or detail that is not explicitly stated in the context.\n"
+                "If an item is listed in the context but its use is not described, do not invent a use for it."
+                "3. If the context contains conflicting rules, identify the conflict. Use the specific/emergency guidance as an exception to the general/safety guidance."
+                "If the context provides a priority (e.g., 'survival is the top priority'), follow that hierarchy. If no hierarchy exists, state that the rules are in direct conflict."
+                "4. If the context lacks enough information to answer, respond with exactly: "
+                "'The provided context does not contain enough information to answer this question.'\n\n"
+                "Always structure your response in this exact format:\n"
+                "Evidence:\n- [list every relevant fact from the context verbatim or as a close paraphrase]\n\n"
+                "Reasoning:\n[step-by-step explanation using only the listed evidence]\n\n"
+                "Answer:\n[final answer, one or two sentences]"
             ),
         ),
         ChatMessage(
             role=MessageRole.USER,
-            content=f"Context:\n{context}\n\nQuestion: {request.query}",
+            content=(
+                f"Context:\n{context}\n\n"
+                f"Question: {request.query}\n\n"
+                "Remember: use ONLY the context above. Do not add anything the context does not say."
+            ),
         ),
     ]
     response = Settings.llm.chat(messages)
     return response.message.content
+
+
+""" Backup prompt
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=(
+                "You are a strict note-retrieval assistant. Your only source of truth is the context below. "
+                "Follow every rule exactly:\n\n"
+                "1. NEVER use knowledge from outside the provided context. If it is not in the context, it does not exist.\n"
+                "2. Do NOT add, invent, or embellish any step, fact, or detail that is not explicitly stated in the context.\n"
+                "3. If the context contains conflicting rules or guidance, state both sides and the conflict clearly. "
+                "Do NOT resolve the conflict using outside knowledge or personal judgment.\n"
+                "4. If the context lacks enough information to answer, respond with exactly: "
+                "'The provided context does not contain enough information to answer this question.'\n\n"
+                "Always structure your response in this exact format:\n"
+                "Evidence:\n- [list every relevant fact from the context verbatim or as a close paraphrase]\n\n"
+                "Reasoning:\n[step-by-step explanation using only the listed evidence]\n\n"
+                "Answer:\n[final answer, one or two sentences]"
+            ),
+        ),
+        ChatMessage(
+            role=MessageRole.USER,
+            content=(
+                f"Context:\n{context}\n\n"
+                f"Question: {request.query}\n\n"
+                "Remember: use ONLY the context above. Do not add anything the context does not say."
+            ),
+        ),
+    ]
+"""
