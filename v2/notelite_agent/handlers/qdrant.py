@@ -3,7 +3,7 @@ from qdrant_client import QdrantClient, models
 from llama_index.core import Document as LlamaDocument
 from llama_index.core import Settings
 from handlers.base import DBHandler
-from core.config import QDRANT_COLLECTION
+from core.config import QDRANT_COLLECTION, QDRANT_URL
 
 COLLECTION_NAME = QDRANT_COLLECTION
 
@@ -30,12 +30,12 @@ class QdrantHandler(DBHandler):
             ),
         )
 
-    def connect(self, embedder, persist_directory):
-        self._client = QdrantClient(path=persist_directory)
+    def connect(self, embedder, persist_directory=None):
+        self._client = QdrantClient(url=QDRANT_URL)
         self._ensure_collection()
 
-    def upsert(self, llama_docs, doc_id, persist_directory):
-        self._client = QdrantClient(path=persist_directory)
+    def upsert(self, llama_docs, doc_id, persist_directory=None):
+        self._client = QdrantClient(url=QDRANT_URL)
         self._ensure_collection()
         # If doc_id exists, delete all prior chunks first to avoid stale retrieval.
         doc_filter = models.Filter(

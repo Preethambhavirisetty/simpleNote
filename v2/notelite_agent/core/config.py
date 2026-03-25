@@ -22,6 +22,7 @@ RERANKER_MODEL = _require_env("RERANKER_MODEL") # "cross-encoder/ms-marco-MiniLM
 VECTOR_DB = _require_env("VECTOR_DB")
 BREAKPOINT_PERCENTILE = int(_require_env("BREAKPOINT_PERCENTILE"))
 QDRANT_COLLECTION = _require_env("QDRANT_COLLECTION")
+QDRANT_URL = _require_env("QDRANT_URL")
 
 LLM_API_BASE = _require_env("LLM_API_BASE")
 LLM_API_KEY = _require_env("LLM_API_KEY")
