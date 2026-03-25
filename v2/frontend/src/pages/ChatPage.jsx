@@ -15,7 +15,7 @@ function Message({ msg }) {
             ? 'bg-indigo-600 text-white rounded-br-sm'
             : msg.isError
             ? 'bg-red-950/50 border border-red-900/40 text-red-300 rounded-bl-sm'
-            : 'bg-zinc-800 text-zinc-200 rounded-bl-sm'
+            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-bl-sm'
         }`}
       >
         {msg.isLoading ? (
@@ -46,7 +46,7 @@ function Message({ msg }) {
 
 function ModeToggle({ mode, onChange }) {
   return (
-    <div className="flex bg-zinc-800 rounded-lg p-0.5 text-xs">
+    <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 text-xs">
       {[
         { key: 'rag', label: 'RAG' },
         { key: 'stream', label: 'Stream' },
@@ -55,7 +55,7 @@ function ModeToggle({ mode, onChange }) {
           key={key}
           onClick={() => onChange(key)}
           className={`px-3 py-1 rounded-md transition-colors ${
-            mode === key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+            mode === key ? 'bg-indigo-600 text-white' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'
           }`}
         >
           {label}
@@ -107,9 +107,9 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-3 border-b border-zinc-800 flex items-center justify-between">
+      <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
         <div>
-          <h1 className="text-sm font-medium text-zinc-200">Chat</h1>
+          <h1 className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Chat</h1>
           <p className="text-xs text-zinc-500">
             {mode === 'rag' ? 'RAG — retrieves context from your notes' : 'Stream — direct model completions'}
           </p>
@@ -118,7 +118,7 @@ export default function ChatPage() {
           <ModeToggle mode={mode} onChange={setMode} />
           <button
             onClick={clearMessages}
-            className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 rounded transition-colors"
+            className="text-xs text-zinc-500 dark:text-zinc-600 hover:text-zinc-800 dark:hover:text-zinc-300 px-2 py-1 rounded transition-colors"
           >
             Clear
           </button>
@@ -129,8 +129,8 @@ export default function ChatPage() {
       <div className="flex-1 overflow-y-auto px-6 py-6">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center gap-2">
-            <p className="text-zinc-500 text-sm">Ask anything about your notes</p>
-            <p className="text-zinc-600 text-xs max-w-xs">
+            <p className="text-zinc-500 dark:text-zinc-500 text-sm">Ask anything about your notes</p>
+            <p className="text-zinc-400 dark:text-zinc-600 text-xs max-w-xs">
               RAG retrieves relevant context first · Stream sends directly to the model
             </p>
           </div>
@@ -142,7 +142,7 @@ export default function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="px-6 py-4 border-t border-zinc-800">
+      <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800">
         <div className="flex gap-3 items-end">
           <textarea
             ref={textareaRef}
@@ -151,7 +151,7 @@ export default function ChatPage() {
             onKeyDown={handleKeyDown}
             placeholder="Ask a question… (Enter to send · Shift+Enter for newline)"
             rows={1}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 resize-none transition-colors"
+            className="flex-1 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-indigo-500 resize-none transition-colors"
             style={{ maxHeight: '180px', overflowY: 'auto' }}
           />
           <button

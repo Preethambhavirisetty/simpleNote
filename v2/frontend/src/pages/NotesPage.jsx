@@ -174,13 +174,13 @@ function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
   }, [openMenuId])
 
   return (
-    <div className="w-64 flex flex-col border-r border-zinc-800 bg-zinc-900 shrink-0">
-      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-zinc-300">Notes</h2>
+    <div className="w-64 flex flex-col border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
+      <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Notes</h2>
         <button
           onClick={onNew}
           title="New note"
-          className="text-zinc-500 hover:text-zinc-200 w-6 h-6 flex items-center justify-center rounded transition-colors"
+          className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 w-6 h-6 flex items-center justify-center rounded transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
@@ -196,24 +196,26 @@ function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
         )}
 
         {!isLoading && notes.length === 0 && (
-          <p className="text-xs text-zinc-600 text-center mt-10 px-4">
+          <p className="text-xs text-zinc-500 dark:text-zinc-600 text-center mt-10 px-4">
             No notes yet — click + to create one
           </p>
         )}
 
         {notes.map((note) => (
-          <div key={note.id} className="relative group border-b border-zinc-800/50">
+          <div key={note.id} className="relative group border-b border-zinc-200/60 dark:border-zinc-800/50">
             <button
               onClick={() => note.id && onSelect(note.id)}
               className={`w-full text-left px-4 py-3 pr-8 transition-colors ${
-                activeId === note.id ? 'bg-zinc-800' : 'hover:bg-zinc-800/40'
+                activeId === note.id
+                  ? 'bg-zinc-100 dark:bg-zinc-800'
+                  : 'hover:bg-zinc-100/70 dark:hover:bg-zinc-800/40'
               }`}
             >
-              <p className="text-sm text-zinc-200 font-medium truncate">{note.title || 'Untitled'}</p>
+              <p className="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate">{note.title || 'Untitled'}</p>
               {note.description && (
                 <p className="text-xs text-zinc-500 mt-0.5 truncate">{note.description}</p>
               )}
-              <p className="text-[11px] text-zinc-600 mt-1">
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-600 mt-1">
                 {new Date(note.updated_at ?? note.created_at).toLocaleDateString()}
               </p>
             </button>
@@ -221,8 +223,8 @@ function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
             <button
               data-note-menu
               onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === note.id ? null : note.id) }}
-              className={`absolute right-2 top-3 w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-700 transition-colors ${
-                openMenuId === note.id ? 'opacity-100 text-zinc-300' : 'opacity-0 group-hover:opacity-100 text-zinc-500'
+              className={`absolute right-2 top-3 w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
+                openMenuId === note.id ? 'opacity-100 text-zinc-600 dark:text-zinc-300' : 'opacity-0 group-hover:opacity-100 text-zinc-400 dark:text-zinc-500'
               }`}
             >
               <ThreeDotsIcon />
@@ -231,11 +233,11 @@ function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
             {openMenuId === note.id && (
               <div
                 data-note-menu
-                className="absolute right-2 top-8 z-50 mt-0.5 w-28 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden"
+                className="absolute right-2 top-8 z-50 mt-0.5 w-28 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl overflow-hidden"
               >
                 <button
                   onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); onDelete(note.id) }}
-                  className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-zinc-700 hover:text-red-300 transition-colors"
+                  className="w-full text-left px-3 py-2 text-xs text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
                 >
                   Delete
                 </button>
@@ -312,7 +314,7 @@ function NoteEditor({ note, onSave, isSaving }) {
   if (!note) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-zinc-600">Select a note or create a new one</p>
+        <p className="text-sm text-zinc-400 dark:text-zinc-600">Select a note or create a new one</p>
       </div>
     )
   }
@@ -320,14 +322,14 @@ function NoteEditor({ note, onSave, isSaving }) {
   return (
     <div className="flex-1 flex flex-col min-w-0">
       {/* Title bar */}
-      <div className="px-6 py-3 border-b border-zinc-800 flex items-center gap-3 shrink-0">
+      <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-3 shrink-0">
         <input
           value={title}
           onChange={handleTitleChange}
           placeholder="Untitled"
-          className="flex-1 bg-transparent text-lg font-semibold text-zinc-100 placeholder-zinc-600 focus:outline-none"
+          className="flex-1 bg-transparent text-lg font-semibold text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none"
         />
-        <span className="text-[11px] text-zinc-600 shrink-0">
+        <span className="text-[11px] text-zinc-400 dark:text-zinc-600 shrink-0">
           {isSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}
         </span>
       </div>
