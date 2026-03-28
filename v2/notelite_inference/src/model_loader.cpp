@@ -73,24 +73,22 @@ static bool recreate_context(ModelContext* mc) {
     return mc->ctx != nullptr;
 }
 
-// ── Text generation ───────────────────────────────────────────────────────────
+// ── Text generation (internal) ────────────────────────────────────────────────
+//
+// Returns the generated text, or a string beginning with "Error:" on failure.
+// `needs_recovery` is set to true when a decode failure leaves the context in a
+// corrupt state that llama_memory_clear alone cannot fix.
 
-std::string generate_text(ModelContext* mc, const std::string& prompt,
-                          const SamplingConfig& config, bool add_bos) {
+static std::string generate_text_impl(ModelContext* mc, const std::string& prompt,
+                                      const SamplingConfig& config, bool add_bos,
+                                      bool& needs_recovery) {
+    needs_recovery = false;
+
     if (!mc || !mc->model || !mc->ctx) {
         std::cerr << "Invalid model context\n";
         return "Error: Invalid model context";
     }
 
-    // Clear KV cache and recreate context to give each request a clean slate.
-    if (!recreate_context(mc)) {
-        std::cerr << "Failed to recreate context\n";
-        return "Error: Failed to reset context";
-    }
-
-    // If the caller hasn't applied a chat template, wrap with a minimal one so
-    // the model at least sees instruction markers.  Templates that already embed
-    // BOS (Llama-3 or Mistral) are detected here so we never double-wrap.
     std::string final_prompt = prompt;
     bool already_formatted =
         (prompt.find("[INST]")              != std::string::npos) ||
@@ -103,7 +101,6 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
 
     const llama_vocab* vocab = llama_model_get_vocab(mc->model);
 
-    // ── Tokenise ──────────────────────────────────────────────────────────────
     // parse_special must mirror add_bos:
     //   add_bos=false → caller provided a full chat template that embeds special
     //                   tokens as text (e.g. "<|eot_id|>"). We MUST parse them as
@@ -141,9 +138,20 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
     }
     tokens.resize(static_cast<size_t>(n_tokens));
 
-    // ── Prefill (batch-decode all prompt tokens) ───────────────────────────────
-    const int batch_cap = static_cast<int>(mc->ctx_params.n_ctx);
-    llama_batch batch   = llama_batch_init(batch_cap, 0, 1);
+    // ── Prefill ──────────────────────────────────────────────────────────────
+    const int n_ctx = static_cast<int>(mc->ctx_params.n_ctx);
+    const int max_prompt_tokens = n_ctx - 1;
+
+    if (n_tokens > max_prompt_tokens) {
+        std::cerr << "Prompt too long (" << n_tokens << " tokens > " << max_prompt_tokens
+                  << "); truncating to last " << max_prompt_tokens << " tokens.\n";
+        int offset = n_tokens - max_prompt_tokens;
+        tokens.erase(tokens.begin(), tokens.begin() + offset);
+        n_tokens = max_prompt_tokens;
+    }
+
+    const int batch_cap = n_ctx;
+    llama_batch batch = llama_batch_init(batch_cap, 0, 1);
 
     for (int i = 0; i < n_tokens; i++) {
         batch.token  [batch.n_tokens] = tokens[i];
@@ -157,16 +165,16 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
         batch.logits[batch.n_tokens - 1] = true;
 
     if (llama_decode(mc->ctx, batch) != 0) {
-        std::cerr << "Failed to decode prompt\n";
+        std::cerr << "Prefill decode failed (n_tokens=" << n_tokens << ")\n";
         llama_batch_free(batch);
+        needs_recovery = true;
         return "Error: Failed to decode prompt";
     }
 
-    // ── Sampling & generation loop ────────────────────────────────────────────
+    // ── Sampling & generation loop ───────────────────────────────────────────
     std::string output;
-    int n_cur     = n_tokens;
-    int n_predict = config.max_predict;
-    int min_tokens = config.min_tokens;
+    int n_cur = n_tokens;
+    const int generation_limit = std::min(config.max_predict, n_ctx - n_tokens - 1);
 
     std::vector<llama_token> recent_tokens;
     if (config.repeat_last_n > 0)
@@ -174,26 +182,25 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
 
     const int n_vocab = static_cast<int>(llama_vocab_n_tokens(vocab));
 
-    for (int i = 0; i < n_predict; i++) {
+    for (int i = 0; i < generation_limit; i++) {
         float* logits = llama_get_logits_ith(mc->ctx, batch.n_tokens - 1);
         if (!logits) {
             std::cerr << "Failed to get logits at step " << i << "\n";
+            needs_recovery = true;
             break;
         }
 
         llama_token id = 0;
 
         if (config.temperature <= 0.01f) {
-            // ── Greedy ───────────────────────────────────────────────────────
+            id = 0;
             float max_logit = logits[0];
             for (int j = 1; j < n_vocab; j++) {
                 if (logits[j] > max_logit) { max_logit = logits[j]; id = j; }
             }
         } else {
-            // ── Sampled (temperature + repetition penalty + top-k + top-p) ──
             std::vector<float> adj(logits, logits + n_vocab);
 
-            // Repetition penalty
             if (config.repetition_penalty != 1.0f && !recent_tokens.empty()) {
                 for (llama_token tok : recent_tokens) {
                     if (tok >= 0 && tok < n_vocab) {
@@ -204,12 +211,10 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
                 }
             }
 
-            // Temperature scaling
             std::vector<float> tl(n_vocab);
             for (int j = 0; j < n_vocab; j++)
                 tl[j] = adj[j] / config.temperature;
 
-            // Top-k masking (before softmax for efficiency)
             if (config.top_k > 0 && config.top_k < n_vocab) {
                 std::vector<std::pair<float, int>> lx;
                 lx.reserve(n_vocab);
@@ -220,7 +225,6 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
                     tl[lx[j].second] = -std::numeric_limits<float>::infinity();
             }
 
-            // Numerically-stable softmax: subtract max of *scaled* logits.
             float max_tl = *std::max_element(tl.begin(), tl.end());
             std::vector<float> probs(n_vocab);
             float sum = 0.0f;
@@ -231,7 +235,6 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
             if (sum > 0.0f)
                 for (int j = 0; j < n_vocab; j++) probs[j] /= sum;
 
-            // Top-p (nucleus) masking
             if (config.top_p < 1.0f) {
                 std::vector<std::pair<float, int>> px;
                 px.reserve(n_vocab);
@@ -249,43 +252,40 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
                 for (size_t j = cutoff; j < px.size(); j++)
                     probs[px[j].second] = 0.0f;
 
-                // Re-normalise after nucleus truncation
                 sum = 0.0f;
                 for (int j = 0; j < n_vocab; j++) sum += probs[j];
                 if (sum > 0.0f)
                     for (int j = 0; j < n_vocab; j++) probs[j] /= sum;
             }
 
-            // Sample from the final distribution
             static thread_local std::mt19937 rng(std::random_device{}());
             float r = std::uniform_real_distribution<float>(0.0f, 1.0f)(rng);
             float cumsum = 0.0f;
+            int fallback_id = 0;
+            float fallback_prob = -1.0f;
+            bool sampled = false;
             for (int j = 0; j < n_vocab; j++) {
+                if (probs[j] > fallback_prob) { fallback_prob = probs[j]; fallback_id = j; }
                 cumsum += probs[j];
-                if (r <= cumsum) { id = j; break; }
+                if (!sampled && r <= cumsum) { id = j; sampled = true; }
             }
+            if (!sampled) id = fallback_id;
         }
 
-        // Track recent tokens for repetition penalty
         if (config.repeat_last_n > 0) {
             recent_tokens.push_back(id);
             if (recent_tokens.size() > static_cast<size_t>(config.repeat_last_n))
                 recent_tokens.erase(recent_tokens.begin());
         }
 
-        // ① EOG check BEFORE text conversion: <|eot_id|>, <|end_of_text|>, EOS, etc.
-        //   With parse_special=true these fire as real token IDs, not text.
-        //   We break unconditionally — the model only emits EOG when it is done.
         if (llama_vocab_is_eog(vocab, id))
             break;
 
-        // ② Convert token ID → UTF-8 (special=false → control tokens return empty)
         char buf[256];
         int n = llama_token_to_piece(vocab, id, buf, static_cast<int32_t>(sizeof(buf)), 0, false);
         if (n > 0 && n < static_cast<int>(sizeof(buf)))
             output.append(buf, static_cast<size_t>(n));
 
-        // Next-token batch
         batch.n_tokens = 0;
         batch.token  [0] = id;
         batch.pos    [0] = n_cur;
@@ -296,18 +296,49 @@ std::string generate_text(ModelContext* mc, const std::string& prompt,
         n_cur++;
 
         if (llama_decode(mc->ctx, batch) != 0) {
-            std::cerr << "Decode failed at step " << i << "\n";
+            std::cerr << "Decode failed at step " << i
+                      << " (n_cur=" << n_cur << "/" << n_ctx << ")\n";
+            needs_recovery = true;
             break;
         }
     }
 
     llama_batch_free(batch);
 
-    // Trim leading/trailing whitespace that Llama-3 sometimes prefixes.
     size_t s = output.find_first_not_of(" \t\n\r");
     if (s == std::string::npos) return "";
     size_t e = output.find_last_not_of(" \t\n\r");
     return output.substr(s, e - s + 1);
+}
+
+// ── Public entry point with automatic recovery ──────────────────────────────
+
+std::string generate_text(ModelContext* mc, const std::string& prompt,
+                          const SamplingConfig& config, bool add_bos) {
+    // Fast path: clear only the KV cache (preserves Metal pipeline state).
+    llama_memory_clear(llama_get_memory(mc->ctx), true);
+
+    bool needs_recovery = false;
+    std::string result = generate_text_impl(mc, prompt, config, add_bos, needs_recovery);
+
+    if (needs_recovery) {
+        // After a decode failure the context is corrupted beyond what
+        // llama_memory_clear can fix.  Destroy and recreate the full context
+        // (expensive, but recovers from any internal state corruption).
+        std::cerr << "Context corrupted — recreating (one-time recovery)...\n";
+        if (!recreate_context(mc)) {
+            std::cerr << "Fatal: could not recreate context\n";
+            return result;  // return whatever partial output we got
+        }
+        // Retry the same request on the fresh context.
+        needs_recovery = false;
+        result = generate_text_impl(mc, prompt, config, add_bos, needs_recovery);
+        if (needs_recovery) {
+            std::cerr << "Decode still failing after context recovery\n";
+        }
+    }
+
+    return result;
 }
 
 // ── Embeddings ────────────────────────────────────────────────────────────────

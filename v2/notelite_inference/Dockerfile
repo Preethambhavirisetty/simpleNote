@@ -15,13 +15,15 @@ RUN if [ ! -f llama.cpp/CMakeLists.txt ]; then \
     git clone --depth 1 https://github.com/ggml-org/llama.cpp.git; fi
 
 RUN mkdir -p build && cd build \
-    && cmake .. -DCMAKE_BUILD_TYPE=Release \
-    && make -j$(nproc)
+    && cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+    && make -j2
 
-# Runtime
+# Runtime — static build needs no shared libs, just the binary
 FROM ubuntu:22.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libstdc++6 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

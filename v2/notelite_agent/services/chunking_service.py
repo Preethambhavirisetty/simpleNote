@@ -1,9 +1,15 @@
 import re
 import hashlib
+import logging
+import httpx
 from llama_index.core.node_parser import SemanticSplitterNodeParser
 from llama_index.core import Document as LlamaDocument
 from llama_index.core import Settings
-from core.config import BREAKPOINT_PERCENTILE, MAX_CHUNK_SIZE, CHUNK_OVERLAP
+from core.config import BREAKPOINT_PERCENTILE, MAX_CHUNK_SIZE, CHUNK_OVERLAP, LLM_API_BASE, LLM_API_KEY
+
+log = logging.getLogger(__name__)
+
+_MISTRAL_TIMEOUT = 120.0  # seconds — allow for cold-start model load
 
 _semantic_splitter = None
 
@@ -408,41 +414,364 @@ def split_into_sections(text):
     return chunks
 
 
+def _get_keywords(chunk):
+    result = []
+    words = re.findall(r'\w+', chunk.strip())  # findall returns a list; re.search returns a Match
+    for word in words:
+        if len(word) >= 6:
+            result.append(word)
+    return result
+
+
+def extract_keywords(text=""):
+    # keywords = []
+    # for chunk in chunks:
+    #     keywords.extend(_get_keywords(chunk))
+    # return ', '.join(keywords)
+    import yake
+
+    kw_extractor = yake.KeywordExtractor(lan="en", n=2, top=5)
+    keywords = kw_extractor.extract_keywords(text)
+
+    # Returns a list of (keyword, score) - lower score is more relevant in YAKE
+    for kw, score in keywords:
+        print(f"{kw}: {score}")
+
+def extract_keywords2(text):
+    import spacy
+
+    nlp = spacy.load("en_core_web_sm")
+    doc = nlp(text)
+
+    # Extract Proper Nouns (PROPN) or specific Entities (ORG, PERSON, GPE)
+    entities = [ent.text for ent in doc.ents if ent.label_ in ["ORG", "PRODUCT"]]
+
+    print(entities)
+
+
+_USELESS_SUMMARY_PATTERNS = re.compile(
+    r"""
+    no\s+(text|meaningful\s+summary|content|information)\s*(provided|to\s+provide|available|found)|
+    nothing\s+to\s+summarize|
+    text\s+is\s+(too\s+short|missing)|
+    these\s+sentences\s+are\s+for\s+testing|
+    no\s+summary\s+to\s+provide|
+    \[no\s+text\s+provided|
+    cannot\s+summarize|
+    please\s+(provide|give)\s+(the\s+)?text|
+    i\s+cannot\s+summarize|
+    without\s+the\s+text\s+provided|
+    provide\s+the\s+text\s+for\s+(me\s+to\s+)?summariz
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_MIN_SUMMARY_WORDS = 5   # reject anything shorter than this
+_MIN_CHUNK_CHARS_FOR_SUMMARY = 30  # skip Mistral call entirely for very short chunks
+
+
+def _is_useless_summary(text: str) -> bool:
+    """Return True when the model produced a refusal/placeholder instead of a real summary."""
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if len(stripped.split()) < _MIN_SUMMARY_WORDS:
+        return True
+    if _USELESS_SUMMARY_PATTERNS.search(stripped):
+        return True
+    return False
+
+
+def _summarize_chunk(text: str) -> str:
+    """Call Mistral (routed via purpose=query_parsing) for a concise 1-2 sentence summary.
+    Returns an empty string on any failure or when the model produces a placeholder refusal,
+    so the caller can fall back gracefully.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return ""
+    if len(stripped) < _MIN_CHUNK_CHARS_FOR_SUMMARY:
+        log.debug("Chunk too short for summarization (%d chars): %r", len(stripped), stripped[:40])
+        return ""
+    try:
+        with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
+            resp = client.post(
+                f"{LLM_API_BASE}/chat/completions",
+                params={"purpose": "query_parsing"},
+                headers={
+                    "Authorization": f"Bearer {LLM_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "mistral-7b",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a summarization assistant. "
+                                "Write 1-2 sentences that capture the main idea of the text. "
+                                "If the text is a heading, label, or single phrase with no body, "
+                                "describe what kind of content it introduces. "
+                                "Never say 'no text provided' or 'no summary to provide' — "
+                                "always produce a real sentence about the content. "
+                                "Output only the summary — nothing else."
+                            ),
+                        },
+                        {"role": "user", "content": text},
+                    ],
+                    "max_tokens": 80,
+                    "temperature": 0.1,
+                },
+            )
+        resp.raise_for_status()
+        summary = resp.json()["choices"][0]["message"]["content"].strip()
+        if _is_useless_summary(summary):
+            log.debug("Discarding useless summary (text len=%d): %r", len(text), summary[:80])
+            return ""
+        return summary
+    except Exception as exc:
+        log.warning("Mistral summary failed (text len=%d): %s", len(text), exc)
+        return ""  # caller falls back to chunk text as summary vector
+
+
+def handle_chunk_summaries(chunks: list) -> tuple:
+    """Summarize every chunk with Mistral, then produce one overall document summary.
+
+    Returns:
+        chunk_summaries   one string per chunk (same order); empty string if Mistral failed.
+        overall_summary   single summary combining all chunk summaries; empty string on failure.
+
+    The caller must not fail if summaries are empty — the named-vector upsert falls back to
+    embedding the raw chunk text for the summary vector in that case.
+    """
+    chunk_summaries = [_summarize_chunk(c) for c in chunks]
+    combined = " ".join(s for s in chunk_summaries if s)
+    overall_summary = _summarize_chunk(combined) if combined else ""
+    return chunk_summaries, overall_summary
+
+
 def get_document_objects(data):
+    """ Hierarchical RAG System (Production-Ready Design)
+    This system uses two vector collections:
+    1. doc_summaries:
+    - doc_id
+    - text = (overall_summary + top_keywords + generated_questions)
+    - metadata
+
+    2. doc_chunks:
+    - doc_id
+    - text = (raw_chunk_text)
+    - metadata:
+            - keywords
+            - parent_summary  # critical for local + global context
+            - additional metadata fields
+
+    --------------------------------------------------
+    1. INGESTION PIPELINE (Bottom-Up, Recursive Summarization)
+
+    Step 1: Chunk Processing: which we already have
+
+    Step 2: Keyword Extraction
+    - For each chunk:
+        - Extract keywords using hybrid approach:
+            - YAKE (statistical)
+            - spaCy (linguistic)
+        - Store keywords in chunk metadata.
+
+    Step 3: Controlled Chunk Merging for Summarization
+    - Combine adjacent chunks until reaching a token cap (e.g., 50 tokens).
+    - Example:
+        - chunk1 (10 tokens) + chunk2 (30 tokens) → merged
+        - chunk3 (100 tokens) → standalone
+    - For each merged group:
+        - Call LLM to generate a summary.
+    - Collect all intermediate summaries.
+
+    Step 4: Recursive Summarization
+    - Repeat the merging + summarization process hierarchically:
+        - Summaries → higher-level summaries
+    - Continue until a single "overall_summary" is produced.
+
+    Step 5: Keyword Deduplication (Critical)
+    - Aggregate all extracted keywords across chunks.
+    - Send to LLM with instruction:
+        "Deduplicate into top 15 unique, high-signal themes."
+    - Result: clean, non-redundant keyword set.
+
+    Step 6: Question Generation
+    - Use final overall_summary to generate 2–3 global questions.
+    - These help retrieval via semantic matching.
+
+    Step 7: Storage
+    - doc_summaries:
+        - Store:
+            overall_summary + top_15_keywords + global_questions
+
+    - doc_chunks:
+        - Store:
+            raw chunk text
+            keywords
+            parent_summary (overall_summary or nearest higher-level summary)
+
+    --------------------------------------------------
+    2. RETRIEVAL PIPELINE (Smart Router + Fusion)
+
+    Step 1: Query doc_summaries
+    - Perform semantic search on summaries.
+    - Retrieve top results with similarity scores.
+
+    Step 2: Filtering Logic
+    - Select documents where score > 0.8 → filtered_docs
+
+    - If many matches:
+        - Limit to Top 3 doc_ids (prevents noisy search space)
+
+    Step 3: Score Gap Check (Uniform Document Edge Case)
+    - If (S1 - S2) < 0.05:
+        - Summaries are too similar → system is "confused"
+        - Trigger fallback immediately
+
+    Step 4: Fallback Condition
+    - If all summary scores < 0.7:
+        - Skip summary filtering
+        - Perform global search directly on doc_chunks
+
+    Step 5: Chunk Retrieval
+    - If filtered_docs available:
+        - Query doc_chunks restricted to top doc_ids
+    - Else:
+        - Query all doc_chunks
+
+    - Perform two parallel retrieval strategies:
+        1. Semantic search (vector similarity)
+        2. Keyword/metadata match (lexical)
+
+    Step 6: Fusion (RRF - Reciprocal Rank Fusion)
+    - Combine semantic + lexical results using RRF
+    - Produces robust, hybrid ranking
+
+    --------------------------------------------------
+    3. EDGE CASE HANDLING
+
+    1. Uniform Documents:
+        - Problem: All summaries have similar scores (e.g., legal docs)
+        - Solution:
+            - Use score gap rule: (S1 - S2) < 0.05 → fallback to chunk search
+
+    2. Cross-Document Queries:
+        - Problem: Answer spans multiple documents
+        - Solution:
+            - Always allow top 2–3 doc_ids into chunk retrieval
+
+    3. Keyword Overlap:
+        - Problem: Query keyword exists in chunks but not summaries
+        - Solution:
+            - If summary scores < 0.7 → global chunk fallback
+
+    4. Summary Hallucination / Missing Detail:
+        - Problem: Summary omits critical info
+        - Solution:
+            - ALWAYS include raw chunk text in final LLM context
+            - Never rely solely on summaries
+
+    --------------------------------------------------
+    4. FINAL LLM PROMPT CONSTRUCTION
+
+    - For each retrieved chunk:
+        - Include:
+            - chunk.text (ground truth)
+            - parent_summary (contextual overview)
+
+    - Combine:
+        - Top-ranked chunks (via RRF)
+        - Relevant summaries (if useful)
+
+    - Send to LLM for final answer generation.
+
+    --------------------------------------------------
+    Key Design Principles:
+    - Preserve small but important data (no chunk loss)
+    - Control noise via top-k filtering
+    - Use hybrid retrieval (semantic + lexical)
+    - Always maintain fallback paths
+    - Provide both local (chunk) and global (summary) context
+    """
+
     if 'text' not in data:
         raise ValueError("provide text to get chunks")
     full_text = data['text']
     chunks = split_into_sections(full_text)
+    # Per-chunk summaries + one overall summary (both generated by Mistral).
+    # Both return empty strings when Mistral is unavailable — handled gracefully below.
+    chunk_summaries, overall_summary = handle_chunk_summaries(chunks)
     tenant_id = data.get("tenant_id")
     doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
+
+    def _base_metadata(chunk_id: int, summary: str) -> dict:
+        return {
+            "doc_id": doc_id,
+            "user_id": data['user_id'],
+            "tenant_id": tenant_id,
+            "folder_id": data['folder_id'],
+            "note_id": data['note_id'],
+            "folder_title": data['folder_title'],
+            "note_title": data['note_title'],
+            "description": data['description'],
+            "tags": ','.join(data['tags']),
+            "chunk_id": chunk_id,
+            # Stored for the summary_vec embedding path in the Qdrant handler.
+            # Excluded from LlamaIndex's rendered text template to avoid double-counting.
+            "summary": summary,
+        }
+
+    _EXCLUDED_EMBED = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'summary']
+    _EXCLUDED_LLM   = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'summary']
+
     llama_docs = [
         LlamaDocument(
-            id_= hashlib.sha256(f"{data['user_id']}-{data['folder_id']}-{data['note_id']}-{chunk}".encode()).hexdigest(),
+            id_=hashlib.sha256(
+                f"{data['user_id']}-{data['folder_id']}-{data['note_id']}-{chunk}".encode()
+            ).hexdigest(),
             text=chunk,
-            metadata={
-                "doc_id": doc_id,
-                "user_id": data['user_id'],
-                "tenant_id": tenant_id,
-                "folder_id": data['folder_id'],
-                "note_id": data['note_id'],
-                "folder_title": data['folder_title'],
-                "note_title": data['note_title'],
-                "description": data['description'],
-                "tags": ','.join(data['tags']),
-                "chunk_id": idx
-            },
-            excluded_embed_metadata_keys=['user_id', 'folder_id', 'note_id', 'chunk_id'],
-            excluded_llm_metadata_keys=['user_id', 'folder_id', 'note_id', 'chunk_id'],
+            metadata=_base_metadata(
+                chunk_id=idx,
+                summary=chunk_summaries[idx - 1] if chunk_summaries and idx - 1 < len(chunk_summaries) else "",
+            ),
+            excluded_embed_metadata_keys=_EXCLUDED_EMBED,
+            excluded_llm_metadata_keys=_EXCLUDED_LLM,
             metadata_template="{key}: {value}",
-            text_template="""Context Information:
-{metadata_str}
-
----
-Document Content:
-{content}
-"""
+            text_template="Context Information:\n{metadata_str}\n\n---\nDocument Content:\n{content}\n",
         )
         for idx, chunk in enumerate(chunks, start=1)
     ]
 
+    # Overall-summary document (chunk_id=0): a single point whose text IS the Mistral
+    # summary of the entire note.  It is embedded in both vector spaces so broad queries
+    # like "what is this note about?" surface it before individual chunks.
+    # Skipped when Mistral was unavailable (overall_summary is empty).
+    if overall_summary:
+        overview_doc = LlamaDocument(
+            id_=hashlib.sha256(
+                f"{data['user_id']}-{data['folder_id']}-{data['note_id']}-overview".encode()
+            ).hexdigest(),
+            text=overall_summary,
+            metadata=_base_metadata(chunk_id=0, summary=overall_summary),
+            excluded_embed_metadata_keys=_EXCLUDED_EMBED,
+            excluded_llm_metadata_keys=_EXCLUDED_LLM,
+            metadata_template="{key}: {value}",
+            text_template="Context Information:\n{metadata_str}\n\n---\nDocument Content:\n{content}\n",
+        )
+        llama_docs.insert(0, overview_doc)
+
     return doc_id, llama_docs
+
+
+if __name__ == "__main__":
+    text="""
+It was late summer and the last hot sun of the season had the neighborhood bustling with activity.
+
+Inspector Winston, a Dachshund with a talent for solving mysteries, was lying comfortably on a warm wooden bench near the garden wall. From here, he had a perfect view of both the house and the street so he could pick up a few exciting bits of conversation from the passers-by while making sure he didn’t miss any activity in the kitchen. His family was planning a barbecue for that night. 
+
+“The last barbecue of the season!” said his dad sadly. All Winston could think about was the chance that a piece of sausage might accidentally fall to the ground for him to clean up. 
+    """
+    extract_keywords(text)

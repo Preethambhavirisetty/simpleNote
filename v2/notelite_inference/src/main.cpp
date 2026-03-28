@@ -65,6 +65,10 @@ int main(int argc, char** argv) {
 
     std::cout << "Server: http://0.0.0.0:" << port
               << " (mode=" << (mode == ServiceMode::Embedding ? "embedding" : "summarization") << ")\n";
-    svr.listen("0.0.0.0", port);
+    if (!svr.listen("0.0.0.0", port)) {
+        std::cerr << "ERROR: Failed to bind to port " << port
+                  << " — is another process using it?  (check: lsof -i :" << port << ")\n";
+        return 1;
+    }
     return 0;
 }

@@ -1,7 +1,7 @@
 celery==5.6.2
 psycopg[binary]
 fastapi==0.135.1
-llama-index==0.14.15
+llama-index-core
 llama-index-embeddings-huggingface==0.6.1
 llama-index-llms-openai>=0.7.3
 llama-index-llms-openai-like>=0.7.1

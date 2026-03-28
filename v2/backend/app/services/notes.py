@@ -120,16 +120,30 @@ class NoteService:
     def update(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteUpdate, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
         content_text = extract_text(payload.content) if payload.content is not None else None
-        # Bump version before the update so the committed row carries the new version
-        # and any in-flight ingestion tasks with older versions are discarded by the agent.
-        note.version += 1
+        content_changed = (
+            content_text is not None and content_text != note.content_text
+        )
+
+        if content_changed:
+            note.version += 1
+
         self.repo.update(db, note, payload, content_text)
         db.commit()
         db.refresh(note)
 
-        if content_text:        # content changed -> re-embed + recompute size
-            _dispatch_ingest(self._ingestion_payload(db, note, user_role))
-            _dispatch_compute_size(note.id, content_text)
+        if content_changed:
+            if content_text.strip():
+                _dispatch_ingest(self._ingestion_payload(db, note, user_role))
+                _dispatch_compute_size(note.id, content_text)
+            else:
+                _dispatch_delete({
+                    "userid": str(note.user_id),
+                    "folder_id": str(note.folder_id),
+                    "note_id": str(note.id),
+                    "role": user_role[0] if user_role else "user",
+                    "tenant_id": str(note.user_id),
+                    "version": note.version,
+                })
         return note
 
     def move(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteMoveRequest):

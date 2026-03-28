@@ -3,7 +3,7 @@ import shutil
 import sys
 import importlib
 from rank_bm25 import BM25Okapi
-from core.config import DB_PATH, VECTOR_DB, RERANKER_MODEL
+from core.config import DB_PATH, VECTOR_DB, RERANKER_MODEL, QDRANT_URL
 from core.contracts import AccessContext
 from core.settings import is_llama_index_settings_initialized
 from llama_index.core import Settings
@@ -65,7 +65,15 @@ class VectorStore:
     def _resolve_scope_filter(self, access_context, filter=None):
         return access_context.apply_scope(filter)
 
+    def _is_backend_reachable(self) -> bool:
+        """Return True when a Qdrant server URL is configured or a local store exists."""
+        return bool(QDRANT_URL) or os.path.exists(self._persist_directory)
+
     def _build_bm25_index(self, documents):
+        if not documents:
+            self._bm25 = None
+            self._bm25_docs = []
+            return
         self._bm25_docs = documents
         tokenized = [doc.text.lower().split() for doc in documents]
         self._bm25 = BM25Okapi(tokenized)
@@ -104,7 +112,9 @@ class VectorStore:
             raise TypeError("access_context must be an AccessContext instance.")
         scoped_filter = self._resolve_scope_filter(access_context, filter)
 
-        if not os.path.exists(self._persist_directory):
+        # When using a remote Qdrant server there is no local persist_directory,
+        # so the old os.path.exists guard would silently skip every delete.
+        if not self._is_backend_reachable():
             return 0
 
         self._handler.connect(self._embedder, self._persist_directory)
@@ -116,7 +126,7 @@ class VectorStore:
 
     def _ensure_connected(self):
         if not self._connected:
-            if os.path.exists(self._persist_directory):
+            if self._is_backend_reachable():
                 self.connect()
             else:
                 raise RuntimeError("No vector store found. Call load() to ingest documents first.")

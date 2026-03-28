@@ -64,10 +64,16 @@ def init_llama_index_settings():
         timeout=300.0,            # cold model load (~30s) + inference can exceed default 60s
     )
 
+    # Use /tmp for the model cache — always writable regardless of container user or
+    # volume mount ownership. The model is re-downloaded once per container lifetime.
+    _cache_dir = os.environ.get("HF_HOME", "/tmp/hf_cache")
+    os.makedirs(_cache_dir, exist_ok=True)
+
     Settings.embed_model = HuggingFaceEmbedding(
         model_name=EMBEDDING_MODEL,
         device=EMBEDDING_DEVICE,
         query_instruction="Represent this sentence for searching relevant passages: ",
+        cache_folder=_cache_dir,
     )
 
     Settings.chunk_size    = MAX_CHUNK_SIZE

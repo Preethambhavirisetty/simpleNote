@@ -1,3 +1,5 @@
+celery==5.6.2
+redis==7.3.0
 annotated-types==0.7.0
 bcrypt==5.0.0
 PyJWT==2.12.1

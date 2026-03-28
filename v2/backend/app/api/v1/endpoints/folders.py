@@ -81,5 +81,5 @@ def delete_folder(
     db: Session = Depends(get_postgres_session),
     service: FolderService = Depends(get_folder_service),
 ):
-    service.delete(db, folder_id, current_user.id)
+    service.delete(db, folder_id, current_user.id, user_role=current_user.role)
     return success_response(None, "Folder deleted")

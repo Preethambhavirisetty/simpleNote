@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.celery import celery_app
+from app.core.config import INGESTION_TASK_STRING
 from app.db.postgres.repos.folder import FolderRepository
+from app.db.postgres.repos.note import NoteRepository
 from app.exceptions.base import AppException
 from app.schema.base import ErrorCode
 from app.schema.folder import FolderCreate, FolderUpdate
@@ -54,7 +60,29 @@ class FolderService:
         db.refresh(folder)
         return folder
 
-    def delete(self, db: Session, folder_id: UUID, user_id: UUID):
+    def delete(self, db: Session, folder_id: UUID, user_id: UUID, user_role: Optional[list[str]] = None):
         folder = self._get_or_404(db, folder_id, user_id)
+        role = (user_role[0] if user_role else "user")
+
+        note_repo = NoteRepository()
+        child_notes = note_repo.list(db, user_id, folder_id=folder_id, limit=10000)
+        del_payloads = [
+            {
+                "userid": str(user_id),
+                "folder_id": str(folder_id),
+                "note_id": str(note.id),
+                "role": role,
+                "tenant_id": str(user_id),
+                "version": note.version,
+            }
+            for note in child_notes
+        ]
+
         self.repo.delete(db, folder)
         db.commit()
+
+        for payload in del_payloads:
+            celery_app.send_task(
+                INGESTION_TASK_STRING,
+                kwargs={"action": "delete", **payload},
+            )
