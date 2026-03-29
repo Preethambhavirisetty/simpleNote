@@ -84,8 +84,8 @@ function BubbleBtn({ onClick, isActive, title, children }) {
       title={title}
       className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
         isActive
-          ? 'bg-zinc-700 text-indigo-400'
-          : 'text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100'
+          ? 'bg-zinc-200 dark:bg-zinc-700 text-indigo-600 dark:text-indigo-400'
+          : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100'
       }`}
     >
       {children}
@@ -94,7 +94,7 @@ function BubbleBtn({ onClick, isActive, title, children }) {
 }
 
 function BubbleDivider() {
-  return <span className="w-px h-5 bg-zinc-700 shrink-0" />
+  return <span className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 shrink-0" />
 }
 
 function FloatingToolbar({ editor }) {
@@ -112,7 +112,7 @@ function FloatingToolbar({ editor }) {
         zIndex: 9999,
       }}
     >
-      <div className="flex items-center bg-zinc-800 border border-zinc-700 rounded-lg shadow-2xl overflow-hidden">
+      <div className="flex items-center bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-2xl overflow-hidden">
         <BubbleBtn onClick={() => editor.chain().focus().toggleBold().run()} isActive={editor.isActive('bold')} title="Bold (⌘B)">
           <strong>B</strong>
         </BubbleBtn>

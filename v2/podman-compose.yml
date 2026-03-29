@@ -132,6 +132,7 @@ services:
       QDRANT_COLLECTION:      knowledge
       VECTOR_DB:              qdrant
       EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
+      SPARSE_EMBEDDING_MODEL: Qdrant/bm42-all-minilm-l6-v2-attentions
       EMBEDDING_DEVICE:       cpu
       RERANKER_MODEL:         cross-encoder/ms-marco-MiniLM-L-6-v2
       MAX_CHUNK_SIZE:         "450"
@@ -170,6 +171,7 @@ services:
       QDRANT_COLLECTION:      knowledge
       VECTOR_DB:              qdrant
       EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
+      SPARSE_EMBEDDING_MODEL: Qdrant/bm42-all-minilm-l6-v2-attentions
       EMBEDDING_DEVICE:       cpu
       RERANKER_MODEL:         cross-encoder/ms-marco-MiniLM-L-6-v2
       MAX_CHUNK_SIZE:         "450"

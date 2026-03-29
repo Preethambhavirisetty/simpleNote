@@ -72,65 +72,122 @@ class QdrantHandler(DBHandler):
                 self._create_collection(name)
 
     @staticmethod
-    def _compute_quality_score(text: str, metadata: dict) -> float:
-        """
-        A robust, diverse quality scorer for RAG chunks.
-        Combines: Structure (30%), Content/Length (40%), and Metadata (30%).
+    def _compute_quality_score(
+        text: str,
+        metadata: dict,
+        keywords: list | None = None,
+        entities: list | None = None,
+    ) -> float:
+        """Quality scorer for RAG chunks.
+
+        Weights: Structure 20%, Content 30%, Information Richness 30%, Metadata 20%.
+
+        Information Richness uses per-chunk keyword/entity counts so that
+        chunks with more extractable concepts score higher than ones with
+        generic prose, giving meaningful differentiation across chunks of
+        the same note.
         """
         if not text or not text.strip():
             return 0.0
 
-        # 1. STRUCTURE ANALYSIS (30%)
+        keywords = keywords or []
+        entities = entities or []
+
+        # ── 1. STRUCTURE (20%) ────────────────────────────────────────
         lines = text.strip().splitlines()
         total_lines = len(lines)
-        
-        # Check for meaningful formatting
+
         headings = len(re.findall(r'^#+\s', text, re.MULTILINE))
         bullets = len(re.findall(r'^[\s]*[-*•]\s', text, re.MULTILINE))
-        
-        # Paragraph detection: Are there natural breaks or is it a "wall of text"?
+
         blank_lines = sum(1 for l in lines if not l.strip())
-        # Ideal ratio is ~1 blank line per 5-7 lines of text
-        para_score = 1.0 if (0.05 < (blank_lines / max(total_lines, 1)) < 0.25) else 0.5
-        
+        bl_ratio = blank_lines / max(total_lines, 1)
+        para_score = 1.0 if 0.05 < bl_ratio < 0.25 else 0.5
+
         structure_score = (
-            min(headings / 1, 1.0) * 0.4 +  # Even 1 heading is a great signal
-            min(bullets / 3, 1.0) * 0.3 +   # 3+ bullets indicates a rich list
-            para_score * 0.3
+            min(headings, 2) / 2 * 0.4
+            + min(bullets / 3, 1.0) * 0.3
+            + para_score * 0.3
         )
 
-        # 2. CONTENT & NOISE ANALYSIS (40%)
+        # ── 2. CONTENT & DENSITY (30%) ───────────────────────────────
         words = text.split()
         wc = len(words)
-        
-        # Smooth Sigmoid-like Length Scoring (Penalty for <20 or >800 words)
+
+        # Peaked length curve: best at 100-400 words, tapers outside
         if wc < 20:
-            length_factor = wc / 20 * 0.3  # Linear ramp up to 0.3
-        elif 20 <= wc <= 600:
-            length_factor = 1.0            # "Goldilocks" zone
+            length_factor = wc / 20 * 0.3
+        elif wc < 80:
+            length_factor = 0.6 + 0.4 * ((wc - 20) / 60)
+        elif wc <= 400:
+            length_factor = 1.0
+        elif wc <= 600:
+            length_factor = 1.0 - 0.2 * ((wc - 400) / 200)
         else:
-            length_factor = max(0.4, 1.0 - (wc - 600) / 1000) # Gentle decay
+            length_factor = max(0.4, 0.8 - (wc - 600) / 1000)
 
-        # Information Density: Unique words vs total words
-        # Prevents repetitive "fluff" or keyword stuffing from scoring high
-        unique_ratio = len(set(w.lower() for w in words)) / wc if wc > 0 else 0
-        density_score = min(unique_ratio / 0.6, 1.0) # 60% unique is usually high-quality prose
+        lower_words = [w.lower() for w in words]
+        unique_ratio = len(set(lower_words)) / wc if wc > 0 else 0
+        density_score = min(unique_ratio / 0.55, 1.0)
 
-        # Noise Check: Non-alphanumeric char ratio (filters out code junk/garbage)
-        alnum_ratio = len(re.findall(r'\w', text)) / len(text) if len(text) > 0 else 0
-        noise_penalty = 1.0 if alnum_ratio > 0.6 else alnum_ratio # Penalize if <60% text
+        alnum_chars = sum(c.isalnum() for c in text)
+        alnum_ratio = alnum_chars / len(text) if text else 0
+        noise_penalty = 1.0 if alnum_ratio > 0.6 else alnum_ratio
 
-        content_score = length_factor * 0.5 + density_score * 0.3 + noise_penalty * 0.2
+        # Average sentence length variance (signals well-structured writing)
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        if len(sentences) >= 2:
+            sent_lens = [len(s.split()) for s in sentences]
+            mean_sl = sum(sent_lens) / len(sent_lens)
+            variance = sum((l - mean_sl) ** 2 for l in sent_lens) / len(sent_lens)
+            # Moderate variance (not all same length, not wildly uneven) is best
+            std_dev = variance ** 0.5
+            sent_variety = min(std_dev / 8.0, 1.0)
+        else:
+            sent_variety = 0.3
 
-        # 3. METADATA RICHNESS (30%)
-        # Checks if the chunk is anchored to a source with valid context
+        content_score = (
+            length_factor * 0.35
+            + density_score * 0.30
+            + noise_penalty * 0.15
+            + sent_variety * 0.20
+        )
+
+        # ── 3. INFORMATION RICHNESS (30%) ────────────────────────────
+        # Per-chunk keywords and entities -- the primary differentiator
+        kw_count = len(keywords)
+        ent_count = len(entities)
+
+        kw_score = min(kw_count / 8.0, 1.0)
+        ent_score = min(ent_count / 3.0, 1.0)
+
+        # Proper nouns (capitalized words not at sentence start) as a proxy
+        # for domain specificity when entity extraction is sparse
+        propn_count = sum(
+            1 for i, w in enumerate(words)
+            if w[0].isupper() and i > 0 and not words[i - 1].endswith(('.', '!', '?'))
+        )
+        propn_score = min(propn_count / 6.0, 1.0)
+
+        info_score = kw_score * 0.50 + ent_score * 0.30 + propn_score * 0.20
+
+        # ── 4. METADATA COMPLETENESS (20%) ───────────────────────────
         core_fields = ('note_title', 'folder_title', 'description', 'tags')
-        valid_fields = sum(1 for f in core_fields if metadata.get(f) and str(metadata[f]).strip())
+        valid_fields = sum(
+            1 for f in core_fields
+            if metadata.get(f) and str(metadata[f]).strip()
+        )
         meta_score = valid_fields / len(core_fields)
 
-        # FINAL AGGREGATION
-        final_score = (0.3 * structure_score) + (0.4 * content_score) + (0.3 * meta_score)
-        
+        # ── FINAL ────────────────────────────────────────────────────
+        final_score = (
+            0.20 * structure_score
+            + 0.30 * content_score
+            + 0.30 * info_score
+            + 0.20 * meta_score
+        )
+
         return round(final_score, 3)
 
 
@@ -175,6 +232,7 @@ class QdrantHandler(DBHandler):
             entities = summary_doc.metadata.pop("entities", [])
             quality_score = self._compute_quality_score(
                 summary_doc.text, summary_doc.metadata,
+                keywords=keywords, entities=entities,
             )
             self._client.upsert(
                 collection_name=SUMMARY_COLLECTION,
@@ -216,6 +274,7 @@ class QdrantHandler(DBHandler):
                 entities = doc.metadata.pop("entities", [])
                 quality_score = self._compute_quality_score(
                     doc.text, doc.metadata,
+                    keywords=keywords, entities=entities,
                 )
                 points.append(
                     models.PointStruct(

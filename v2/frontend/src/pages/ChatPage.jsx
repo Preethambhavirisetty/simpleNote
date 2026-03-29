@@ -30,7 +30,7 @@ function Message({ msg }) {
           </span>
         ) : (
           // <span className="whitespace-pre-wrap">{msg.content}</span>
-          <div className="prose prose-sm max-w-none">
+          <div className="prose prose-sm prose-zinc dark:prose-invert max-w-none">
             <ReactMarkdown>{msg.content}</ReactMarkdown>
           </div>
         )}
