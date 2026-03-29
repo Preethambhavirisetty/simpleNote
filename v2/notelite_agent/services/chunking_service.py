@@ -1,10 +1,13 @@
 import re
 import hashlib
 import logging
+from tokenize import generate_tokens
 import httpx
+from collections import Counter
 from llama_index.core.node_parser import SemanticSplitterNodeParser
 from llama_index.core import Document as LlamaDocument
 from llama_index.core import Settings
+from handlers.keyword_extractor import extract_keywords
 from core.config import BREAKPOINT_PERCENTILE, MAX_CHUNK_SIZE, CHUNK_OVERLAP, LLM_API_BASE, LLM_API_KEY
 
 log = logging.getLogger(__name__)
@@ -18,8 +21,33 @@ DIVIDER_LINE_PATTERN = re.compile(r'(?m)^[ \t]*[-*_]{3,}[ \t]*$')
 SENTINEL_LINE_PATTERN = re.compile(r'(?mi)^[ \t]*\[(?:eof|end)\][ \t]*$')
 EMPTY_LIST_ITEM_PATTERN = re.compile(r'(?m)^[ \t]*(?:[*+-]|\d+[.)])[ \t]*$')
 NUMBERED_LINE_PATTERN = re.compile(r'^\s*\d+\.\s+(.+)$')
+_USELESS_SUMMARY_PATTERNS = re.compile(
+    r"""
+    no\s+(text|meaningful\s+summary|content|information)\s*(provided|to\s+provide|available|found)|
+    nothing\s+to\s+summarize|
+    text\s+is\s+(too\s+short|missing)|
+    these\s+sentences\s+are\s+for\s+testing|
+    no\s+summary\s+to\s+provide|
+    \[no\s+text\s+provided|
+    cannot\s+summarize|
+    please\s+(provide|give)\s+(the\s+)?text|
+    i\s+cannot\s+summarize|
+    without\s+the\s+text\s+provided|
+    provide\s+the\s+text\s+for\s+(me\s+to\s+)?summariz
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_MIN_SUMMARY_WORDS = 5   # reject anything shorter than this
+_MIN_CHUNK_CHARS_FOR_SUMMARY = 30  # skip Mistral call entirely for very short chunks
+
+_SUMMARIZATION_CHAR_CAP = 2000
+_MAX_RECURSION_DEPTH = 5
+
+_TOP_N_KEYWORDS=15
 
 
+# ------ CHUNK HELPERS ----------------------------------------
 
 def _split_by_headings(text):
     """Split at lines that look like section headings (short, capitalized, no end punctuation)."""
@@ -384,92 +412,6 @@ def _process_heading_parts(heading_parts, chunks, pending_paragraph):
     return _flush_pending_chunk(pending_chunk, chunks, pending_paragraph)
 
 
-def split_into_sections(text):
-    """Three-tier splitting: paragraphs -> headings -> semantic."""
-    print("Chunking began...")
-    text = _inject_numbered_line_breaks(text)
-    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()] # split into paragraphs
-    chunks = []
-    pending_paragraph = ""
-    for paragraph in paragraphs:
-        current_paragraph = f"{pending_paragraph}\n{paragraph}".strip() if pending_paragraph else paragraph
-        pending_paragraph = ""
-
-        if len(current_paragraph) <= MAX_CHUNK_SIZE: # if paragraph itself is smaller, add it to chunks
-            pending_paragraph = _handle_small_paragraph(current_paragraph, chunks)
-            continue
-
-        heading_parts = _split_by_headings(current_paragraph) # split paragraph by headings
-        if len(heading_parts) > 1:
-            pending_paragraph = _process_heading_parts(heading_parts, chunks, pending_paragraph)
-        else: 
-            chunks.extend(_split_large_text(current_paragraph)) # no heading split -> semantic split + hard size enforcement
-
-    if pending_paragraph and validate_chunk(pending_paragraph) != "DISCARD":
-        chunks.append(pending_paragraph)
-
-    chunks = _postprocess_chunks(chunks)
-    print(f"Generated {len(chunks)} chunks.")
-    print(f"Original Length: {len(text)} | Chunked Length: {sum(len(c) for c in chunks)}")
-    return chunks
-
-
-def _get_keywords(chunk):
-    result = []
-    words = re.findall(r'\w+', chunk.strip())  # findall returns a list; re.search returns a Match
-    for word in words:
-        if len(word) >= 6:
-            result.append(word)
-    return result
-
-
-def extract_keywords(text=""):
-    # keywords = []
-    # for chunk in chunks:
-    #     keywords.extend(_get_keywords(chunk))
-    # return ', '.join(keywords)
-    import yake
-
-    kw_extractor = yake.KeywordExtractor(lan="en", n=2, top=5)
-    keywords = kw_extractor.extract_keywords(text)
-
-    # Returns a list of (keyword, score) - lower score is more relevant in YAKE
-    for kw, score in keywords:
-        print(f"{kw}: {score}")
-
-def extract_keywords2(text):
-    import spacy
-
-    nlp = spacy.load("en_core_web_sm")
-    doc = nlp(text)
-
-    # Extract Proper Nouns (PROPN) or specific Entities (ORG, PERSON, GPE)
-    entities = [ent.text for ent in doc.ents if ent.label_ in ["ORG", "PRODUCT"]]
-
-    print(entities)
-
-
-_USELESS_SUMMARY_PATTERNS = re.compile(
-    r"""
-    no\s+(text|meaningful\s+summary|content|information)\s*(provided|to\s+provide|available|found)|
-    nothing\s+to\s+summarize|
-    text\s+is\s+(too\s+short|missing)|
-    these\s+sentences\s+are\s+for\s+testing|
-    no\s+summary\s+to\s+provide|
-    \[no\s+text\s+provided|
-    cannot\s+summarize|
-    please\s+(provide|give)\s+(the\s+)?text|
-    i\s+cannot\s+summarize|
-    without\s+the\s+text\s+provided|
-    provide\s+the\s+text\s+for\s+(me\s+to\s+)?summariz
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
-_MIN_SUMMARY_WORDS = 5   # reject anything shorter than this
-_MIN_CHUNK_CHARS_FOR_SUMMARY = 30  # skip Mistral call entirely for very short chunks
-
-
 def _is_useless_summary(text: str) -> bool:
     """Return True when the model produced a refusal/placeholder instead of a real summary."""
     stripped = text.strip()
@@ -486,6 +428,8 @@ def _summarize_chunk(text: str) -> str:
     """Call Mistral (routed via purpose=query_parsing) for a concise 1-2 sentence summary.
     Returns an empty string on any failure or when the model produces a placeholder refusal,
     so the caller can fall back gracefully.
+
+    optimization: perform chunking summaries in batches rather than a single text
     """
     stripped = text.strip()
     if not stripped:
@@ -534,22 +478,311 @@ def _summarize_chunk(text: str) -> str:
         return ""  # caller falls back to chunk text as summary vector
 
 
-def handle_chunk_summaries(chunks: list) -> tuple:
-    """Summarize every chunk with Mistral, then produce one overall document summary.
+def _merge_for_summarization(texts: list[str], char_cap: int = _SUMMARIZATION_CHAR_CAP) -> list[str]:
+    """Merge adjacent small texts into groups up to char_cap for efficient LLM summarization."""
+    groups: list[str] = []
+    current_parts: list[str] = []
+    current_len = 0
+    for text in texts:
+        text_len = len(text)
+        if current_parts and current_len + text_len > char_cap:
+            groups.append("\n\n".join(current_parts))
+            current_parts = [text]
+            current_len = text_len
+        else:
+            current_parts.append(text)
+            current_len += text_len
+    if current_parts:
+        groups.append("\n\n".join(current_parts))
+    return groups
 
-    Returns:
-        chunk_summaries   one string per chunk (same order); empty string if Mistral failed.
-        overall_summary   single summary combining all chunk summaries; empty string on failure.
 
-    The caller must not fail if summaries are empty — the named-vector upsert falls back to
-    embedding the raw chunk text for the summary vector in that case.
-    """
-    chunk_summaries = [_summarize_chunk(c) for c in chunks]
-    combined = " ".join(s for s in chunk_summaries if s)
-    overall_summary = _summarize_chunk(combined) if combined else ""
-    return chunk_summaries, overall_summary
+def _recursive_summarize(chunks: list[str], _depth: int = 0) -> str:
+    """Recursively merge and summarize until a single overall summary is produced."""
+    if not chunks:
+        return ""
+    if len(chunks) == 1:
+        return _summarize_chunk(chunks[0]) or chunks[0][:200]
+    if _depth >= _MAX_RECURSION_DEPTH:
+        combined = " ".join(chunks)
+        return _summarize_chunk(combined) or combined[:200]
+
+    groups = _merge_for_summarization(chunks)
+    summaries = []
+    for group in groups:
+        summary = _summarize_chunk(group)
+        summaries.append(summary if summary else group[:200])
+
+    return _recursive_summarize(summaries, _depth + 1)
 
 
+def _deduplicate_keywords_llm(keywords: list[str]) -> list[str]:
+    """Use LLM to deduplicate keywords into top 15 unique, high-signal themes."""
+    if not keywords:
+        return []
+    keyword_text = ", ".join(keywords)
+    try:
+        with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
+            resp = client.post(
+                f"{LLM_API_BASE}/chat/completions",
+                params={"purpose": "query_parsing"},
+                headers={
+                    "Authorization": f"Bearer {LLM_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "mistral-7b",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a keyword analysis assistant. "
+                                "Given a list of keywords from a document, deduplicate them "
+                                "and identify the top 15 unique, high-signal themes. "
+                                "Return only the themes, one per line. No numbering, no explanations."
+                            ),
+                        },
+                        {"role": "user", "content": keyword_text},
+                    ],
+                    "max_tokens": 150,
+                    "temperature": 0.1,
+                },
+            )
+        resp.raise_for_status()
+        result = resp.json()["choices"][0]["message"]["content"].strip()
+        return [line.strip() for line in result.splitlines() if line.strip()][:15]
+    except Exception as exc:
+        log.warning("LLM keyword dedup failed: %s — using simple dedup", exc)
+        seen = set()
+        deduped = []
+        for kw in keywords:
+            lower = kw.lower()
+            if lower not in seen:
+                seen.add(lower)
+                deduped.append(kw)
+        return deduped[:15]
+
+
+def _generate_questions(overall_summary: str) -> list[str]:
+    """Generate 2-3 global questions from overall summary to improve retrieval."""
+    if not overall_summary:
+        return []
+    try:
+        with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
+            resp = client.post(
+                f"{LLM_API_BASE}/chat/completions",
+                params={"purpose": "query_parsing"},
+                headers={
+                    "Authorization": f"Bearer {LLM_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "mistral-7b",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a question generation assistant. "
+                                "Based on the provided summary, generate exactly 3 questions "
+                                "that someone might ask about this content. "
+                                "Return only the questions, one per line. No numbering."
+                            ),
+                        },
+                        {"role": "user", "content": overall_summary},
+                    ],
+                    "max_tokens": 150,
+                    "temperature": 0.3,
+                },
+            )
+        resp.raise_for_status()
+        result = resp.json()["choices"][0]["message"]["content"].strip()
+        print(f"Generate questions result: {result}")
+        return [
+            line.strip() for line in result.splitlines()
+            if line.strip() and line.strip().endswith("?")
+        ][:3]
+    except Exception as exc:
+        log.warning("Question generation failed: %s", exc)
+        return []
+
+
+def _split_into_sections(text):
+    """Three-tier splitting: paragraphs -> headings -> semantic."""
+    print("Chunking began...")
+    text = _inject_numbered_line_breaks(text)
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()] # split into paragraphs
+    chunks = []
+    pending_paragraph = ""
+    for paragraph in paragraphs:
+        current_paragraph = f"{pending_paragraph}\n{paragraph}".strip() if pending_paragraph else paragraph
+        pending_paragraph = ""
+
+        if len(current_paragraph) <= MAX_CHUNK_SIZE: # if paragraph itself is smaller, add it to chunks
+            pending_paragraph = _handle_small_paragraph(current_paragraph, chunks)
+            continue
+
+        heading_parts = _split_by_headings(current_paragraph) # split paragraph by headings
+        if len(heading_parts) > 1:
+            pending_paragraph = _process_heading_parts(heading_parts, chunks, pending_paragraph)
+        else: 
+            chunks.extend(_split_large_text(current_paragraph)) # no heading split -> semantic split + hard size enforcement
+
+    if pending_paragraph and validate_chunk(pending_paragraph) != "DISCARD":
+        chunks.append(pending_paragraph)
+
+    chunks = _postprocess_chunks(chunks)
+    print(f"Generated {len(chunks)} chunks.")
+    print(f"Original Length: {len(text)} | Chunked Length: {sum(len(c) for c in chunks)}")
+    return chunks
+
+
+# ------ PUBLIC API ----------------------------------------
+
+def get_document_objects(data):
+    if 'text' not in data:
+        raise ValueError("provide text to get chunks")
+    full_text = data['text']
+    chunks = _split_into_sections(full_text)
+
+    tenant_id = data.get("tenant_id")
+    doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
+
+    # ── Step 2: Keyword extraction (YAKE + spaCy + SGRank) per chunk ─────────────
+    chunk_keywords = [extract_keywords(c, _TOP_N_KEYWORDS) for c in chunks]
+    all_keywords = [kw for kws in chunk_keywords for kw in kws]
+    keywords_counter = Counter(all_keywords)
+    filtered_keywords = [(kw, count) for kw, count in keywords_counter.items() if count >= 2 or len(kw.split()) >= 2]
+    sorted_keywords = [kw for (kw, _) in sorted(filtered_keywords, key=lambda x: x[1], reverse=True)[:40]]
+
+    # ── Step 3: Keyword deduplication via LLM ───────────────────────────
+    top_keywords = _deduplicate_keywords_llm(sorted_keywords) if sorted_keywords else []
+
+    # ── Steps 4: Recursive summarization ──────────────────────────────
+    overall_summary = _recursive_summarize(chunks)
+
+    # ── Step 5: Question generation ─────────────────────────────────────
+    global_questions = _generate_questions(overall_summary) if overall_summary else []
+
+    # ── Step 6: Build documents ─────────────────────────────────────────
+
+    def _shared_metadata() -> dict:
+        return {
+            "doc_id": doc_id,
+            "user_id": data['user_id'],
+            "tenant_id": tenant_id,
+            "folder_id": data['folder_id'],
+            "note_id": data['note_id'],
+            "folder_title": data['folder_title'],
+            "note_title": data['note_title'],
+            "description": data['description'],
+            "tags": ','.join(data['tags']),
+        }
+
+    # -- Summary document (one per note, for doc_summaries collection) --
+    summary_doc = None
+    if overall_summary:
+        summary_parts = [overall_summary]
+        if top_keywords:
+            summary_parts.append(f"Keywords: {', '.join(top_keywords)}")
+        if global_questions:
+            summary_parts.append("Questions:\n" + "\n".join(global_questions))
+        summary_text = "\n\n".join(summary_parts)
+
+        summary_meta = _shared_metadata()
+        summary_meta["keywords"] = ','.join(top_keywords)
+
+        summary_doc = LlamaDocument(
+            id_=hashlib.sha256(f"{doc_id}-summary".encode()).hexdigest(),
+            text=summary_text,
+            metadata=summary_meta,
+        )
+
+    # -- Chunk documents (one per chunk, for doc_chunks collection) --
+    _EXCLUDED_EMBED = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'parent_summary']
+    _EXCLUDED_LLM   = ['user_id', 'folder_id', 'note_id', 'chunk_id']
+
+    chunk_docs = []
+    for idx, chunk in enumerate(chunks, start=1):
+        meta = _shared_metadata()
+        meta["chunk_id"] = idx
+        meta["keywords"] = ','.join(
+            chunk_keywords[idx - 1] if idx - 1 < len(chunk_keywords) else []
+        )
+        meta["parent_summary"] = overall_summary or ""
+
+        chunk_docs.append(
+            LlamaDocument(
+                id_=hashlib.sha256(f"{doc_id}-{chunk}".encode()).hexdigest(),
+                text=chunk,
+                metadata=meta,
+                excluded_embed_metadata_keys=_EXCLUDED_EMBED,
+                excluded_llm_metadata_keys=_EXCLUDED_LLM,
+                metadata_template="{key}: {value}",
+                text_template=(
+                    "Context Information:\n{metadata_str}\n\n"
+                    "---\nDocument Content:\n{content}\n"
+                ),
+            )
+        )
+
+    log.info(
+        "Built %d chunk docs + summary=%s for doc_id=%s",
+        len(chunk_docs), bool(summary_doc), doc_id,
+    )
+    return doc_id, summary_doc, chunk_docs
+
+
+# if __name__ == "__main__":
+#     # text="""Test Case: The Future of Networking Stuff and Other Things Introduction In this conversation today, I wanted to take some time to talk about something that has been on my mind for a few days. When we look at the activity of modern networking, there is always a new thing to consider. This time, I am focusing on how we handle the various bits of data that move through our systems at night and during the day. It is a conversation that many of us have had before, but I think this time it is different because of a few factors. The Main Activity When you are working with Cisco Catalyst switches or perhaps some Nexus stuff, you often run into a situation where you need to manage anything that comes across the wire. That night when I was reviewing the logs, I realized that the activity wasn't just about the hardware; it was about the software things as well. We often say that "time is money," but in networking, time is latency. If you don't fix the latency thing, you will have a bad day. I’ve noticed a few people mentioning that they want to see more technical bits in these posts. So, let’s look at something specific. When we configure an interface, we aren't just doing a thing; we are establishing a protocol conversation. This conversation happens all the time, whether it is day or night. If anything goes wrong during this time, the whole activity could fail. A Few More Things to Consider There is always something new to learn about SD-WAN stuff. Last night, I was thinking about the conversation we had regarding security things. It’s not just about one thing; it’s about all the things combined. For instance, if you have a few routers that aren't synced, you’ll spend a lot of time fixing the sync activity. This time, I recommend looking at the automation bits. Automation is the thing that will save us time in the long run. Anything can happen when you are deploying a new configuration. That night, we saw a few errors that didn't mean anything at first, but over time, they became a major thing. We spent the whole day looking at the activity logs, trying to find something—anything—that would explain the behavior.  Conclusion To wrap this up, I hope this conversation provided a few insights into the stuff we do every day. Networking is a complex activity, and there is always something to improve. Next time, we will talk about more specific Cisco things and how to manage the bits and pieces of your infrastructure during the day. It’s been a long night, but I think we’ve covered a lot of things."""
+#     text = "bits and bit and the same as thing and things but all activities should be consider as the main priority which doesn't give any SD-WAN stuff or Nexus stuff"
+#     print("Keywords:", extract_keywords(text, top_n=20))
+
+
+if __name__ == '__main__':
+    text = """
+The document/documents begins with the idea that the organization is always doing something, even when it is not doing very much at all. On paper, the system appears organized, but in practice the system is mostly a collection of activities, operations, processes, notes, reports, and discussions that are repeated in different forms throughout the day. During the day, the team talks about coordination, and at night the same team talks about coordination again, but with slightly different words, as if repetition itself were a strategy. The report about the work refers to the report as if the report were both the cause and the effect of the work.
+
+In the first section, there is a mention of alignment, strategy, management, implementation, workflow, integration, and output. In the second section, those same terms appear again, but they are surrounded by words like thing, stuff, part, item, element, factor, aspect, and piece. The text keeps saying that one thing leads to another thing, that one activity influences another activity, and that one operation affects another operation, yet the exact relationship between these things is never fully explained. The result is a situation where the situation itself becomes the subject of the discussion.
+
+The project team is described in several ways. Sometimes it is the operations team. Sometimes it is the management team. Sometimes it is the delivery team. Sometimes it is simply the team. Sometimes it is not even a team but a group, a unit, a collection, or a set of people working on the same thing. The document also refers to the organization, the company, the department, the office, and the group as though these were interchangeable, which makes entity extraction difficult. The organization wants better organization, the company wants better coordination, and the department wants better management, but all of these goals are expressed using the same generic language.
+
+There are multiple references to the phase, the stage, the step, the process, the procedure, the cycle, and the sequence. Every phase contains a review, every review contains a note, every note contains a comment, every comment contains a remark, and every remark contains another reference to the same project. The implementation phase is mentioned alongside the planning phase, the analysis phase, the execution phase, the validation phase, and the closing phase, but each one seems to contain the same content repeated under a different heading. The document makes it look like there are many distinct stages when in reality there is very little variation.
+
+The text also includes a long discussion of data, logs, records, outputs, results, metrics, values, and summaries. The data is said to support the report, but the report is also said to define the data. The logs are said to show the output, but the output is also said to confirm the logs. The metrics are said to measure performance, but performance is never clearly separated from activity, work, or output. This creates a loop in which every noun points back to another noun, and every conclusion points back to the original statement.
+
+Sometimes the document switches to more abstract language. It talks about improvement, optimization, efficiency, quality, consistency, reliability, structure, clarity, and stability. These are repeated in different combinations, often with modifiers like better, more, less, stronger, clearer, faster, and simpler. The text claims that the workflow should be clearer, the operations should be smoother, the coordination should be stronger, the management should be better, and the integration should be tighter, but these claims are not backed by concrete detail. Instead, the document uses phrases like “the thing we need,” “the way forward,” “the right approach,” and “the better path,” which sound useful but do not add much semantic precision.
+
+At several points, the document becomes circular. It says that the report should improve the report. It says that the summary should summarize the summary. It says that the review should review the review. It says that the process should process the process. It says that the system should stabilize the system. These statements are grammatically valid but semantically weak. They create a worst-case scenario for a keyword extractor because the same words appear in many contexts, often without clear importance or hierarchy.
+
+The final section repeats the core themes one more time: team, report, work, process, system, output, management, operations, coordination, integration, workflow, phase, data, log, result, organization, and situation. The conclusion does not introduce new information; it only rephrases what has already been said. If a keyword extractor relies too heavily on frequency, it may surface the wrong terms. If it relies too heavily on shallow phrase matching, it may keep phrases that are merely repeated rather than truly meaningful. If it relies too heavily on surface form without normalization, it may treat plural and singular variants as unrelated terms even though they refer to the same concept.
+
+In that sense, the document is designed to be difficult. It is long enough to create many candidate spans, repetitive enough to inflate common terms, abstract enough to blur semantic boundaries, and vague enough to make subphrase pruning uncertain. It includes multiple references to day and night, to the same idea expressed in different ways, to overlapping concepts like management and coordination, and to generic nouns like thing, stuff, part, piece, item, and element. A keyword extractor has to decide what matters most, even though the text keeps suggesting that almost everything matters equally. That is exactly what makes it a useful stress test.
+"""
+    import time
+    start = time.time()
+    data = {
+        "text": text,
+        "user_id": "SAMPLEUSER01",
+        "folder_id": "SAMPLESFOLDER01",
+        "note_id": "SAMPLENOTE01",
+        "role": "user",
+        "tenant_id": "TENANT01",
+        "folder_title": "SAMPLE FOLDER TITLE1",
+        "note_title": "SAMPLE NOTE TITLE1",
+        "description": "SAMPLE DESCRIPTION 1",
+        "tags": [
+            "tag1",
+            "tag2"
+        ]
+    }
+    doc_id, summary_doc, chunk_docs = get_document_objects(data)
+    print(doc_id, summary_doc, '\n', chunk_docs[0], time.time() - start)
+
+
+
+
+
+''' SAVING THIS FOR THE PLAN IN DOC STRING
 def get_document_objects(data):
     """ Hierarchical RAG System (Production-Ready Design)
     This system uses two vector collections:
@@ -701,13 +934,26 @@ def get_document_objects(data):
         raise ValueError("provide text to get chunks")
     full_text = data['text']
     chunks = split_into_sections(full_text)
-    # Per-chunk summaries + one overall summary (both generated by Mistral).
-    # Both return empty strings when Mistral is unavailable — handled gracefully below.
-    chunk_summaries, overall_summary = handle_chunk_summaries(chunks)
+
     tenant_id = data.get("tenant_id")
     doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
 
-    def _base_metadata(chunk_id: int, summary: str) -> dict:
+    # ── Step 2: Keyword extraction (YAKE + spaCy) per chunk ─────────────
+    chunk_keywords = [extract_keywords(c) for c in chunks]
+    all_keywords = [kw for kws in chunk_keywords for kw in kws]
+
+    # ── Steps 3-4: Recursive summarization ──────────────────────────────
+    overall_summary = _recursive_summarize(chunks)
+
+    # ── Step 5: Keyword deduplication via LLM ───────────────────────────
+    top_keywords = _deduplicate_keywords_llm(all_keywords) if all_keywords else []
+
+    # ── Step 6: Question generation ─────────────────────────────────────
+    global_questions = _generate_questions(overall_summary) if overall_summary else []
+
+    # ── Step 7: Build documents ─────────────────────────────────────────
+
+    def _shared_metadata() -> dict:
         return {
             "doc_id": doc_id,
             "user_id": data['user_id'],
@@ -718,60 +964,60 @@ def get_document_objects(data):
             "note_title": data['note_title'],
             "description": data['description'],
             "tags": ','.join(data['tags']),
-            "chunk_id": chunk_id,
-            # Stored for the summary_vec embedding path in the Qdrant handler.
-            # Excluded from LlamaIndex's rendered text template to avoid double-counting.
-            "summary": summary,
         }
 
-    _EXCLUDED_EMBED = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'summary']
-    _EXCLUDED_LLM   = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'summary']
-
-    llama_docs = [
-        LlamaDocument(
-            id_=hashlib.sha256(
-                f"{data['user_id']}-{data['folder_id']}-{data['note_id']}-{chunk}".encode()
-            ).hexdigest(),
-            text=chunk,
-            metadata=_base_metadata(
-                chunk_id=idx,
-                summary=chunk_summaries[idx - 1] if chunk_summaries and idx - 1 < len(chunk_summaries) else "",
-            ),
-            excluded_embed_metadata_keys=_EXCLUDED_EMBED,
-            excluded_llm_metadata_keys=_EXCLUDED_LLM,
-            metadata_template="{key}: {value}",
-            text_template="Context Information:\n{metadata_str}\n\n---\nDocument Content:\n{content}\n",
-        )
-        for idx, chunk in enumerate(chunks, start=1)
-    ]
-
-    # Overall-summary document (chunk_id=0): a single point whose text IS the Mistral
-    # summary of the entire note.  It is embedded in both vector spaces so broad queries
-    # like "what is this note about?" surface it before individual chunks.
-    # Skipped when Mistral was unavailable (overall_summary is empty).
+    # -- Summary document (one per note, for doc_summaries collection) --
+    summary_doc = None
     if overall_summary:
-        overview_doc = LlamaDocument(
-            id_=hashlib.sha256(
-                f"{data['user_id']}-{data['folder_id']}-{data['note_id']}-overview".encode()
-            ).hexdigest(),
-            text=overall_summary,
-            metadata=_base_metadata(chunk_id=0, summary=overall_summary),
-            excluded_embed_metadata_keys=_EXCLUDED_EMBED,
-            excluded_llm_metadata_keys=_EXCLUDED_LLM,
-            metadata_template="{key}: {value}",
-            text_template="Context Information:\n{metadata_str}\n\n---\nDocument Content:\n{content}\n",
+        summary_parts = [overall_summary]
+        if top_keywords:
+            summary_parts.append(f"Keywords: {', '.join(top_keywords)}")
+        if global_questions:
+            summary_parts.append("Questions:\n" + "\n".join(global_questions))
+        summary_text = "\n\n".join(summary_parts)
+
+        summary_meta = _shared_metadata()
+        summary_meta["keywords"] = ','.join(top_keywords)
+
+        summary_doc = LlamaDocument(
+            id_=hashlib.sha256(f"{doc_id}-summary".encode()).hexdigest(),
+            text=summary_text,
+            metadata=summary_meta,
         )
-        llama_docs.insert(0, overview_doc)
 
-    return doc_id, llama_docs
+    # -- Chunk documents (one per chunk, for doc_chunks collection) --
+    _EXCLUDED_EMBED = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'parent_summary']
+    _EXCLUDED_LLM   = ['user_id', 'folder_id', 'note_id', 'chunk_id']
+
+    chunk_docs = []
+    for idx, chunk in enumerate(chunks, start=1):
+        meta = _shared_metadata()
+        meta["chunk_id"] = idx
+        meta["keywords"] = ','.join(
+            chunk_keywords[idx - 1] if idx - 1 < len(chunk_keywords) else []
+        )
+        meta["parent_summary"] = overall_summary or ""
+
+        chunk_docs.append(
+            LlamaDocument(
+                id_=hashlib.sha256(f"{doc_id}-{chunk}".encode()).hexdigest(),
+                text=chunk,
+                metadata=meta,
+                excluded_embed_metadata_keys=_EXCLUDED_EMBED,
+                excluded_llm_metadata_keys=_EXCLUDED_LLM,
+                metadata_template="{key}: {value}",
+                text_template=(
+                    "Context Information:\n{metadata_str}\n\n"
+                    "---\nDocument Content:\n{content}\n"
+                ),
+            )
+        )
+
+    log.info(
+        "Built %d chunk docs + summary=%s for doc_id=%s",
+        len(chunk_docs), bool(summary_doc), doc_id,
+    )
+    return doc_id, summary_doc, chunk_docs
 
 
-if __name__ == "__main__":
-    text="""
-It was late summer and the last hot sun of the season had the neighborhood bustling with activity.
-
-Inspector Winston, a Dachshund with a talent for solving mysteries, was lying comfortably on a warm wooden bench near the garden wall. From here, he had a perfect view of both the house and the street so he could pick up a few exciting bits of conversation from the passers-by while making sure he didn’t miss any activity in the kitchen. His family was planning a barbecue for that night. 
-
-“The last barbecue of the season!” said his dad sadly. All Winston could think about was the chance that a piece of sausage might accidentally fall to the ground for him to clean up. 
-    """
-    extract_keywords(text)
+'''
