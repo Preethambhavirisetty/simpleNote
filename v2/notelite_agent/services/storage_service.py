@@ -4,8 +4,9 @@ import sys
 import importlib
 from core.config import (
     DB_PATH, VECTOR_DB, RERANKER_MODEL, QDRANT_URL,
-    SOFT_W_RRF, SOFT_W_KEYWORD, SOFT_W_ENTITY, SOFT_W_QUALITY,
+    SOFT_W_RRF, SOFT_W_KEYWORD, SOFT_W_ENTITY, SOFT_W_QUALITY, SOFT_W_PARENT,
 )
+from handlers.keyword_extractor import extract_keywords
 from core.contracts import AccessContext
 from core.settings import is_llama_index_settings_initialized
 from llama_index.core import Settings
@@ -30,12 +31,14 @@ _QUERY_STOP = frozenset({
 
 
 def _tokenize_phrases(phrases):
-    """Break a list of keyword/entity phrases into a lowercased token set."""
-    return {w for p in phrases for w in p.lower().split() if len(w) > 1}
-
-
-def _entity_overlap(query_entities, doc_entities):
-    return len(set(query_entities) & set(doc_entities)) / max(len(query_entities), 1)
+    """Break keyword/entity phrases into lowercased tokens, expanding hyphens."""
+    tokens = set()
+    for p in phrases:
+        for w in p.lower().split():
+            tokens.add(w)
+            if '-' in w:
+                tokens.update(part for part in w.split('-') if part)
+    return {t for t in tokens if len(t) > 1}
 
 
 def _jaccard(set_a, set_b):
@@ -44,20 +47,39 @@ def _jaccard(set_a, set_b):
     return len(set_a & set_b) / len(set_a | set_b)
 
 
+def _entity_recall(query_ent_set, doc_ent_set):
+    """Fraction of query entities found in the doc (recall-based)."""
+    if not query_ent_set:
+        return 0.0
+    return len(query_ent_set & doc_ent_set) / len(query_ent_set)
+
+
 def _soft_score(query, results):
     """Re-sort (doc, rrf_score) pairs by blending RRF, keyword/entity
-    Jaccard similarity, and stored doc_quality.
+    similarity, parent-summary overlap, and stored doc_quality.
 
-    Returns list of (doc, soft_score) sorted descending.
+    Uses extract_keywords for POS-validated query analysis with a
+    stopword-filtered fallback when extraction returns nothing.
     """
     if len(results) < 2:
         return results
 
-    query_tokens = {
-        w.lower() for w in query.split()
-        if w.lower() not in _QUERY_STOP and len(w) > 1
-    }
+    # ── Query analysis via the full keyword/entity pipeline ───────
+    try:
+        query_kws, query_ents = extract_keywords(query, top_n=10)
+    except Exception:
+        query_kws, query_ents = [], []
 
+    if query_kws:
+        query_kw_tokens = _tokenize_phrases(query_kws)
+    else:
+        query_kw_tokens = {
+            w.lower() for w in query.split()
+            if w.lower() not in _QUERY_STOP and len(w) > 1
+        }
+    query_ent_set = {e.lower() for e in query_ents}
+
+    # ── RRF normalisation (min-max to [0, 1]) ────────────────────
     rrf_scores = [s for _, s in results]
     min_s, max_s = min(rrf_scores), max(rrf_scores)
     spread = max_s - min_s if max_s > min_s else 1.0
@@ -66,20 +88,35 @@ def _soft_score(query, results):
     for doc, rrf_raw in results:
         rrf_norm = (rrf_raw - min_s) / spread
 
-        kw_tokens = _tokenize_phrases(doc.metadata.get("keywords", []))
-        ent_tokens = _tokenize_phrases(doc.metadata.get("entities", []))
+        doc_kw_tokens = _tokenize_phrases(doc.metadata.get("keywords", []))
+        doc_ent_set = {e.lower() for e in doc.metadata.get("entities", [])}
 
-        kw_sim = _jaccard(query_tokens, kw_tokens)
-        ent_sim = _entity_overlap(query_tokens, ent_tokens)
-        # parent_sim = similarity(query, doc.parent_summary)
+        kw_sim = _jaccard(query_kw_tokens, doc_kw_tokens)
+        ent_sim = _entity_recall(query_ent_set, doc_ent_set)
+
+        parent_text = doc.metadata.get("parent_summary", "")
+        if parent_text:
+            parent_tokens = {
+                w.lower() for w in parent_text.split()
+                if w.lower() not in _QUERY_STOP and len(w) > 1
+            }
+            parent_sim = _jaccard(query_kw_tokens, parent_tokens)
+        else:
+            parent_sim = 0.0
+
         quality = doc.metadata.get("doc_quality", 0.0)
 
         soft = (
             SOFT_W_RRF * rrf_norm
             + SOFT_W_KEYWORD * kw_sim
             + SOFT_W_ENTITY * ent_sim
+            + SOFT_W_PARENT * parent_sim
             + SOFT_W_QUALITY * quality
         )
+
+        # Tiebreaker: preserve original RRF ordering for equal soft scores
+        soft += rrf_raw * 1e-6
+
         scored.append((doc, soft))
 
     scored.sort(key=lambda x: x[1], reverse=True)
