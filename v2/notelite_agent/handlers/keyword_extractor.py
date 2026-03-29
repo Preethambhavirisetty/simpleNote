@@ -255,8 +255,8 @@ def _build_pos_sets(doc) -> tuple[set[str], set[str]]:
     nouns: set[str] = set()
     verbs: set[str] = set()
     for token in doc:
-        lower = token.text.lower()
-        lemma = token.lemma_.lower()
+        lower = token.text
+        lemma = token.lemma_
         if token.pos_ in ("NOUN", "PROPN") and not token.is_stop:
             nouns.add(lemma)
             nouns.add(lower)
@@ -314,7 +314,7 @@ def _refine_with_pos(term: str, noun_set: set[str], verb_set: set[str]) -> str |
 
 def _clean_term(term: str) -> str | None:
     """Normalize whitespace, strip noisy edges, reject junk."""
-    term = re.sub(r'\s+', ' ', term).lower().strip()
+    term = re.sub(r'\s+', ' ', term).strip()
 
     if len(term) < 3:
         return None
@@ -546,9 +546,7 @@ def extract_keywords(text: str, top_n: int = 20) -> tuple[list[str], list[str]]:
 
 if __name__ == '__main__':
     text = """
-u/TechGuru_99 • 4h ago • r/GadgetHeads
-Just grabbed the new Pixel 8 Pro from the Google Store in Mountain View!
-Has anyone tried comparing the Tensor G3 chip against the Apple A17 Pro? I’m heading to London next Tuesday for CES 2024 and want to know if the battery holds up on a 10-hour flight. I paid about $999 plus tax. Also, shoutout to Marques Brownlee for the solid review that convinced me to switch from my old Samsung S21.
+The project team is described in several ways. Sometimes it is the operations team. Sometimes it is the management team. Sometimes it is the delivery team. Sometimes it is simply the team.
 """
     import time
     start = time.time()

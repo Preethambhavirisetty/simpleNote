@@ -10,6 +10,7 @@ from core.config import (
     LLM_MODEL,
     LLM_CONTEXT_WINDOW,
     EMBEDDING_MODEL,
+    SPARSE_EMBEDDING_MODEL,
     EMBEDDING_DEVICE,
     MAX_CHUNK_SIZE,
     CHUNK_OVERLAP,
@@ -77,7 +78,7 @@ def init_llama_index_settings():
         cache_folder=_cache_dir,
     )
 
-    Settings.sparse_model = FastEmbedSparseEmbedding(model_name="Qdrant/bm25")
+    Settings.sparse_model = FastEmbedSparseEmbedding(model_name=SPARSE_EMBEDDING_MODEL)
 
     Settings.chunk_size    = MAX_CHUNK_SIZE
     Settings.chunk_overlap = CHUNK_OVERLAP

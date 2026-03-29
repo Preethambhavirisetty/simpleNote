@@ -643,30 +643,36 @@ def get_document_objects(data):
         raise ValueError("provide text to get chunks")
     full_text = data['text']
     chunks = _split_into_sections(full_text)
+    print("***************** Chunking completed! *****************")
 
     tenant_id = data.get("tenant_id")
     doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
 
     # ── Step 2: Keyword + entity extraction per chunk ──────────────────────
-    chunk_results = [extract_keywords(c, _TOP_N_KEYWORDS) for c in chunks]
-    chunk_keywords = [kws for kws, _ in chunk_results]
-    chunk_entities = [ents for _, ents in chunk_results]
+    chunk_results = [extract_keywords(c, _TOP_N_KEYWORDS) for c in chunks] # [(List[str], List[str]), (List[str], List[str]), ...] 
+    chunk_keywords = [kws for kws, _ in chunk_results] # [List[str], List[str], ...]
+    chunk_entities = [ents for _, ents in chunk_results] # [List[str], List[str], ...]
 
-    all_keywords = [kw for kws in chunk_keywords for kw in kws]
-    keywords_counter = Counter(all_keywords)
-    filtered_keywords = [(kw, count) for kw, count in keywords_counter.items() if count >= 2 or len(kw.split()) >= 2]
-    sorted_keywords = [kw for (kw, _) in sorted(filtered_keywords, key=lambda x: x[1], reverse=True)[:40]]
+    all_keywords = [kw for kws in chunk_keywords for kw in kws] # [str,str...]
+    keywords_counter = Counter(all_keywords) # {str:count1, str:count2,...}
+    filtered_keywords = [(kw, count) for kw, count in keywords_counter.items() if count >= 2 or len(kw.split()) >= 2] # [(str, count),...]
+    sorted_keywords = [kw for (kw, _) in sorted(filtered_keywords, key=lambda x: x[1], reverse=True)[:40]] # [str,str,..]
 
-    all_entities = list(dict.fromkeys(ent for ents in chunk_entities for ent in ents))
+    all_entities = list(dict.fromkeys(ent for ents in chunk_entities for ent in ents)) # [str, str]
 
     # ── Step 3: Keyword deduplication via LLM ───────────────────────────
-    top_keywords = _deduplicate_keywords_llm(sorted_keywords) if sorted_keywords else []
+    top_keywords = _deduplicate_keywords_llm(sorted_keywords) if sorted_keywords else [] # 
+    print('LLM DEDUP: ', top_keywords)
+
+    print("***************** keywords dedup completed! *****************")
 
     # ── Steps 4: Recursive summarization ──────────────────────────────
     overall_summary = _recursive_summarize(chunks)
 
     # ── Step 5: Question generation ─────────────────────────────────────
     global_questions = _generate_questions(overall_summary) if overall_summary else []
+
+    print("***************** recurssive summary + question generations completed! *****************")
 
     # ── Step 6: Build documents ─────────────────────────────────────────
 
@@ -686,22 +692,29 @@ def get_document_objects(data):
     # -- Summary document (one per note, for doc_summaries collection) --
     summary_doc = None
     if overall_summary:
-        summary_parts = [overall_summary]
-        if top_keywords:
-            summary_parts.append(f"Keywords: {', '.join(top_keywords)}")
-        if global_questions:
-            summary_parts.append("Questions:\n" + "\n".join(global_questions))
-        summary_text = "\n\n".join(summary_parts)
+        # summary_parts = [overall_summary]
+        # if top_keywords:
+        #     summary_parts.append(f"Keywords: {', '.join(top_keywords)}")
+        # if global_questions:
+        #     summary_parts.append("Questions:\n" + "\n".join(global_questions))
+        # summary_text = "\n\n".join(summary_parts)
 
         summary_meta = _shared_metadata()
-        summary_meta["keywords"] = ','.join(top_keywords)
-        summary_meta["entities"] = ','.join(all_entities)
+        summary_meta["keywords"] = [
+            kw.strip()
+            for line in top_keywords
+            for kw in line.split(',')
+            if kw.strip()
+        ]
+        summary_meta["entities"] = all_entities
+        summary_meta["questions"] = global_questions
 
         summary_doc = LlamaDocument(
             id_=hashlib.sha256(f"{doc_id}-summary".encode()).hexdigest(),
-            text=summary_text,
+            text=overall_summary,
             metadata=summary_meta,
         )
+        print("***************** summary point created! *****************")
 
     # -- Chunk documents (one per chunk, for doc_chunks collection) --
     _EXCLUDED_EMBED = ['user_id', 'folder_id', 'note_id', 'chunk_id', 'parent_summary']
@@ -711,12 +724,8 @@ def get_document_objects(data):
     for idx, chunk in enumerate(chunks, start=1):
         meta = _shared_metadata()
         meta["chunk_id"] = idx
-        meta["keywords"] = ','.join(
-            chunk_keywords[idx - 1] if idx - 1 < len(chunk_keywords) else []
-        )
-        meta["entities"] = ','.join(
-            chunk_entities[idx - 1] if idx - 1 < len(chunk_entities) else []
-        )
+        meta["keywords"] = [*chunk_keywords[idx - 1]] if idx - 1 < len(chunk_keywords) else []
+        meta["entities"] = [*chunk_entities[idx - 1]] if idx - 1 < len(chunk_entities) else []
         meta["parent_summary"] = overall_summary or ""
 
         chunk_docs.append(
@@ -738,48 +747,49 @@ def get_document_objects(data):
         "Built %d chunk docs + summary=%s for doc_id=%s",
         len(chunk_docs), bool(summary_doc), doc_id,
     )
+    print("***************** chunks points created! *****************")
     return doc_id, summary_doc, chunk_docs
 
 
-if __name__ == '__main__':
-    text = """
-The document/documents begins with the idea that the organization is always doing something, even when it is not doing very much at all. On paper, the system appears organized, but in practice the system is mostly a collection of activities, operations, processes, notes, reports, and discussions that are repeated in different forms throughout the day. During the day, the team talks about coordination, and at night the same team talks about coordination again, but with slightly different words, as if repetition itself were a strategy. The report about the work refers to the report as if the report were both the cause and the effect of the work.
+# if __name__ == '__main__':
+#     text = """
+# The document/documents begins with the idea that the organization is always doing something, even when it is not doing very much at all. On paper, the system appears organized, but in practice the system is mostly a collection of activities, operations, processes, notes, reports, and discussions that are repeated in different forms throughout the day. During the day, the team talks about coordination, and at night the same team talks about coordination again, but with slightly different words, as if repetition itself were a strategy. The report about the work refers to the report as if the report were both the cause and the effect of the work.
 
-In the first section, there is a mention of alignment, strategy, management, implementation, workflow, integration, and output. In the second section, those same terms appear again, but they are surrounded by words like thing, stuff, part, item, element, factor, aspect, and piece. The text keeps saying that one thing leads to another thing, that one activity influences another activity, and that one operation affects another operation, yet the exact relationship between these things is never fully explained. The result is a situation where the situation itself becomes the subject of the discussion.
+# In the first section, there is a mention of alignment, strategy, management, implementation, workflow, integration, and output. In the second section, those same terms appear again, but they are surrounded by words like thing, stuff, part, item, element, factor, aspect, and piece. The text keeps saying that one thing leads to another thing, that one activity influences another activity, and that one operation affects another operation, yet the exact relationship between these things is never fully explained. The result is a situation where the situation itself becomes the subject of the discussion.
 
-The project team is described in several ways. Sometimes it is the operations team. Sometimes it is the management team. Sometimes it is the delivery team. Sometimes it is simply the team. Sometimes it is not even a team but a group, a unit, a collection, or a set of people working on the same thing. The document also refers to the organization, the company, the department, the office, and the group as though these were interchangeable, which makes entity extraction difficult. The organization wants better organization, the company wants better coordination, and the department wants better management, but all of these goals are expressed using the same generic language.
+# The project team is described in several ways. Sometimes it is the operations team. Sometimes it is the management team. Sometimes it is the delivery team. Sometimes it is simply the team. Sometimes it is not even a team but a group, a unit, a collection, or a set of people working on the same thing. The document also refers to the organization, the company, the department, the office, and the group as though these were interchangeable, which makes entity extraction difficult. The organization wants better organization, the company wants better coordination, and the department wants better management, but all of these goals are expressed using the same generic language.
 
-There are multiple references to the phase, the stage, the step, the process, the procedure, the cycle, and the sequence. Every phase contains a review, every review contains a note, every note contains a comment, every comment contains a remark, and every remark contains another reference to the same project. The implementation phase is mentioned alongside the planning phase, the analysis phase, the execution phase, the validation phase, and the closing phase, but each one seems to contain the same content repeated under a different heading. The document makes it look like there are many distinct stages when in reality there is very little variation.
+# There are multiple references to the phase, the stage, the step, the process, the procedure, the cycle, and the sequence. Every phase contains a review, every review contains a note, every note contains a comment, every comment contains a remark, and every remark contains another reference to the same project. The implementation phase is mentioned alongside the planning phase, the analysis phase, the execution phase, the validation phase, and the closing phase, but each one seems to contain the same content repeated under a different heading. The document makes it look like there are many distinct stages when in reality there is very little variation.
 
-The text also includes a long discussion of data, logs, records, outputs, results, metrics, values, and summaries. The data is said to support the report, but the report is also said to define the data. The logs are said to show the output, but the output is also said to confirm the logs. The metrics are said to measure performance, but performance is never clearly separated from activity, work, or output. This creates a loop in which every noun points back to another noun, and every conclusion points back to the original statement.
+# The text also includes a long discussion of data, logs, records, outputs, results, metrics, values, and summaries. The data is said to support the report, but the report is also said to define the data. The logs are said to show the output, but the output is also said to confirm the logs. The metrics are said to measure performance, but performance is never clearly separated from activity, work, or output. This creates a loop in which every noun points back to another noun, and every conclusion points back to the original statement.
 
-Sometimes the document switches to more abstract language. It talks about improvement, optimization, efficiency, quality, consistency, reliability, structure, clarity, and stability. These are repeated in different combinations, often with modifiers like better, more, less, stronger, clearer, faster, and simpler. The text claims that the workflow should be clearer, the operations should be smoother, the coordination should be stronger, the management should be better, and the integration should be tighter, but these claims are not backed by concrete detail. Instead, the document uses phrases like “the thing we need,” “the way forward,” “the right approach,” and “the better path,” which sound useful but do not add much semantic precision.
+# Sometimes the document switches to more abstract language. It talks about improvement, optimization, efficiency, quality, consistency, reliability, structure, clarity, and stability. These are repeated in different combinations, often with modifiers like better, more, less, stronger, clearer, faster, and simpler. The text claims that the workflow should be clearer, the operations should be smoother, the coordination should be stronger, the management should be better, and the integration should be tighter, but these claims are not backed by concrete detail. Instead, the document uses phrases like “the thing we need,” “the way forward,” “the right approach,” and “the better path,” which sound useful but do not add much semantic precision.
 
-At several points, the document becomes circular. It says that the report should improve the report. It says that the summary should summarize the summary. It says that the review should review the review. It says that the process should process the process. It says that the system should stabilize the system. These statements are grammatically valid but semantically weak. They create a worst-case scenario for a keyword extractor because the same words appear in many contexts, often without clear importance or hierarchy.
+# At several points, the document becomes circular. It says that the report should improve the report. It says that the summary should summarize the summary. It says that the review should review the review. It says that the process should process the process. It says that the system should stabilize the system. These statements are grammatically valid but semantically weak. They create a worst-case scenario for a keyword extractor because the same words appear in many contexts, often without clear importance or hierarchy.
 
-The final section repeats the core themes one more time: team, report, work, process, system, output, management, operations, coordination, integration, workflow, phase, data, log, result, organization, and situation. The conclusion does not introduce new information; it only rephrases what has already been said. If a keyword extractor relies too heavily on frequency, it may surface the wrong terms. If it relies too heavily on shallow phrase matching, it may keep phrases that are merely repeated rather than truly meaningful. If it relies too heavily on surface form without normalization, it may treat plural and singular variants as unrelated terms even though they refer to the same concept.
+# The final section repeats the core themes one more time: team, report, work, process, system, output, management, operations, coordination, integration, workflow, phase, data, log, result, organization, and situation. The conclusion does not introduce new information; it only rephrases what has already been said. If a keyword extractor relies too heavily on frequency, it may surface the wrong terms. If it relies too heavily on shallow phrase matching, it may keep phrases that are merely repeated rather than truly meaningful. If it relies too heavily on surface form without normalization, it may treat plural and singular variants as unrelated terms even though they refer to the same concept.
 
-In that sense, the document is designed to be difficult. It is long enough to create many candidate spans, repetitive enough to inflate common terms, abstract enough to blur semantic boundaries, and vague enough to make subphrase pruning uncertain. It includes multiple references to day and night, to the same idea expressed in different ways, to overlapping concepts like management and coordination, and to generic nouns like thing, stuff, part, piece, item, and element. A keyword extractor has to decide what matters most, even though the text keeps suggesting that almost everything matters equally. That is exactly what makes it a useful stress test.
-"""
-    import time
-    start = time.time()
-    data = {
-        "text": text,
-        "user_id": "SAMPLEUSER01",
-        "folder_id": "SAMPLESFOLDER01",
-        "note_id": "SAMPLENOTE01",
-        "role": "user",
-        "tenant_id": "TENANT01",
-        "folder_title": "SAMPLE FOLDER TITLE1",
-        "note_title": "SAMPLE NOTE TITLE1",
-        "description": "SAMPLE DESCRIPTION 1",
-        "tags": [
-            "tag1",
-            "tag2"
-        ]
-    }
-    doc_id, summary_doc, chunk_docs = get_document_objects(data)
-    print(doc_id, summary_doc, '\n', chunk_docs[0], time.time() - start)
+# In that sense, the document is designed to be difficult. It is long enough to create many candidate spans, repetitive enough to inflate common terms, abstract enough to blur semantic boundaries, and vague enough to make subphrase pruning uncertain. It includes multiple references to day and night, to the same idea expressed in different ways, to overlapping concepts like management and coordination, and to generic nouns like thing, stuff, part, piece, item, and element. A keyword extractor has to decide what matters most, even though the text keeps suggesting that almost everything matters equally. That is exactly what makes it a useful stress test.
+# """
+#     import time
+#     start = time.time()
+#     data = {
+#         "text": text,
+#         "user_id": "SAMPLEUSER01",
+#         "folder_id": "SAMPLESFOLDER01",
+#         "note_id": "SAMPLENOTE01",
+#         "role": "user",
+#         "tenant_id": "TENANT01",
+#         "folder_title": "SAMPLE FOLDER TITLE1",
+#         "note_title": "SAMPLE NOTE TITLE1",
+#         "description": "SAMPLE DESCRIPTION 1",
+#         "tags": [
+#             "tag1",
+#             "tag2"
+#         ]
+#     }
+#     _run_ingestion(data)
+#     print("Total ingestion time: ", time.time() - start)
 
 
 

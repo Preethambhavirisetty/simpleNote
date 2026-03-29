@@ -1,11 +1,13 @@
 celery==5.6.2
 psycopg[binary]
 fastapi==0.135.1
+fastembed==0.8.0
 llama-index-core
 llama-index-embeddings-huggingface==0.6.1
 llama-index-llms-openai>=0.7.3
 llama-index-llms-openai-like>=0.7.1
 llama-index-vector-stores-qdrant==0.10.0
+llama-index-sparse-embeddings-fastembed-0.4.0 
 pydantic==2.12.5
 python-dotenv==1.2.2
 qdrant-client==1.17.0

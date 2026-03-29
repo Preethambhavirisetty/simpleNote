@@ -18,6 +18,7 @@ MAX_CHUNK_SIZE = int(_require_env("MAX_CHUNK_SIZE"))
 CHUNK_OVERLAP = int(_require_env("CHUNK_OVERLAP"))
 
 EMBEDDING_MODEL = _require_env("EMBEDDING_MODEL") # "BAAI/bge-large-en-v1.5"
+SPARSE_EMBEDDING_MODEL = _require_env("SPARSE_EMBEDDING_MODEL") # Qdrant/bm42-all-minilm-l6-v2-attentions
 RERANKER_MODEL = _require_env("RERANKER_MODEL") # "cross-encoder/ms-marco-MiniLM-L-6-v2"
 VECTOR_DB = _require_env("VECTOR_DB")
 BREAKPOINT_PERCENTILE = int(_require_env("BREAKPOINT_PERCENTILE"))
@@ -36,6 +37,12 @@ INGESTION_TASK_STRING = _require_env("INGESTION_TASK_STRING")
 # Shared secret for agent HTTP endpoints.  Set the same value in the backend's .env
 # and send it as the `X-API-Key` header on every request to /ingest, /get-context, /retrieve.
 AGENT_API_KEY = _require_env("AGENT_API_KEY")
+# Retrieval soft-scoring weights (should sum to 1.0)
+SOFT_W_RRF = float(os.getenv("SOFT_W_RRF", "0.6"))
+SOFT_W_KEYWORD = float(os.getenv("SOFT_W_KEYWORD", "0.15"))
+SOFT_W_ENTITY = float(os.getenv("SOFT_W_ENTITY", "0.15"))
+SOFT_W_QUALITY = float(os.getenv("SOFT_W_QUALITY", "0.1"))
+
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", MESSAGE_BROKER_URL)
 INGESTION_QUEUE = os.getenv("INGESTION_QUEUE", "ingestion")
 
