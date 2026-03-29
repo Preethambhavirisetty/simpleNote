@@ -218,7 +218,6 @@ _TRAIL_STRIP = _FUNC_WORDS | _VAGUE_TRAIL
 def _get_spacy_nlp():
     global _spacy_nlp
     if _spacy_nlp is None:
-        print("No en_core_we_sm model found, loading it now!")
         try:
             import spacy
             _spacy_nlp = spacy.load("en_core_web_sm")
@@ -372,6 +371,40 @@ def _is_subphrase(a: str, b: str) -> bool:
     return _split_tokens(a).issubset(_split_tokens(b))
 
 
+_ENTITY_LABELS = frozenset({
+    "ORG", "PRODUCT", "PERSON", "GPE", "EVENT",
+    "WORK_OF_ART", "FAC", "LOC", "NORP",
+})
+
+
+def extract_entities(text: str, doc=None) -> list[str]:
+    """Extract named entities from text, deduplicated and cleaned.
+
+    If a pre-built spaCy/textacy doc is provided, it is reused to avoid
+    double-processing.  Returns ``[]`` when spaCy is unavailable.
+    """
+    if doc is None:
+        nlp = _get_spacy_nlp()
+        if nlp is None:
+            return []
+        try:
+            import textacy
+        except ImportError:
+            return []
+        doc = textacy.make_spacy_doc(text[:nlp.max_length], lang=nlp)
+
+    seen: set[str] = set()
+    entities: list[str] = []
+    for ent in doc.ents:
+        if ent.label_ in _ENTITY_LABELS:
+            cleaned = _clean_term(ent.text)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                entities.append(cleaned)
+    return entities
+
+
+
 def prune_keywords(keywords: list[str]) -> list[str]:
     if not keywords:
         return []
@@ -398,7 +431,7 @@ def prune_keywords(keywords: list[str]) -> list[str]:
 
 # ── Primary path: SGRank + YAKE combined, POS-validated ──────────────────
 
-def _extract_hybrid(text: str, top_n: int = 20) -> list[str] | None:
+def _extract_hybrid(text: str, top_n: int = 20) -> tuple[list[str], list[str]] | None:
     """Combined textacy SGRank + YAKE, with spaCy POS validation."""
     nlp = _get_spacy_nlp()
     if nlp is None:
@@ -436,16 +469,12 @@ def _extract_hybrid(text: str, top_n: int = 20) -> list[str] | None:
             inv_score = 1.0 / (1.0 + yake_score)
             _score(term_text, inv_score * 1.5)
 
-    # Named entities: always valuable (names, orgs, products, etc.)
-    for ent in doc.ents:
-        if ent.label_ in ("ORG", "PRODUCT", "PERSON", "GPE", "EVENT",
-                           "WORK_OF_ART", "FAC", "LOC", "NORP"):
-            cleaned = _clean_term(ent.text)
-            if cleaned:
-                scores[cleaned] = scores.get(cleaned, 0) + 2.0
+    entities = extract_entities(text, doc)
+    for entity in entities:
+        scores[entity] = scores.get(entity, 0) + 2.0
 
     ranked = sorted(scores, key=lambda k: scores[k], reverse=True)
-    return ranked[:top_n * 2]
+    return ranked[:top_n * 2], entities
 
 
 # ── Fallback path: YAKE only (no spaCy available) ───────────────────────
@@ -497,39 +526,33 @@ def _extract_yake_fallback(text: str, top_n: int = 20) -> list[str]:
 
 # ── Public API ───────────────────────────────────────────────────────────
 
-def extract_keywords(text: str, top_n: int = 20) -> list[str]:
-    """Extract keywords using SGRank + YAKE hybrid (primary) or YAKE-only (fallback).
+def extract_keywords(text: str, top_n: int = 20) -> tuple[list[str], list[str]]:
+    """Extract keywords and named entities from text.
 
-    Returns a deduplicated, pruned list of up to ``top_n`` keywords.
+    Returns ``(keywords, entities)`` where *keywords* is a deduplicated,
+    pruned list of up to ``top_n`` keywords and *entities* is a list of
+    named entities (ORG, PERSON, GPE, etc.).  Entities are ``[]`` when
+    spaCy is unavailable.
     """
-    keywords = _extract_hybrid(text, top_n)
+    result = _extract_hybrid(text, top_n)
 
-    if keywords is None:
+    if result is not None:
+        keywords, entities = result
+    else:
         keywords = _extract_yake_fallback(text, top_n)
+        entities = []
 
-    return prune_keywords(keywords)[:top_n]
+    return prune_keywords(keywords)[:top_n], entities
 
 if __name__ == '__main__':
     text = """
-The document/documents begins with the idea that the organization is always doing something, even when it is not doing very much at all. On paper, the system appears organized, but in practice the system is mostly a collection of activities, operations, processes, notes, reports, and discussions that are repeated in different forms throughout the day. During the day, the team talks about coordination, and at night the same team talks about coordination again, but with slightly different words, as if repetition itself were a strategy. The report about the work refers to the report as if the report were both the cause and the effect of the work.
-
-In the first section, there is a mention of alignment, strategy, management, implementation, workflow, integration, and output. In the second section, those same terms appear again, but they are surrounded by words like thing, stuff, part, item, element, factor, aspect, and piece. The text keeps saying that one thing leads to another thing, that one activity influences another activity, and that one operation affects another operation, yet the exact relationship between these things is never fully explained. The result is a situation where the situation itself becomes the subject of the discussion.
-
-The project team is described in several ways. Sometimes it is the operations team. Sometimes it is the management team. Sometimes it is the delivery team. Sometimes it is simply the team. Sometimes it is not even a team but a group, a unit, a collection, or a set of people working on the same thing. The document also refers to the organization, the company, the department, the office, and the group as though these were interchangeable, which makes entity extraction difficult. The organization wants better organization, the company wants better coordination, and the department wants better management, but all of these goals are expressed using the same generic language.
-
-There are multiple references to the phase, the stage, the step, the process, the procedure, the cycle, and the sequence. Every phase contains a review, every review contains a note, every note contains a comment, every comment contains a remark, and every remark contains another reference to the same project. The implementation phase is mentioned alongside the planning phase, the analysis phase, the execution phase, the validation phase, and the closing phase, but each one seems to contain the same content repeated under a different heading. The document makes it look like there are many distinct stages when in reality there is very little variation.
-
-The text also includes a long discussion of data, logs, records, outputs, results, metrics, values, and summaries. The data is said to support the report, but the report is also said to define the data. The logs are said to show the output, but the output is also said to confirm the logs. The metrics are said to measure performance, but performance is never clearly separated from activity, work, or output. This creates a loop in which every noun points back to another noun, and every conclusion points back to the original statement.
-
-Sometimes the document switches to more abstract language. It talks about improvement, optimization, efficiency, quality, consistency, reliability, structure, clarity, and stability. These are repeated in different combinations, often with modifiers like better, more, less, stronger, clearer, faster, and simpler. The text claims that the workflow should be clearer, the operations should be smoother, the coordination should be stronger, the management should be better, and the integration should be tighter, but these claims are not backed by concrete detail. Instead, the document uses phrases like “the thing we need,” “the way forward,” “the right approach,” and “the better path,” which sound useful but do not add much semantic precision.
-
-At several points, the document becomes circular. It says that the report should improve the report. It says that the summary should summarize the summary. It says that the review should review the review. It says that the process should process the process. It says that the system should stabilize the system. These statements are grammatically valid but semantically weak. They create a worst-case scenario for a keyword extractor because the same words appear in many contexts, often without clear importance or hierarchy.
-
-The final section repeats the core themes one more time: team, report, work, process, system, output, management, operations, coordination, integration, workflow, phase, data, log, result, organization, and situation. The conclusion does not introduce new information; it only rephrases what has already been said. If a keyword extractor relies too heavily on frequency, it may surface the wrong terms. If it relies too heavily on shallow phrase matching, it may keep phrases that are merely repeated rather than truly meaningful. If it relies too heavily on surface form without normalization, it may treat plural and singular variants as unrelated terms even though they refer to the same concept.
-
-In that sense, the document is designed to be difficult. It is long enough to create many candidate spans, repetitive enough to inflate common terms, abstract enough to blur semantic boundaries, and vague enough to make subphrase pruning uncertain. It includes multiple references to day and night, to the same idea expressed in different ways, to overlapping concepts like management and coordination, and to generic nouns like thing, stuff, part, piece, item, and element. A keyword extractor has to decide what matters most, even though the text keeps suggesting that almost everything matters equally. That is exactly what makes it a useful stress test.
+u/TechGuru_99 • 4h ago • r/GadgetHeads
+Just grabbed the new Pixel 8 Pro from the Google Store in Mountain View!
+Has anyone tried comparing the Tensor G3 chip against the Apple A17 Pro? I’m heading to London next Tuesday for CES 2024 and want to know if the battery holds up on a 10-hour flight. I paid about $999 plus tax. Also, shoutout to Marques Brownlee for the solid review that convinced me to switch from my old Samsung S21.
 """
     import time
     start = time.time()
-    keywords = extract_keywords(text, 8)
-    print(keywords, len(keywords), len(text.split()), time.time() - start)
+    kws, entities = extract_keywords(text)
+    print(f"total words: {len(text.split())}, total processing time: {time.time() - start}")
+    print(kws, len(kws))
+    print(entities, len(entities))

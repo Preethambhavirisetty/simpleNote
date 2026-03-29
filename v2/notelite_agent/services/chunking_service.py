@@ -647,12 +647,17 @@ def get_document_objects(data):
     tenant_id = data.get("tenant_id")
     doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
 
-    # ── Step 2: Keyword extraction (YAKE + spaCy + SGRank) per chunk ─────────────
-    chunk_keywords = [extract_keywords(c, _TOP_N_KEYWORDS) for c in chunks]
+    # ── Step 2: Keyword + entity extraction per chunk ──────────────────────
+    chunk_results = [extract_keywords(c, _TOP_N_KEYWORDS) for c in chunks]
+    chunk_keywords = [kws for kws, _ in chunk_results]
+    chunk_entities = [ents for _, ents in chunk_results]
+
     all_keywords = [kw for kws in chunk_keywords for kw in kws]
     keywords_counter = Counter(all_keywords)
     filtered_keywords = [(kw, count) for kw, count in keywords_counter.items() if count >= 2 or len(kw.split()) >= 2]
     sorted_keywords = [kw for (kw, _) in sorted(filtered_keywords, key=lambda x: x[1], reverse=True)[:40]]
+
+    all_entities = list(dict.fromkeys(ent for ents in chunk_entities for ent in ents))
 
     # ── Step 3: Keyword deduplication via LLM ───────────────────────────
     top_keywords = _deduplicate_keywords_llm(sorted_keywords) if sorted_keywords else []
@@ -690,6 +695,7 @@ def get_document_objects(data):
 
         summary_meta = _shared_metadata()
         summary_meta["keywords"] = ','.join(top_keywords)
+        summary_meta["entities"] = ','.join(all_entities)
 
         summary_doc = LlamaDocument(
             id_=hashlib.sha256(f"{doc_id}-summary".encode()).hexdigest(),
@@ -707,6 +713,9 @@ def get_document_objects(data):
         meta["chunk_id"] = idx
         meta["keywords"] = ','.join(
             chunk_keywords[idx - 1] if idx - 1 < len(chunk_keywords) else []
+        )
+        meta["entities"] = ','.join(
+            chunk_entities[idx - 1] if idx - 1 < len(chunk_entities) else []
         )
         meta["parent_summary"] = overall_summary or ""
 
@@ -730,12 +739,6 @@ def get_document_objects(data):
         len(chunk_docs), bool(summary_doc), doc_id,
     )
     return doc_id, summary_doc, chunk_docs
-
-
-# if __name__ == "__main__":
-#     # text="""Test Case: The Future of Networking Stuff and Other Things Introduction In this conversation today, I wanted to take some time to talk about something that has been on my mind for a few days. When we look at the activity of modern networking, there is always a new thing to consider. This time, I am focusing on how we handle the various bits of data that move through our systems at night and during the day. It is a conversation that many of us have had before, but I think this time it is different because of a few factors. The Main Activity When you are working with Cisco Catalyst switches or perhaps some Nexus stuff, you often run into a situation where you need to manage anything that comes across the wire. That night when I was reviewing the logs, I realized that the activity wasn't just about the hardware; it was about the software things as well. We often say that "time is money," but in networking, time is latency. If you don't fix the latency thing, you will have a bad day. I’ve noticed a few people mentioning that they want to see more technical bits in these posts. So, let’s look at something specific. When we configure an interface, we aren't just doing a thing; we are establishing a protocol conversation. This conversation happens all the time, whether it is day or night. If anything goes wrong during this time, the whole activity could fail. A Few More Things to Consider There is always something new to learn about SD-WAN stuff. Last night, I was thinking about the conversation we had regarding security things. It’s not just about one thing; it’s about all the things combined. For instance, if you have a few routers that aren't synced, you’ll spend a lot of time fixing the sync activity. This time, I recommend looking at the automation bits. Automation is the thing that will save us time in the long run. Anything can happen when you are deploying a new configuration. That night, we saw a few errors that didn't mean anything at first, but over time, they became a major thing. We spent the whole day looking at the activity logs, trying to find something—anything—that would explain the behavior.  Conclusion To wrap this up, I hope this conversation provided a few insights into the stuff we do every day. Networking is a complex activity, and there is always something to improve. Next time, we will talk about more specific Cisco things and how to manage the bits and pieces of your infrastructure during the day. It’s been a long night, but I think we’ve covered a lot of things."""
-#     text = "bits and bit and the same as thing and things but all activities should be consider as the main priority which doesn't give any SD-WAN stuff or Nexus stuff"
-#     print("Keywords:", extract_keywords(text, top_n=20))
 
 
 if __name__ == '__main__':
@@ -938,9 +941,13 @@ def get_document_objects(data):
     tenant_id = data.get("tenant_id")
     doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
 
-    # ── Step 2: Keyword extraction (YAKE + spaCy) per chunk ─────────────
-    chunk_keywords = [extract_keywords(c) for c in chunks]
+    # ── Step 2: Keyword + entity extraction per chunk ──────────────────
+    chunk_results = [extract_keywords(c) for c in chunks]
+    chunk_keywords = [kws for kws, _ in chunk_results]
+    chunk_entities = [ents for _, ents in chunk_results]
+
     all_keywords = [kw for kws in chunk_keywords for kw in kws]
+    all_entities = list(dict.fromkeys(ent for ents in chunk_entities for ent in ents))
 
     # ── Steps 3-4: Recursive summarization ──────────────────────────────
     overall_summary = _recursive_summarize(chunks)
@@ -978,6 +985,7 @@ def get_document_objects(data):
 
         summary_meta = _shared_metadata()
         summary_meta["keywords"] = ','.join(top_keywords)
+        summary_meta["entities"] = ','.join(all_entities)
 
         summary_doc = LlamaDocument(
             id_=hashlib.sha256(f"{doc_id}-summary".encode()).hexdigest(),
@@ -995,6 +1003,9 @@ def get_document_objects(data):
         meta["chunk_id"] = idx
         meta["keywords"] = ','.join(
             chunk_keywords[idx - 1] if idx - 1 < len(chunk_keywords) else []
+        )
+        meta["entities"] = ','.join(
+            chunk_entities[idx - 1] if idx - 1 < len(chunk_entities) else []
         )
         meta["parent_summary"] = overall_summary or ""
 
