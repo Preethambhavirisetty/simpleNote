@@ -7,12 +7,16 @@ class DBHandler(ABC):
         """Connect to an existing persisted store."""
 
     @abstractmethod
-    def upsert(self, documents, doc_id, persist_directory):
-        """Ingest documents into the store."""
+    def upsert(self, summary_doc, chunk_docs, doc_id, persist_directory):
+        """Ingest a summary document and chunk documents into the store."""
 
     @abstractmethod
-    def search(self, query, k, filter=None):
-        """Run similarity search, return list of Documents."""
+    def search(self, query, k, filter=None, doc_ids=None):
+        """Run similarity search on chunks, return list of Documents."""
+
+    def search_summaries(self, query, k, filter=None):
+        """Search document summaries, return list of (Document, score) tuples."""
+        raise NotImplementedError
 
     @abstractmethod
     def count(self, filter=None):
@@ -20,10 +24,10 @@ class DBHandler(ABC):
 
     @abstractmethod
     def get_all_documents(self, filter=None):
-        """Return all stored Documents for BM25 indexing."""
+        """Return all stored chunk Documents for BM25 indexing."""
 
     def delete(self, filter=None):
-        """Delete documents matching filter."""
+        """Delete documents matching filter from all collections."""
         raise NotImplementedError("Delete operation not implemented for this handler.")
 
     def close(self):

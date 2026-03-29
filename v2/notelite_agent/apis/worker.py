@@ -40,7 +40,7 @@ init_llama_index_settings()
 def _run_ingestion(data):
     # Defensive in case worker process hot-reloads.
     init_llama_index_settings()
-    doc_id, llama_docs = get_document_objects(data)
+    doc_id, summary_doc, chunk_docs = get_document_objects(data)
     access_context = AccessContext(
         user_id=data["user_id"],
         role=data["role"],
@@ -48,7 +48,8 @@ def _run_ingestion(data):
     )
     with VectorStore() as db:
         db.upsert(
-            llama_docs,
+            summary_doc,
+            chunk_docs,
             doc_id,
             access_context=access_context,
         )

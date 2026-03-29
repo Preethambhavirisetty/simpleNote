@@ -8,14 +8,8 @@ from core.config import QDRANT_COLLECTION, QDRANT_URL
 
 log = logging.getLogger(__name__)
 
-COLLECTION_NAME = QDRANT_COLLECTION
-
-# Named-vector keys — every point stores two separate embeddings:
-#   chunk_vec   → embedding of the raw chunk text
-#   summary_vec → embedding of the Mistral-generated chunk summary
-#                 (falls back to chunk text when Mistral is unavailable)
-CHUNK_VEC   = "chunk_vec"
-SUMMARY_VEC = "summary_vec"
+CHUNK_COLLECTION = QDRANT_COLLECTION
+SUMMARY_COLLECTION = f"{QDRANT_COLLECTION}_summaries"
 
 
 class QdrantHandler(DBHandler):
@@ -28,48 +22,46 @@ class QdrantHandler(DBHandler):
         except (ValueError, TypeError):
             return str(uuid.uuid5(uuid.NAMESPACE_DNS, str(raw_id)))
 
-    def _create_collection(self):
-        """Create the collection with both named vector spaces."""
+    def _create_collection(self, name):
         sample = Settings.embed_model.get_text_embedding("dimension check")
         dim = len(sample)
         self._client.create_collection(
-            collection_name=COLLECTION_NAME,
+            collection_name=name,
             vectors_config={
-                CHUNK_VEC:   models.VectorParams(size=dim, distance=models.Distance.COSINE),
-                SUMMARY_VEC: models.VectorParams(size=dim, distance=models.Distance.COSINE),
+                "dense": models.VectorParams(size=dim, distance=models.Distance.COSINE)
             },
+            sparse_vectors_config={
+                "sparse": {}
+            }
         )
-        log.info("Created Qdrant collection '%s' with named vectors (dim=%d).", COLLECTION_NAME, dim)
+        log.info("Created Qdrant collection '%s' (dim=%d).", name, dim)
 
-    def _ensure_collection(self):
-        if not self._client.collection_exists(COLLECTION_NAME):
-            self._create_collection()
-            return
+    def _ensure_collections(self):
+        if self._client.collection_exists(CHUNK_COLLECTION):
+            info = self._client.get_collection(CHUNK_COLLECTION)
+            vec_cfg = info.config.params.vectors
+            if isinstance(vec_cfg, dict):
+                log.warning(
+                    "Collection '%s' uses old named-vector schema. "
+                    "Dropping and recreating. Re-ingest all notes.",
+                    CHUNK_COLLECTION,
+                )
+                self._client.delete_collection(CHUNK_COLLECTION)
+                self._create_collection(CHUNK_COLLECTION)
+        else:
+            self._create_collection(CHUNK_COLLECTION)
 
-        # Detect old single-vector schema and auto-migrate.
-        # The old schema stores a single VectorParams object; the new schema stores a dict.
-        info = self._client.get_collection(COLLECTION_NAME)
-        vec_cfg = info.config.params.vectors
-        if isinstance(vec_cfg, dict) and CHUNK_VEC in vec_cfg and SUMMARY_VEC in vec_cfg:
-            return  # Already using named-vector schema
-
-        log.warning(
-            "Collection '%s' uses the old single-vector schema. "
-            "Dropping and recreating with named vectors. Re-ingest all notes.",
-            COLLECTION_NAME,
-        )
-        self._client.delete_collection(COLLECTION_NAME)
-        self._create_collection()
+        if not self._client.collection_exists(SUMMARY_COLLECTION):
+            self._create_collection(SUMMARY_COLLECTION)
 
     def connect(self, embedder=None, persist_directory=None):
         self._client = QdrantClient(url=QDRANT_URL)
-        self._ensure_collection()
+        self._ensure_collections()
 
-    def upsert(self, llama_docs, doc_id, persist_directory=None):
+    def upsert(self, summary_doc, chunk_docs, doc_id, persist_directory=None):
         self._client = QdrantClient(url=QDRANT_URL)
-        self._ensure_collection()
+        self._ensure_collections()
 
-        # Remove stale chunks for this document before re-inserting.
         doc_filter = models.Filter(
             must=[
                 models.FieldCondition(
@@ -78,27 +70,59 @@ class QdrantHandler(DBHandler):
                 )
             ]
         )
+
         self._client.delete(
-            collection_name=COLLECTION_NAME,
+            collection_name=CHUNK_COLLECTION,
+            points_selector=models.FilterSelector(filter=doc_filter),
+        )
+        self._client.delete(
+            collection_name=SUMMARY_COLLECTION,
             points_selector=models.FilterSelector(filter=doc_filter),
         )
 
-        chunk_texts   = [doc.text for doc in llama_docs]
-        # Fall back to chunk text when Mistral summary is absent so the point is complete.
-        summary_texts = [doc.metadata.get("summary") or doc.text for doc in llama_docs]
-
-        chunk_vecs   = [Settings.embed_model.get_text_embedding(t) for t in chunk_texts]
-        summary_vecs = [Settings.embed_model.get_text_embedding(s) for s in summary_texts]
-
-        points = [
-            models.PointStruct(
-                id=self._to_point_id(doc.id_ or f"doc-{idx}"),
-                vector={CHUNK_VEC: cv, SUMMARY_VEC: sv},
-                payload={"text": doc.text, "metadata": doc.metadata or {}},
+        if summary_doc:
+            summary_vec = Settings.embed_model.get_text_embedding(summary_doc.text)
+            doc_id = summary_doc.metadata.get("doc_id")
+            if doc_id is None:
+                raise ValueError("doc_id not found!")
+            keywords = summary_doc.metadata.get("keywords", [])
+            entities = summary_doc.metadata.get("entities", [])
+            self._client.upsert(
+                collection_name=SUMMARY_COLLECTION,
+                points=[
+                    models.PointStruct(
+                        id=self._to_point_id(summary_doc.id_),
+                        vector=summary_vec,
+                        payload={
+                            "doc_id": doc_id,
+                            "text": summary_doc.text,
+                            "keywords": keywords,
+                            "entities": entities,
+                            "metadata": summary_doc.metadata or {},
+                        },
+                    )
+                ],
             )
-            for idx, (doc, cv, sv) in enumerate(zip(llama_docs, chunk_vecs, summary_vecs))
-        ]
-        self._client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+        if chunk_docs:
+            chunk_texts = [doc.text for doc in chunk_docs]
+            chunk_vecs = [
+                Settings.embed_model.get_text_embedding(t) for t in chunk_texts
+            ]
+            points = [
+                models.PointStruct(
+                    id=self._to_point_id(doc.id_ or f"doc-{idx}"),
+                    vector=cv,
+                    payload={
+                        "text": doc.text,
+                        "keywords": doc.metadata.pop("keywords") if "keywords" in doc.metadata else [],
+                        "entities": doc.metadata.pop("entities") if "entities" in doc.metadata else [],
+                        "metadata": doc.metadata or {}
+                    },
+                )
+                for idx, (doc, cv) in enumerate(zip(chunk_docs, chunk_vecs))
+            ]
+            self._client.upsert(collection_name=CHUNK_COLLECTION, points=points)
 
     def _build_qdrant_filter(self, filter=None):
         if not filter:
@@ -112,47 +136,67 @@ class QdrantHandler(DBHandler):
         ]
         return models.Filter(must=conditions)
 
-    def search(self, query, k, filter=None):
-        """Search both vector spaces and return a deduplicated union of results.
-
-        Chunk-vector hits capture exact wording; summary-vector hits capture semantic
-        intent even when a query uses different phrasing than the original text.
-        """
-        query_vector  = Settings.embed_model.get_query_embedding(query)
+    def search_summaries(self, query, k, filter=None):
+        """Search doc_summaries collection, return [(LlamaDocument, score), ...]."""
+        query_vector = Settings.embed_model.get_query_embedding(query)
         qdrant_filter = self._build_qdrant_filter(filter)
+        results = self._client.query_points(
+            collection_name=SUMMARY_COLLECTION,
+            query=query_vector,
+            limit=k,
+            query_filter=qdrant_filter,
+        ).points
+        return [
+            (
+                LlamaDocument(
+                    id_=str(point.id),
+                    text=point.payload.get("text", ""),
+                    metadata=point.payload.get("metadata", {}),
+                ),
+                point.score,
+            )
+            for point in results
+        ]
 
-        def _query(using):
-            return self._client.query_points(
-                collection_name=COLLECTION_NAME,
-                query=query_vector,
-                using=using,
-                limit=k,
-                query_filter=qdrant_filter,
-            ).points
-
-        chunk_hits   = _query(CHUNK_VEC)
-        summary_hits = _query(SUMMARY_VEC)
-
-        # Union: chunk hits are listed first (higher direct-match priority),
-        # summary hits fill in anything not already captured.
-        seen   = set()
-        merged = []
-        for point in chunk_hits + summary_hits:
-            if point.id not in seen:
-                seen.add(point.id)
-                merged.append(
-                    LlamaDocument(
-                        id_=str(point.id),
-                        text=point.payload.get("text", ""),
-                        metadata=point.payload.get("metadata", {}),
+    def search(self, query, k, filter=None, doc_ids=None):
+        """Search doc_chunks collection, optionally scoped to specific doc_ids."""
+        query_vector = Settings.embed_model.get_query_embedding(query)
+        conditions = []
+        if filter:
+            for key, value in filter.items():
+                conditions.append(
+                    models.FieldCondition(
+                        key=f"metadata.{key}",
+                        match=models.MatchValue(value=value),
                     )
                 )
-        return merged
+        if doc_ids:
+            conditions.append(
+                models.FieldCondition(
+                    key="metadata.doc_id",
+                    match=models.MatchAny(any=doc_ids),
+                )
+            )
+        qdrant_filter = models.Filter(must=conditions) if conditions else None
+        results = self._client.query_points(
+            collection_name=CHUNK_COLLECTION,
+            query=query_vector,
+            limit=k,
+            query_filter=qdrant_filter,
+        ).points
+        return [
+            LlamaDocument(
+                id_=str(point.id),
+                text=point.payload.get("text", ""),
+                metadata=point.payload.get("metadata", {}),
+            )
+            for point in results
+        ]
 
     def count(self, filter=None):
         qdrant_filter = self._build_qdrant_filter(filter)
         return self._client.count(
-            collection_name=COLLECTION_NAME,
+            collection_name=CHUNK_COLLECTION,
             count_filter=qdrant_filter,
             exact=True,
         ).count
@@ -163,7 +207,7 @@ class QdrantHandler(DBHandler):
         qdrant_filter = self._build_qdrant_filter(filter)
         while True:
             results, offset = self._client.scroll(
-                collection_name=COLLECTION_NAME,
+                collection_name=CHUNK_COLLECTION,
                 limit=100,
                 offset=offset,
                 scroll_filter=qdrant_filter,
@@ -189,9 +233,14 @@ class QdrantHandler(DBHandler):
         if not qdrant_filter:
             return
         self._client.delete(
-            collection_name=COLLECTION_NAME,
+            collection_name=CHUNK_COLLECTION,
             points_selector=models.FilterSelector(filter=qdrant_filter),
         )
+        if self._client.collection_exists(SUMMARY_COLLECTION):
+            self._client.delete(
+                collection_name=SUMMARY_COLLECTION,
+                points_selector=models.FilterSelector(filter=qdrant_filter),
+            )
 
     def close(self):
         if self._client:

@@ -3,6 +3,7 @@ import logging
 from llama_index.core import Settings
 from llama_index.llms.openai_like import OpenAILike
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.sparse_embeddings.fastembed import FastEmbedSparseEmbedding
 from core.config import (
     LLM_API_BASE,
     LLM_API_KEY,
@@ -75,6 +76,8 @@ def init_llama_index_settings():
         query_instruction="Represent this sentence for searching relevant passages: ",
         cache_folder=_cache_dir,
     )
+
+    Settings.sparse_model = FastEmbedSparseEmbedding(model_name="Qdrant/bm25")
 
     Settings.chunk_size    = MAX_CHUNK_SIZE
     Settings.chunk_overlap = CHUNK_OVERLAP
