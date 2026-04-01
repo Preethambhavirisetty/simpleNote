@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <algorithm>
+#include <unistd.h>
 
 // ── Log suppression ───────────────────────────────────────────────────────────
 
@@ -19,39 +20,60 @@ void suppress_llama_internal_logs() {
 
 // ── Model paths ───────────────────────────────────────────────────────────────
 //   Two models live in notelite_inference/models/:
-//     • Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf  → primary reasoning / summarisation
-//     • mistral_7b_instruct_v0_2_Q5_K_M.gguf     → intent classification / query parsing
+//     • mistral_7b_instruct_v0_2_Q5_K_M.gguf     → summarization (summaries, query parsing, question gen)
+//     • Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf   → chat (user Q&A)
 //
 //   Override at runtime with env vars:
-//     MODEL_PURPOSE_SUMMARY        → path for reasoning model
-//     MODEL_PURPOSE_QUERY_PARSING  → path for intent model
-//     LLAMA_MODEL_PATH             → single-model fallback
+//     MODEL_PURPOSE_SUMMARIZATION  → path for summarization model (Mistral)
+//     MODEL_PURPOSE_CHAT           → path for chat model (Llama)
+//     LLAMA_MODEL_PATH             → single-model fallback (applies to ALL purposes)
 
-static const char* DEFAULT_PATH_SUMMARY =
-    "/Users/rbhaviri/Desktop/_others/simpleNote/v2/notelite_inference/models/"
-    "Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf";
+static const char* FILENAME_SUMMARIZATION = "mistral_7b_instruct_v0_2_Q5_K_M.gguf";
+static const char* FILENAME_CHAT          = "Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf";
 
-static const char* DEFAULT_PATH_QUERY_PARSING =
-    "/Users/rbhaviri/Desktop/_others/simpleNote/v2/notelite_inference/models/"
-    "mistral_7b_instruct_v0_2_Q5_K_M.gguf";
+static std::string resolve_model_file(const char* filename) {
+    // Container mount path (docker-compose mounts ./models → /models)
+    std::string container_path = std::string("/models/") + filename;
+    if (access(container_path.c_str(), R_OK) == 0)
+        return container_path;
+
+    // Local development (running from notelite_inference/ or its build/ dir)
+    std::string local_path = std::string("models/") + filename;
+    if (access(local_path.c_str(), R_OK) == 0)
+        return local_path;
+
+    std::string parent_path = std::string("../models/") + filename;
+    if (access(parent_path.c_str(), R_OK) == 0)
+        return parent_path;
+
+    return container_path;
+}
 
 static std::string get_model_path_for_purpose(const std::string& purpose) {
-    if (purpose == "query_parsing") {
-        const char* env = std::getenv("MODEL_PURPOSE_QUERY_PARSING");
+    if (purpose == "summarization") {
+        const char* env = std::getenv("MODEL_PURPOSE_SUMMARIZATION");
         if (env && env[0]) return env;
-        return DEFAULT_PATH_QUERY_PARSING;
+    } else {
+        const char* env = std::getenv("MODEL_PURPOSE_CHAT");
+        if (env && env[0]) return env;
     }
-    // "summary", "default", or anything else → reasoning model
-    const char* env = std::getenv("MODEL_PURPOSE_SUMMARY");
-    if (env && env[0]) return env;
-    // Single-model override
+
+    // LLAMA_MODEL_PATH acts as a single-model override for any purpose
     const char* gen = std::getenv("LLAMA_MODEL_PATH");
     if (gen && gen[0]) return gen;
-    return DEFAULT_PATH_SUMMARY;
+
+    const char* filename = (purpose == "summarization")
+        ? FILENAME_SUMMARIZATION
+        : FILENAME_CHAT;
+    return resolve_model_file(filename);
 }
 
 static std::string normalize_purpose(const std::string& purpose) {
-    if (purpose.empty() || purpose == "default") return "summary";
+    // Backward-compat: map legacy keys to the two canonical purpose names
+    if (purpose.empty() || purpose == "default" ||
+        purpose == "query_parsing" || purpose == "intent" || purpose == "summary")
+        return "summarization";
+    if (purpose == "chat" || purpose == "reasoning") return "chat";
     return purpose;
 }
 
@@ -60,6 +82,15 @@ static std::string normalize_purpose(const std::string& purpose) {
 static std::map<std::string, ModelContext*> g_models;
 static std::mutex g_map_mutex;
 static std::mutex g_inference_mutex;
+
+static int env_int(const char* name, int fallback) {
+    const char* v = std::getenv(name);
+    if (v && v[0]) {
+        int n = std::atoi(v);
+        if (n > 0) return n;
+    }
+    return fallback;
+}
 
 static ModelContext* ensure_model_loaded(const std::string& purpose_key) {
     {
@@ -72,8 +103,9 @@ static ModelContext* ensure_model_loaded(const std::string& purpose_key) {
     std::cout << "Loading model for purpose='" << purpose_key << "' from " << path << "\n";
 
     LoadOptions opts;
-    opts.embedding = (get_service_mode() == ServiceMode::Embedding);
-    opts.n_ctx     = opts.embedding ? 4096 : 32768;
+    opts.embedding    = (get_service_mode() == ServiceMode::Embedding);
+    opts.n_ctx        = opts.embedding ? 4096 : env_int("LLAMA_N_CTX", 8192);
+    opts.n_gpu_layers = env_int("LLAMA_N_GPU_LAYERS", 999);
 
     ModelContext* mc = load_model(path, opts);
     if (!mc) {
@@ -84,12 +116,13 @@ static ModelContext* ensure_model_loaded(const std::string& purpose_key) {
     std::lock_guard<std::mutex> lk(g_map_mutex);
     auto it = g_models.find(purpose_key);
     if (it != g_models.end() && it->second) {
-        // Another thread already loaded it while we were loading — discard ours.
         cleanup_model(mc);
         return it->second;
     }
     g_models[purpose_key] = mc;
-    std::cout << "Model loaded (purpose=" << purpose_key << ").\n";
+    std::cout << "Model loaded (purpose=" << purpose_key
+              << ", n_ctx=" << opts.n_ctx
+              << ", n_gpu_layers=" << opts.n_gpu_layers << ").\n";
     return mc;
 }
 
@@ -182,9 +215,9 @@ std::string run_inference_with_history(
     std::string full_prompt = apply_chat_template(messages, purpose_key);
     if (full_prompt.length() > 65536) return "Error: Prompt too long (max 65536 characters)";
 
-    const SamplingConfig& preset = (purpose_key == "query_parsing")
-        ? SamplingPresets::BALANCED_0_1
-        : SamplingPresets::REASONING;
+    const SamplingConfig& preset = (purpose_key == "summarization")
+        ? SamplingPresets::BALANCED_0_1   // greedy → structured output (Mistral)
+        : SamplingPresets::REASONING;     // near-greedy CoT → conversational (Llama)
 
     std::lock_guard<std::mutex> lock(g_inference_mutex);
     // add_bos=false: template already includes BOS (<|begin_of_text|> or <s>)
@@ -208,10 +241,9 @@ std::string run_chat_completion(
     std::string full_prompt = apply_chat_template(messages, purpose_key);
     if (full_prompt.length() > 65536) return "Error: Prompt too long (max 65536 characters)";
 
-    // Start from the preset; selectively override with caller-supplied params.
-    SamplingConfig cfg = (purpose_key == "query_parsing")
-        ? SamplingPresets::BALANCED_0_1   // greedy → structured JSON / intent
-        : SamplingPresets::REASONING;     // near-greedy CoT → Llama reasoning
+    SamplingConfig cfg = (purpose_key == "summarization")
+        ? SamplingPresets::BALANCED_0_1   // greedy → structured output (Mistral)
+        : SamplingPresets::REASONING;     // near-greedy CoT → conversational (Llama)
 
     if (temperature_override >= 0.0f) cfg.temperature  = temperature_override;
     if (max_tokens_override  >  0)    cfg.max_predict   = max_tokens_override;
@@ -235,18 +267,11 @@ std::vector<float> run_embed(const std::string& text) {
 
 void shutdown_inference() {
     std::lock_guard<std::mutex> lk(g_map_mutex);
-    bool first = true;
     for (auto& kv : g_models) {
         if (!kv.second) continue;
-        if (first) {
-            cleanup_model(kv.second);  // also calls llama_backend_free()
-            first = false;
-        } else {
-            if (kv.second->ctx)   llama_free(kv.second->ctx);
-            if (kv.second->model) llama_model_free(kv.second->model);
-            delete kv.second;
-        }
+        cleanup_model(kv.second);
         kv.second = nullptr;
     }
     g_models.clear();
+    free_backend();
 }

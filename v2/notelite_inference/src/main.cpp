@@ -4,13 +4,19 @@
 #include <cstring>
 #include "register_routes.h"
 #include "run_inference.h"
+#include "model_loader.h"
 #include "service_config.h"
 
 static void signal_handler(int) {
-    // captures interruption or termination signals for gracefull shutdown
     std::cout << "\nShutting down...\n";
     shutdown_inference();
     std::exit(0);
+}
+
+static ServiceMode parse_mode(const char* val) {
+    if (std::strcmp(val, "embedding") == 0) return ServiceMode::Embedding;
+    // "summarization" and "chat" both serve /v1/chat/completions (text generation)
+    return ServiceMode::Summarization;
 }
 
 static void parse_args(int argc, char** argv, ServiceMode& mode, std::string& api_key) {
@@ -21,19 +27,14 @@ static void parse_args(int argc, char** argv, ServiceMode& mode, std::string& ap
         } else if (std::strcmp(a, "--api-key") == 0 && i + 1 < argc) {
             api_key = argv[++i];
         } else if (std::strncmp(a, "--mode=", 7) == 0) {
-            if (std::strcmp(a + 7, "embedding") == 0) mode = ServiceMode::Embedding;
-            else if (std::strcmp(a + 7, "summarization") == 0) mode = ServiceMode::Summarization;
+            mode = parse_mode(a + 7);
         } else if (std::strcmp(a, "--mode") == 0 && i + 1 < argc) {
-            if (std::strcmp(argv[i + 1], "embedding") == 0) mode = ServiceMode::Embedding;
-            else if (std::strcmp(argv[i + 1], "summarization") == 0) mode = ServiceMode::Summarization;
-            i++;
+            mode = parse_mode(argv[++i]);
         }
     }
     const char* env_mode = std::getenv("SERVICE_MODE");
-    if (env_mode) {
-        if (std::strcmp(env_mode, "embedding") == 0) mode = ServiceMode::Embedding;
-        else if (std::strcmp(env_mode, "summarization") == 0) mode = ServiceMode::Summarization;
-    }
+    if (env_mode && env_mode[0])
+        mode = parse_mode(env_mode);
 }
 
 int main(int argc, char** argv) {
@@ -46,6 +47,7 @@ int main(int argc, char** argv) {
     std::string api_key;
     parse_args(argc, argv, mode, api_key);
 
+    init_backend();
     suppress_llama_internal_logs();
 
     // Port: --port=N  |  PORT env var  |  default 8081

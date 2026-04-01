@@ -5,8 +5,9 @@
 #include "sampling_config.h"
 
 struct LoadOptions {
-    bool embedding = false;
-    int n_ctx = 4096;
+    bool embedding    = false;
+    int  n_ctx        = 4096;
+    int  n_gpu_layers = 999;   // 999 = offload all; reduce when running multiple models
 };
 
 struct ModelContext {
@@ -15,6 +16,9 @@ struct ModelContext {
     llama_context_params ctx_params;
     bool is_embedding = false;
 };
+
+void init_backend();
+void free_backend();
 
 ModelContext* load_model(const std::string& model_path, const LoadOptions& opts = LoadOptions{});
 

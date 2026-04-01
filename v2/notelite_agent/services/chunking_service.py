@@ -425,7 +425,7 @@ def _is_useless_summary(text: str) -> bool:
 
 
 def _summarize_chunk(text: str) -> str:
-    """Call Mistral (routed via purpose=query_parsing) for a concise 1-2 sentence summary.
+    """Call Mistral (routed via purpose=summarization) for a concise 1-2 sentence summary.
     Returns an empty string on any failure or when the model produces a placeholder refusal,
     so the caller can fall back gracefully.
 
@@ -441,7 +441,7 @@ def _summarize_chunk(text: str) -> str:
         with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
             resp = client.post(
                 f"{LLM_API_BASE}/chat/completions",
-                params={"purpose": "query_parsing"},
+                params={"purpose": "summarization"},
                 headers={
                     "Authorization": f"Bearer {LLM_API_KEY}",
                     "Content-Type": "application/json",
@@ -525,7 +525,7 @@ def _deduplicate_keywords_llm(keywords: list[str]) -> list[str]:
         with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
             resp = client.post(
                 f"{LLM_API_BASE}/chat/completions",
-                params={"purpose": "query_parsing"},
+                params={"purpose": "summarization"},
                 headers={
                     "Authorization": f"Bearer {LLM_API_KEY}",
                     "Content-Type": "application/json",
@@ -571,7 +571,7 @@ def _generate_questions(overall_summary: str) -> list[str]:
         with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
             resp = client.post(
                 f"{LLM_API_BASE}/chat/completions",
-                params={"purpose": "query_parsing"},
+                params={"purpose": "summarization"},
                 headers={
                     "Authorization": f"Bearer {LLM_API_KEY}",
                     "Content-Type": "application/json",

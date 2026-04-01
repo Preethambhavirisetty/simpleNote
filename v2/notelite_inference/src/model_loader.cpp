@@ -12,22 +12,37 @@
 #include <cstring>
 
 static std::mutex g_context_mutex;
+static std::once_flag g_backend_init_flag;
+static bool g_backend_alive = false;
+
+void init_backend() {
+    std::call_once(g_backend_init_flag, [] {
+        llama_backend_init();
+        g_backend_alive = true;
+    });
+}
+
+void free_backend() {
+    if (g_backend_alive) {
+        llama_backend_free();
+        g_backend_alive = false;
+    }
+}
 
 // ── Model loading ────────────────────────────────────────────────────────────
 
 ModelContext* load_model(const std::string& model_path, const LoadOptions& opts) {
-    llama_backend_init();
+    init_backend();
 
     llama_model_params mparams = llama_model_default_params();
     mparams.use_mmap  = true;
-    mparams.n_gpu_layers = 999;  // offload all layers; falls back to CPU gracefully
+    mparams.n_gpu_layers = opts.n_gpu_layers;
     mparams.main_gpu  = 0;
     mparams.vocab_only = false;
 
     llama_model* model = llama_model_load_from_file(model_path.c_str(), mparams);
     if (!model) {
         std::cerr << "Failed to load model from: " << model_path << "\n";
-        llama_backend_free();
         return nullptr;
     }
 
@@ -49,7 +64,6 @@ ModelContext* load_model(const std::string& model_path, const LoadOptions& opts)
     if (!ctx) {
         std::cerr << "Failed to create context\n";
         llama_model_free(model);
-        llama_backend_free();
         return nullptr;
     }
 
@@ -399,5 +413,4 @@ void cleanup_model(ModelContext* mc) {
     if (mc->ctx)   llama_free(mc->ctx);
     if (mc->model) llama_model_free(mc->model);
     delete mc;
-    llama_backend_free();
 }

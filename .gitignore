@@ -3,4 +3,5 @@ __pycache__
 .env
 *.pyc
 _others
+docs/
 .DS_STORE

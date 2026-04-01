@@ -266,8 +266,8 @@ static std::string make_chat_completion_json(const std::string& content,
 
 // Map the model name from the request (or an explicit ?purpose= param) to
 // the purpose key understood by run_inference / model registry.
-//   • "mistral*" or explicit "query_parsing" / "intent" → query_parsing model
-//   • everything else (incl. "gpt-3.5-turbo")           → reasoning / summary
+//   • "mistral*" or explicit summarization/query_parsing/intent → Mistral (summarization)
+//   • "llama*", "gpt*", or explicit chat/qa                    → Llama  (chat)
 static std::string resolve_purpose(const std::string& model_name,
                                    const std::string& explicit_purpose) {
     if (!explicit_purpose.empty())
@@ -275,12 +275,13 @@ static std::string resolve_purpose(const std::string& model_name,
 
     std::string lc = model_name;
     std::transform(lc.begin(), lc.end(), lc.begin(), ::tolower);
-    if (lc.find("mistral")       != std::string::npos ||
-        lc.find("query_parsing") != std::string::npos ||
-        lc.find("intent")        != std::string::npos)
-        return "query_parsing";
+    if (lc.find("mistral")        != std::string::npos ||
+        lc.find("summarization")  != std::string::npos ||
+        lc.find("query_parsing")  != std::string::npos ||
+        lc.find("intent")         != std::string::npos)
+        return "summarization";
 
-    return "summary";  // → Llama reasoning model
+    return "chat";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -444,8 +445,7 @@ void register_routes(httplib::Server& svr, ServiceMode mode, const std::string& 
                     return;
                 }
 
-                // Echo back the model name the client sent so it recognises the response.
-                std::string resp_model = cr.model.empty() ? "llama-3.1-8b" : cr.model;
+                std::string resp_model = cr.model.empty() ? "notelite-inference" : cr.model;
                 std::string json_resp  = make_chat_completion_json(output, resp_model);
                 res.set_content(json_resp, "application/json");
                 std::cout << "POST /v1/chat/completions -> 200 (purpose=" << purpose
@@ -474,5 +474,5 @@ void register_routes(httplib::Server& svr, ServiceMode mode, const std::string& 
         std::cout << "  POST /embed\n";
     else
         std::cout << "  POST /v1/chat/completions  "
-                     "(OpenAI-compatible; ?purpose=summary|query_parsing)\n";
+                     "(OpenAI-compatible; ?purpose=summarization|chat)\n";
 }
