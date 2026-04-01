@@ -46,6 +46,9 @@ SOFT_W_PARENT = float(os.getenv("SOFT_W_PARENT", "0.1"))
 
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", MESSAGE_BROKER_URL)
 INGESTION_QUEUE = os.getenv("INGESTION_QUEUE", "ingestion")
+CONVERSATION_QUEUE = os.getenv("CONVERSATION_QUEUE", "conversation")
+
+BACKEND_API_URL = _require_env("BACKEND_API_URL")
 
 # Used only for version guard checks — read-only, one query per upsert task.
 # Accepts the same URL format as the backend (postgresql+psycopg://... is normalised automatically).

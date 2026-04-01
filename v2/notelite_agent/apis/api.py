@@ -1,13 +1,17 @@
+import json
 import secrets
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 
-from apis.schema import IngestionRequest, RetrieveRequest
-from apis.worker import ingest_in_background, worker_app
+from apis.schema import ChatRequest, IngestionRequest, RetrieveRequest
+from apis.worker import ingest_in_background, persist_message, worker_app
 from core.config import AGENT_API_KEY
 from core.contracts import AccessContext
 from services.storage_service import VectorStore
+from services import backend_client
 from llama_index.core import Settings
 from llama_index.core.llms import ChatMessage, MessageRole
 
@@ -129,6 +133,120 @@ def ask_llm(request: RetrieveRequest):
     ]
     response = Settings.llm.chat(messages)
     return {"answer": response.message.content}
+
+
+@router.post("/chat/stream")
+def chat_stream(request: ChatRequest):
+    """SSE streaming chat with write-ahead persistence.
+
+    Flow:
+    1. Create/reuse conversation → write-ahead user + assistant (partial) messages
+    2. Retrieve context from Qdrant
+    3. Call inference (blocking — server doesn't support SSE)
+    4. Stream response word-by-word to FE via SSE
+    5. Fire Celery task to finalize the assistant message
+    """
+    start_ms = time.monotonic()
+
+    # ── 1. Conversation bookkeeping ───────────────────────────────────────────
+    conv_id = request.conversation_id
+    if not conv_id:
+        conv = backend_client.create_conversation(
+            request.user_id,
+            title=request.conversation_title or request.query[:100],
+        )
+        conv_id = conv["id"]
+
+    user_msg = backend_client.create_message(
+        request.user_id, conv_id, role="user", content=request.query,
+    )
+
+    assistant_msg = backend_client.create_message(
+        request.user_id, conv_id, role="assistant", content="", status="partial",
+    )
+
+    # ── 2. RAG retrieval ─────────────────────────────────────────────────────
+    access_context = AccessContext(
+        user_id=request.user_id,
+        role=request.role,
+        tenant_id=request.tenant_id,
+    )
+    with VectorStore() as db:
+        results = db.retrieve_documents(
+            request.query, k=request.k, access_context=access_context,
+        )
+
+    context = "\n\n".join(doc.text for doc in results)
+    source_ids = [doc.metadata.get("note_id") for doc in results if doc.metadata.get("note_id")]
+
+    # ── 3. Inference ─────────────────────────────────────────────────────────
+    messages = [
+        ChatMessage(
+            role=MessageRole.SYSTEM,
+            content=(
+                "You are a helpful personal assistant that answers questions about the user's notes.\n\n"
+                "Rules:\n"
+                "- Answer using ONLY information from the provided context. Never use outside knowledge.\n"
+                "- Be conversational and direct — write naturally, like explaining to a friend.\n"
+                "- If the context does not contain enough information, say so honestly in one sentence.\n"
+                "- Do not invent details, steps, or facts not present in the context."
+            ),
+        ),
+        ChatMessage(
+            role=MessageRole.USER,
+            content=f"Context from my notes:\n{context}\n\nQuestion: {request.query}",
+        ),
+    ]
+
+    try:
+        response = Settings.llm.chat(messages)
+        answer = response.message.content
+        error = None
+    except Exception as e:
+        answer = ""
+        error = str(e)
+
+    latency_ms = int((time.monotonic() - start_ms) * 1000)
+
+    # ── 4. Stream response as SSE ────────────────────────────────────────────
+    def event_stream():
+        yield _sse("meta", {
+            "conversation_id": conv_id,
+            "message_id": assistant_msg["id"],
+            "user_message_id": user_msg["id"],
+        })
+
+        if error:
+            yield _sse("error", {"message": error})
+        else:
+            words = answer.split(" ")
+            for i, word in enumerate(words):
+                token = word if i == 0 else " " + word
+                yield _sse("delta", {"content": token})
+
+        yield _sse("done", {
+            "latency_ms": latency_ms,
+            "sources": list(set(source_ids)),
+        })
+
+        # ── 5. Async persistence ─────────────────────────────────────────
+        persist_message.delay({
+            "user_id": request.user_id,
+            "conversation_id": conv_id,
+            "message_id": assistant_msg["id"],
+            "content": answer,
+            "status": "error" if error else "complete",
+            "latency_ms": latency_ms,
+            "tokens_used": len(answer.split()) if answer else 0,
+            "sources_used": list(set(source_ids)),
+            "error_message": error,
+        })
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 """ Backup prompt

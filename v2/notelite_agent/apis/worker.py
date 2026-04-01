@@ -17,6 +17,8 @@ from services.chunking_service import get_document_objects
 log = logging.getLogger(__name__)
 
 
+CONVERSATION_TASK = "tasks.persist_message"
+
 worker_app = Celery(
     "tasks",
     broker=MESSAGE_BROKER_URL,
@@ -30,7 +32,10 @@ worker_app.conf.update(
     task_send_sent_event=True,
     broker_connection_retry_on_startup=True,
     task_ignore_result=False,
-    task_routes={INGESTION_TASK_STRING: {"queue": INGESTION_QUEUE}},
+    task_routes={
+        INGESTION_TASK_STRING: {"queue": INGESTION_QUEUE},
+        CONVERSATION_TASK: {"queue": INGESTION_QUEUE},
+    },
 )
 
 # Initialize once per worker process on import.
@@ -166,6 +171,32 @@ def ingest_in_background(self, data=None, **kwargs):
         "action": "upsert",
     }
 
+
+
+@worker_app.task(
+    name=CONVERSATION_TASK,
+    acks_late=True,
+    bind=True,
+    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    max_retries=3,
+    retry_backoff=True,
+)
+def persist_message(self, data: dict):
+    """Update the assistant message in the backend after streaming completes."""
+    from services import backend_client
+
+    backend_client.update_message(
+        user_id=data["user_id"],
+        conversation_id=data["conversation_id"],
+        message_id=data["message_id"],
+        content=data.get("content", ""),
+        status=data.get("status", "complete"),
+        latency_ms=data.get("latency_ms"),
+        tokens_used=data.get("tokens_used"),
+        sources_used=data.get("sources_used"),
+        error_message=data.get("error_message"),
+    )
+    return {"message": f"persisted message {data['message_id']}"}
 
 
 if __name__ == '__main__':

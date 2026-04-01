@@ -39,3 +39,4 @@ class User(Base):
     folders: Mapped[List["Folder"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     notes: Mapped[List["Note"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     tags: Mapped[List["Tag"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    conversations: Mapped[List["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
