@@ -16,10 +16,12 @@ std::string run_inference_with_history(
     const std::string& purpose
 );
 
+struct CompletionResult;
+
 // Primary API: OpenAI-style chat completion.
 // temperature_override < 0  → use preset default.
 // max_tokens_override   <= 0 → use preset default.
-std::string run_chat_completion(
+CompletionResult run_chat_completion(
     const std::vector<Message>& messages,
     const std::string& purpose,
     float temperature_override,

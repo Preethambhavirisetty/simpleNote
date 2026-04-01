@@ -93,14 +93,14 @@ static bool recreate_context(ModelContext* mc) {
 // `needs_recovery` is set to true when a decode failure leaves the context in a
 // corrupt state that llama_memory_clear alone cannot fix.
 
-static std::string generate_text_impl(ModelContext* mc, const std::string& prompt,
-                                      const SamplingConfig& config, bool add_bos,
-                                      bool& needs_recovery) {
+static CompletionResult generate_text_impl(ModelContext* mc, const std::string& prompt,
+                                           const SamplingConfig& config, bool add_bos,
+                                           bool& needs_recovery) {
     needs_recovery = false;
 
     if (!mc || !mc->model || !mc->ctx) {
         std::cerr << "Invalid model context\n";
-        return "Error: Invalid model context";
+        return {"Error: Invalid model context", 0, 0};
     }
 
     std::string final_prompt = prompt;
@@ -147,7 +147,7 @@ static std::string generate_text_impl(ModelContext* mc, const std::string& promp
         );
         if (n_tokens < 0) {
             std::cerr << "Tokenisation failed\n";
-            return "Error: Tokenisation failed";
+            return {"Error: Tokenisation failed", 0, 0};
         }
     }
     tokens.resize(static_cast<size_t>(n_tokens));
@@ -182,7 +182,7 @@ static std::string generate_text_impl(ModelContext* mc, const std::string& promp
         std::cerr << "Prefill decode failed (n_tokens=" << n_tokens << ")\n";
         llama_batch_free(batch);
         needs_recovery = true;
-        return "Error: Failed to decode prompt";
+        return {"Error: Failed to decode prompt", n_tokens, 0};
     }
 
     // ── Sampling & generation loop ───────────────────────────────────────────
@@ -317,34 +317,30 @@ static std::string generate_text_impl(ModelContext* mc, const std::string& promp
         }
     }
 
+    int completion_tokens = n_cur - n_tokens;
     llama_batch_free(batch);
 
     size_t s = output.find_first_not_of(" \t\n\r");
-    if (s == std::string::npos) return "";
+    if (s == std::string::npos) return {"", n_tokens, 0};
     size_t e = output.find_last_not_of(" \t\n\r");
-    return output.substr(s, e - s + 1);
+    return {output.substr(s, e - s + 1), n_tokens, completion_tokens};
 }
 
 // ── Public entry point with automatic recovery ──────────────────────────────
 
-std::string generate_text(ModelContext* mc, const std::string& prompt,
-                          const SamplingConfig& config, bool add_bos) {
-    // Fast path: clear only the KV cache (preserves Metal pipeline state).
+CompletionResult generate_text(ModelContext* mc, const std::string& prompt,
+                               const SamplingConfig& config, bool add_bos) {
     llama_memory_clear(llama_get_memory(mc->ctx), true);
 
     bool needs_recovery = false;
-    std::string result = generate_text_impl(mc, prompt, config, add_bos, needs_recovery);
+    CompletionResult result = generate_text_impl(mc, prompt, config, add_bos, needs_recovery);
 
     if (needs_recovery) {
-        // After a decode failure the context is corrupted beyond what
-        // llama_memory_clear can fix.  Destroy and recreate the full context
-        // (expensive, but recovers from any internal state corruption).
         std::cerr << "Context corrupted — recreating (one-time recovery)...\n";
         if (!recreate_context(mc)) {
             std::cerr << "Fatal: could not recreate context\n";
-            return result;  // return whatever partial output we got
+            return result;
         }
-        // Retry the same request on the fresh context.
         needs_recovery = false;
         result = generate_text_impl(mc, prompt, config, add_bos, needs_recovery);
         if (needs_recovery) {

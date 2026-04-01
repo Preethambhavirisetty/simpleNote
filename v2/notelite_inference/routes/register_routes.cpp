@@ -1,5 +1,6 @@
 #include "register_routes.h"
 #include "run_inference.h"
+#include "model_loader.h"
 #include "service_config.h"
 #include <iostream>
 #include <sstream>
@@ -232,14 +233,16 @@ static bool parse_chat_request(const std::string& body, ParsedChatRequest& out) 
     return !out.messages.empty();
 }
 
-// Build a proper OpenAI chat-completion response JSON.
 static std::string make_chat_completion_json(const std::string& content,
-                                              const std::string& model) {
+                                              const std::string& model,
+                                              int prompt_tokens,
+                                              int completion_tokens) {
     auto now = static_cast<long long>(std::time(nullptr));
 
-    // Generate a short hex ID from the timestamp
     char id_buf[32];
     snprintf(id_buf, sizeof(id_buf), "chatcmpl-%llx", (unsigned long long)now);
+
+    int total = prompt_tokens + completion_tokens;
 
     std::ostringstream j;
     j << "{"
@@ -256,9 +259,9 @@ static std::string make_chat_completion_json(const std::string& content,
       <<   "\"finish_reason\":\"stop\""
       << "}],"
       << "\"usage\":{"
-      <<   "\"prompt_tokens\":0,"
-      <<   "\"completion_tokens\":0,"
-      <<   "\"total_tokens\":0"
+      <<   "\"prompt_tokens\":"     << prompt_tokens     << ","
+      <<   "\"completion_tokens\":" << completion_tokens  << ","
+      <<   "\"total_tokens\":"      << total
       << "}"
       << "}";
     return j.str();
@@ -431,25 +434,29 @@ void register_routes(httplib::Server& svr, ServiceMode mode, const std::string& 
 
             // ── Run inference ───────────────────────────────────────────────
             try {
-                std::string output = run_chat_completion(
+                CompletionResult cr_out = run_chat_completion(
                     cr.messages,
                     purpose,
-                    cr.temperature,   // < 0 → preset used inside
-                    cr.max_tokens     // < 1 → preset used inside
+                    cr.temperature,
+                    cr.max_tokens
                 );
 
-                if (!output.empty() && output.compare(0, 6, "Error:") == 0) {
+                if (!cr_out.text.empty() && cr_out.text.compare(0, 6, "Error:") == 0) {
                     res.status = 500;
-                    res.set_content("{\"error\":\"" + json_escape(output) + "\"}", "application/json");
-                    std::cout << "POST /v1/chat/completions -> 500 (" << output << ")\n";
+                    res.set_content("{\"error\":\"" + json_escape(cr_out.text) + "\"}", "application/json");
+                    std::cout << "POST /v1/chat/completions -> 500 (" << cr_out.text << ")\n";
                     return;
                 }
 
                 std::string resp_model = cr.model.empty() ? "notelite-inference" : cr.model;
-                std::string json_resp  = make_chat_completion_json(output, resp_model);
+                std::string json_resp  = make_chat_completion_json(
+                    cr_out.text, resp_model,
+                    cr_out.prompt_tokens, cr_out.completion_tokens
+                );
                 res.set_content(json_resp, "application/json");
                 std::cout << "POST /v1/chat/completions -> 200 (purpose=" << purpose
-                          << ", tokens~" << output.size() / 4 << ")\n";
+                          << ", prompt=" << cr_out.prompt_tokens
+                          << ", completion=" << cr_out.completion_tokens << ")\n";
 
             } catch (const std::exception& e) {
                 res.status = 500;

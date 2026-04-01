@@ -84,10 +84,11 @@ static std::mutex g_map_mutex;
 static std::mutex g_inference_mutex;
 
 static int env_int(const char* name, int fallback) {
+    // getenv() only reads actual shell environment variables
     const char* v = std::getenv(name);
     if (v && v[0]) {
         int n = std::atoi(v);
-        if (n > 0) return n;
+        if (n >= 0) return n;
     }
     return fallback;
 }
@@ -201,8 +202,6 @@ std::string run_inference_with_history(
     ModelContext* mc = ensure_model_loaded(purpose_key);
     if (!mc) return "Error: Model failed to load for purpose='" + purpose_key + "'.";
 
-    // Convert history + current prompt into a Messages list and apply the
-    // correct chat template for the loaded model.
     std::vector<Message> messages;
     size_t start = (history.size() > MAX_HISTORY_TURNS)
                  ? history.size() - MAX_HISTORY_TURNS : 0;
@@ -216,34 +215,33 @@ std::string run_inference_with_history(
     if (full_prompt.length() > 65536) return "Error: Prompt too long (max 65536 characters)";
 
     const SamplingConfig& preset = (purpose_key == "summarization")
-        ? SamplingPresets::BALANCED_0_1   // greedy → structured output (Mistral)
-        : SamplingPresets::REASONING;     // near-greedy CoT → conversational (Llama)
+        ? SamplingPresets::BALANCED_0_1
+        : SamplingPresets::REASONING;
 
     std::lock_guard<std::mutex> lock(g_inference_mutex);
-    // add_bos=false: template already includes BOS (<|begin_of_text|> or <s>)
-    return generate_text(mc, full_prompt, preset, /*add_bos=*/false);
+    return generate_text(mc, full_prompt, preset, /*add_bos=*/false).text;
 }
 
-std::string run_chat_completion(
+CompletionResult run_chat_completion(
     const std::vector<Message>& messages,
     const std::string& purpose,
     float temperature_override,
     int max_tokens_override)
 {
     if (get_service_mode() == ServiceMode::Embedding)
-        return "Error: This instance is for embedding, not inference.";
-    if (messages.empty()) return "Error: No messages provided";
+        return {"Error: This instance is for embedding, not inference.", 0, 0};
+    if (messages.empty()) return {"Error: No messages provided", 0, 0};
 
     std::string purpose_key = normalize_purpose(purpose);
     ModelContext* mc = ensure_model_loaded(purpose_key);
-    if (!mc) return "Error: Model failed to load for purpose='" + purpose_key + "'.";
+    if (!mc) return {"Error: Model failed to load for purpose='" + purpose_key + "'.", 0, 0};
 
     std::string full_prompt = apply_chat_template(messages, purpose_key);
-    if (full_prompt.length() > 65536) return "Error: Prompt too long (max 65536 characters)";
+    if (full_prompt.length() > 65536) return {"Error: Prompt too long (max 65536 characters)", 0, 0};
 
     SamplingConfig cfg = (purpose_key == "summarization")
-        ? SamplingPresets::BALANCED_0_1   // greedy → structured output (Mistral)
-        : SamplingPresets::REASONING;     // near-greedy CoT → conversational (Llama)
+        ? SamplingPresets::BALANCED_0_1
+        : SamplingPresets::REASONING;
 
     if (temperature_override >= 0.0f) cfg.temperature  = temperature_override;
     if (max_tokens_override  >  0)    cfg.max_predict   = max_tokens_override;
