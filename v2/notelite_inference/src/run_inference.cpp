@@ -106,7 +106,7 @@ static ModelContext* ensure_model_loaded(const std::string& purpose_key) {
     LoadOptions opts;
     opts.embedding    = (get_service_mode() == ServiceMode::Embedding);
     opts.n_ctx        = opts.embedding ? 4096 : env_int("LLAMA_N_CTX", 8192);
-    opts.n_gpu_layers = env_int("LLAMA_N_GPU_LAYERS", 999);
+    opts.n_gpu_layers = env_int("LLAMA_N_GPU_LAYERS", 999); // if on macbook, all model layers offload to M3 Pro's GPU via Metal
 
     ModelContext* mc = load_model(path, opts);
     if (!mc) {

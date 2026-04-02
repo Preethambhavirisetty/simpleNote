@@ -24,6 +24,7 @@ const router = createBrowserRouter([
       { path: 'notes', element: <NotesPage /> },
       { path: 'folders/:folderId', element: <NotesPage /> },
       { path: 'chat', element: <ChatPage /> },
+      { path: 'chat/:conversationId', element: <ChatPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

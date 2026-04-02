@@ -1,59 +1,78 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import { agentApi, streamChatCompletions } from '@/api/agent'
+import { conversationsApi } from '@/api/conversations'
+import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
 
 export const useChatStore = create(
   devtools(
     (set, get) => ({
-      messages: [], // { id, role, content, timestamp, isLoading?, isStreaming?, isError? }
+      conversations: [],
+      activeConvId: null,
+      messages: [],
       isStreaming: false,
+      isLoadingConvs: false,
+      isLoadingMessages: false,
       error: null,
-      // 'rag'  → POST /api/chat (RAG pipeline, structured answer)
-      // 'stream' → POST /v1/chat/completions (OpenAI-compatible streaming)
-      mode: 'rag',
 
-      setMode: (mode) => set({ mode }),
+      // ── Conversation list ──────────────────────────────────────────
 
-      clearMessages: () => set({ messages: [], error: null }),
-
-      // ---- RAG mode ----
-      sendRagMessage: async (query) => {
-        const { user } = useAuthStore.getState()
-        const userMsg = _makeMsg('user', query)
-        const assistantMsg = _makeMsg('assistant', '', { isLoading: true })
-
-        set((s) => ({ messages: [...s.messages, userMsg, assistantMsg], isStreaming: true, error: null }))
-
+      fetchConversations: async () => {
+        if (get().isLoadingConvs) return
+        set({ isLoadingConvs: true })
         try {
-          const { data } = await agentApi.chat({
-            query,
-            k: 5,
-            user_id: user?.id,
-            role: user?.roles?.includes('admin') ? 'admin' : 'user',
-            tenant_id: user?.id,
-          })
-
-          const answer = typeof data === 'string'
-            ? data
-            : data?.answer ?? data?.result ?? JSON.stringify(data)
-          _updateLastMsg(set, { content: answer, isLoading: false })
+          const list = await conversationsApi.list({ limit: 100 })
+          set({ conversations: list, isLoadingConvs: false })
         } catch (err) {
-          _updateLastMsg(set, {
-            content: `Error: ${err.response?.data?.detail ?? err.message ?? 'Request failed'}`,
-            isLoading: false,
-            isError: true,
-          })
-          set({ error: err.message })
-        } finally {
-          set({ isStreaming: false })
+          console.error('[chatStore] fetchConversations failed:', err)
+          set({ isLoadingConvs: false })
         }
       },
 
-      // ---- Streaming mode (/v1/chat/completions) ----
-      sendStreamMessage: async (content) => {
-        const { messages } = get()
-        const userMsg = _makeMsg('user', content)
+      selectConversation: async (convId) => {
+        if (get().activeConvId === convId) return
+        set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
+        try {
+          const conv = await conversationsApi.get(convId)
+          const msgs = (conv.messages ?? []).map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.created_at,
+            sources: m.sources_used,
+          }))
+          set({ messages: msgs, isLoadingMessages: false })
+        } catch (err) {
+          console.error('[chatStore] selectConversation failed:', err)
+          set({ isLoadingMessages: false, error: 'Failed to load conversation' })
+        }
+      },
+
+      newConversation: () => {
+        set({ activeConvId: null, messages: [], error: null })
+      },
+
+      deleteConversation: async (convId) => {
+        try {
+          await conversationsApi.delete(convId)
+          const { activeConvId } = get()
+          set((s) => ({
+            conversations: s.conversations.filter((c) => c.id !== convId),
+            ...(activeConvId === convId ? { activeConvId: null, messages: [] } : {}),
+          }))
+        } catch {
+          // silent
+        }
+      },
+
+      // ── Streaming chat ─────────────────────────────────────────────
+
+      sendMessage: async (query) => {
+        const { user } = useAuthStore.getState()
+        if (!user) return
+
+        const { activeConvId, messages } = get()
+        const userMsg = _makeMsg('user', query)
         const assistantMsg = _makeMsg('assistant', '', { isStreaming: true })
 
         set((s) => ({
@@ -62,25 +81,73 @@ export const useChatStore = create(
           error: null,
         }))
 
-        // Build history including the new user message
-        const history = [
-          ...messages.map((m) => ({ role: m.role, content: m.content })),
-          { role: 'user', content },
-        ]
+        const body = {
+          query,
+          k: 5,
+          user_id: user.id,
+          role: user.roles?.includes('admin') ? 'admin' : 'user',
+          tenant_id: user.id,
+          conversation_id: activeConvId || undefined,
+          conversation_title: !activeConvId && messages.length === 0 ? query.slice(0, 100) : undefined,
+        }
 
-        await streamChatCompletions({
-          messages: history,
-          onChunk: (chunk) => {
-            set((s) => ({
-              messages: s.messages.map((m, i) =>
-                i === s.messages.length - 1 ? { ...m, content: m.content + chunk } : m,
-              ),
-            }))
+        await streamChat({
+          body,
+          onMeta: (meta) => {
+            const convId = meta.conversation_id
+            set({ activeConvId: convId })
+
+            if (meta.user_message_id) {
+              set((s) => ({
+                messages: s.messages.map((m) =>
+                  m.id === userMsg.id ? { ...m, id: meta.user_message_id } : m,
+                ),
+              }))
+            }
+            if (meta.message_id) {
+              set((s) => ({
+                messages: s.messages.map((m) =>
+                  m.id === assistantMsg.id ? { ...m, id: meta.message_id } : m,
+                ),
+              }))
+            }
+
+            set((s) => {
+              const exists = s.conversations.some((c) => c.id === convId)
+              if (exists) return {}
+              return {
+                conversations: [
+                  { id: convId, title: body.conversation_title || query.slice(0, 100), updated_at: new Date().toISOString() },
+                  ...s.conversations,
+                ],
+              }
+            })
           },
-          onDone: () => {
-            _updateLastMsg(set, { isStreaming: false })
-            set({ isStreaming: false })
+
+          onDelta: (content) => {
+            set((s) => {
+              const msgs = [...s.messages]
+              const last = msgs[msgs.length - 1]
+              msgs[msgs.length - 1] = { ...last, content: last.content + content }
+              return { messages: msgs }
+            })
           },
+
+          onDone: (payload) => {
+            set((s) => {
+              const msgs = [...s.messages]
+              const last = msgs[msgs.length - 1]
+              msgs[msgs.length - 1] = {
+                ...last,
+                isStreaming: false,
+                sources: payload?.sources,
+                latency_ms: payload?.latency_ms,
+              }
+              return { messages: msgs, isStreaming: false }
+            })
+            get().fetchConversations()
+          },
+
           onError: (err) => {
             _updateLastMsg(set, {
               content: `Error: ${err.message}`,
@@ -101,7 +168,7 @@ export const useChatStore = create(
 let _msgCounter = 0
 
 function _makeMsg(role, content, extra = {}) {
-  return { id: ++_msgCounter, role, content, timestamp: new Date().toISOString(), ...extra }
+  return { id: `tmp-${++_msgCounter}`, role, content, timestamp: new Date().toISOString(), ...extra }
 }
 
 function _updateLastMsg(set, patch) {

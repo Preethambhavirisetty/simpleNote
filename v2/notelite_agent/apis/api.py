@@ -1,19 +1,23 @@
 import json
+import logging
 import secrets
 import time
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader
 
 from apis.schema import ChatRequest, IngestionRequest, RetrieveRequest
 from apis.worker import ingest_in_background, persist_message, worker_app
-from core.config import AGENT_API_KEY
+from core.config import AGENT_API_KEY, CHAT_LLM_API_BASE, LLM_API_KEY
 from core.contracts import AccessContext
 from services.storage_service import VectorStore
 from services import backend_client
 from llama_index.core import Settings
 from llama_index.core.llms import ChatMessage, MessageRole
+
+log = logging.getLogger(__name__)
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -179,11 +183,11 @@ def chat_stream(request: ChatRequest):
     context = "\n\n".join(doc.text for doc in results)
     source_ids = [doc.metadata.get("note_id") for doc in results if doc.metadata.get("note_id")]
 
-    # ── 3. Inference ─────────────────────────────────────────────────────────
-    messages = [
-        ChatMessage(
-            role=MessageRole.SYSTEM,
-            content=(
+    # ── 3. Inference (via chat LLM, not summarization) ─────────────────────
+    chat_messages = [
+        {
+            "role": "system",
+            "content": (
                 "You are a helpful personal assistant that answers questions about the user's notes.\n\n"
                 "Rules:\n"
                 "- Answer using ONLY information from the provided context. Never use outside knowledge.\n"
@@ -191,19 +195,29 @@ def chat_stream(request: ChatRequest):
                 "- If the context does not contain enough information, say so honestly in one sentence.\n"
                 "- Do not invent details, steps, or facts not present in the context."
             ),
-        ),
-        ChatMessage(
-            role=MessageRole.USER,
-            content=f"Context from my notes:\n{context}\n\nQuestion: {request.query}",
-        ),
+        },
+        {
+            "role": "user",
+            "content": f"Context from my notes:\n{context}\n\nQuestion: {request.query}",
+        },
     ]
 
+    answer = ""
+    error = None
+    tokens_used = 0
     try:
-        response = Settings.llm.chat(messages)
-        answer = response.message.content
-        error = None
+        resp = httpx.post(
+            f"{CHAT_LLM_API_BASE}/chat/completions",
+            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+            json={"model": "llama3.1", "messages": chat_messages, "max_tokens": 1024},
+            timeout=300.0,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        answer = body["choices"][0]["message"]["content"]
+        tokens_used = body.get("usage", {}).get("total_tokens", 0)
     except Exception as e:
-        answer = ""
+        log.exception("Chat inference failed")
         error = str(e)
 
     latency_ms = int((time.monotonic() - start_ms) * 1000)
@@ -223,6 +237,7 @@ def chat_stream(request: ChatRequest):
             for i, word in enumerate(words):
                 token = word if i == 0 else " " + word
                 yield _sse("delta", {"content": token})
+                time.sleep(0.02)
 
         yield _sse("done", {
             "latency_ms": latency_ms,
@@ -237,7 +252,7 @@ def chat_stream(request: ChatRequest):
             "content": answer,
             "status": "error" if error else "complete",
             "latency_ms": latency_ms,
-            "tokens_used": len(answer.split()) if answer else 0,
+            "tokens_used": tokens_used,
             "sources_used": list(set(source_ids)),
             "error_message": error,
         })

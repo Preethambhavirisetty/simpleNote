@@ -128,7 +128,9 @@ services:
       LLM_API_KEY:            ${AGENT_API_KEY}
       LLM_MODEL:              gpt-3.5-turbo
       LLM_CONTEXT_WINDOW:     "4096"
+      CHAT_LLM_API_BASE:      http://host.containers.internal:8082/v1
       QDRANT_URL:             http://qdrant:6333
+      BACKEND_API_URL:        http://backend:8000
       QDRANT_COLLECTION:      knowledge
       VECTOR_DB:              qdrant
       EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
@@ -149,7 +151,7 @@ services:
     networks:
       - notelite-net
 
-  # Agent Celery worker — ingestion queue
+  # Agent Celery worker — ingestion + conversation queues
   agent-celery:
     build:
       context: ./notelite_agent
@@ -157,7 +159,7 @@ services:
     container_name: notelite-agent-celery
     restart: unless-stopped
     command: ["python", "-m", "celery", "-A", "apis.worker.worker_app", "worker",
-              "--loglevel=info", "-Q", "ingestion", "-c", "2", "-n", "agent-celery@%h"]
+              "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h"]
     environment:
       LLAMA_INDEX_CACHE_DIR:  /tmp/llama_index
       HF_HOME:                /tmp/hf_cache
@@ -167,7 +169,9 @@ services:
       LLM_API_KEY:            ${AGENT_API_KEY}
       LLM_MODEL:              gpt-3.5-turbo
       LLM_CONTEXT_WINDOW:     "4096"
+      CHAT_LLM_API_BASE:      http://host.containers.internal:8082/v1
       QDRANT_URL:             http://qdrant:6333
+      BACKEND_API_URL:        http://backend:8000
       QDRANT_COLLECTION:      knowledge
       VECTOR_DB:              qdrant
       EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
