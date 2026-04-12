@@ -9,6 +9,12 @@ podman run -d \
 
 podman logs -f notelite-postgres
 
+### Ignores saved creds
+git -c credential.helper= push origin notelite-v2-enhancement
+
+### to check local settings
+git config --local -l
+
 
 **Secure ingestion queue pipeline**
 python3 -c "import secrets; print(secrets.token_hex(32))"

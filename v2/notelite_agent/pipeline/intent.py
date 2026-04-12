@@ -1,7 +1,15 @@
+"""Query intent detection (experimental).
+
+Classifies queries as aggregation vs factual and detects knowledge type
+filters via keyword matching with embedding similarity fallback.
+
+Not wired into the retrieval pipeline yet — available as a future stage.
+"""
+
 import re
-import numpy as np
 from dataclasses import dataclass
 
+import numpy as np
 
 AGGREGATION_PATTERN = re.compile(
     r'\b(how many|how much|count|total\s+number|summarize|give\s+(?:me\s+)?(?:a\s+)?summary)\b',

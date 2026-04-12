@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from apis.api import router as api_router
+
+from apis.routes import router as api_router
 from core.settings import init_llama_index_settings
 
 
@@ -12,7 +13,6 @@ app = FastAPI(
 
 @app.on_event("startup")
 def on_startup():
-    # Initialize LlamaIndex/embedding/LLM settings once for the process.
     init_llama_index_settings()
 
 

@@ -1,12 +1,22 @@
+"""Vector store facade — retrieval, upsert, and scoring.
+
+Orchestrates two-stage retrieval:
+    1. Summary collection (dense + questions vectors) → doc_id scoping
+    2. Chunk collection (hybrid dense + sparse RRF)
+    3. Soft scoring (keyword/entity Jaccard + quality)
+    4. Optional cross-encoder reranking
+"""
+
 import os
 import shutil
 import sys
 import importlib
+
 from core.config import (
     DB_PATH, VECTOR_DB, RERANKER_MODEL, QDRANT_URL,
     SOFT_W_RRF, SOFT_W_KEYWORD, SOFT_W_ENTITY, SOFT_W_QUALITY, SOFT_W_PARENT,
 )
-from handlers.keyword_extractor import extract_keywords
+from pipeline.keywords import extract_keywords
 from core.contracts import AccessContext
 from core.settings import is_llama_index_settings_initialized
 from llama_index.core import Settings
@@ -29,6 +39,8 @@ _QUERY_STOP = frozenset({
     "this", "that", "these", "those", "me", "him", "us", "them",
 })
 
+
+# ── Soft scoring helpers ─────────────────────────────────────────────────
 
 def _tokenize_phrases(phrases):
     """Break keyword/entity phrases into lowercased tokens, expanding hyphens."""
@@ -57,14 +69,10 @@ def _entity_recall(query_ent_set, doc_ent_set):
 def _soft_score(query, results):
     """Re-sort (doc, rrf_score) pairs by blending RRF, keyword/entity
     similarity, parent-summary overlap, and stored doc_quality.
-
-    Uses extract_keywords for POS-validated query analysis with a
-    stopword-filtered fallback when extraction returns nothing.
     """
     if len(results) < 2:
         return results
 
-    # ── Query analysis via the full keyword/entity pipeline ───────
     try:
         query_kws, query_ents = extract_keywords(query, top_n=10)
     except Exception:
@@ -79,7 +87,6 @@ def _soft_score(query, results):
         }
     query_ent_set = {e.lower() for e in query_ents}
 
-    # ── RRF normalisation (min-max to [0, 1]) ────────────────────
     rrf_scores = [s for _, s in results]
     min_s, max_s = min(rrf_scores), max(rrf_scores)
     spread = max_s - min_s if max_s > min_s else 1.0
@@ -113,8 +120,6 @@ def _soft_score(query, results):
             + SOFT_W_PARENT * parent_sim
             + SOFT_W_QUALITY * quality
         )
-
-        # Tiebreaker: preserve original RRF ordering for equal soft scores
         soft += rrf_raw * 1e-6
 
         scored.append((doc, soft))
@@ -122,6 +127,8 @@ def _soft_score(query, results):
     scored.sort(key=lambda x: x[1], reverse=True)
     return scored
 
+
+# ── VectorStore ──────────────────────────────────────────────────────────
 
 class VectorStore:
     def __init__(self, persist_directory=DB_PATH):
@@ -141,14 +148,9 @@ class VectorStore:
     def embedder(self):
         return self._embedder
 
-    # ------ HELPERS METHODS ------------------------------------
-
     @staticmethod
     def _load_handler(vector_db_name):
-        """
-        Load handler factory robustly across runtime contexts
-        (uvicorn, celery worker, tests, different cwd/PYTHONPATH).
-        """
+        """Load handler factory robustly across runtime contexts."""
         module_candidates = ["handlers", "rag.handlers"]
         for module_name in module_candidates:
             try:
@@ -178,7 +180,6 @@ class VectorStore:
         return access_context.apply_scope(filter)
 
     def _is_backend_reachable(self) -> bool:
-        """Return True when a Qdrant server URL is configured or a local store exists."""
         return bool(QDRANT_URL) or os.path.exists(self._persist_directory)
 
     def _ensure_connected(self):
@@ -187,8 +188,6 @@ class VectorStore:
                 self.connect()
             else:
                 raise RuntimeError("No vector store found. Call load() to ingest documents first.")
-
-    # ------ CORE METHODS ------------------------------------
 
     def connect(self):
         self._handler.connect(self._embedder, self._persist_directory)
@@ -211,28 +210,16 @@ class VectorStore:
         candidates=10,
         access_context=None,
     ):
-        """
-        Query
-        → Step 1: Summary collection (dense search) → doc_id scoping
-        → Step 2: Chunk collection (hybrid: dense + sparse RRF)
-        → Step 3.5: Soft scoring (new)
-        → Step 4: Cross-encoder rerank
-        → Top-k results
-        """
+        """Two-stage retrieval: summaries → doc scoping → hybrid chunk search → soft score → rerank."""
         self._ensure_connected()
         if not isinstance(access_context, AccessContext):
             raise TypeError("access_context must be an AccessContext instance.")
         scoped_filter = self._resolve_scope_filter(access_context, filter)
         fetch_k = max(candidates, k)
 
-        # ── Step 1: Query doc_summaries (dense) ──────────────────────────
-        summary_results = self._handler.search_summaries(
-            query, k=10, filter=scoped_filter,
-        )
+        summary_results = self._handler.search_summaries(query, k=10, filter=scoped_filter)
 
-        # ── Step 2: Determine doc scope for chunk search ─────────────────
         doc_ids = None
-
         if summary_results:
             scores = [score for _, score in summary_results]
 
@@ -256,15 +243,9 @@ class VectorStore:
                         for doc, _ in summary_results[:_MAX_FILTERED_DOCS]
                     ]
 
-        # ── Step 3: Hybrid chunk retrieval (dense + sparse in Qdrant) ────
-        results = self._handler.search(
-            query, fetch_k, scoped_filter, doc_ids=doc_ids,
-        )
-
-        # ── Step 3.5: Soft scoring (RRF + keyword/entity Jaccard + quality)
+        results = self._handler.search(query, fetch_k, scoped_filter, doc_ids=doc_ids)
         results = _soft_score(query, results)
 
-        # ── Step 4: Optional cross-encoder reranking ─────────────────────
         if rerank and len(results) > 1:
             if self._reranker is None:
                 from sentence_transformers import CrossEncoder
@@ -303,8 +284,7 @@ class VectorStore:
             for doc in all_docs:
                 if doc.metadata.get("user_id") != access_context.user_id:
                     raise PermissionError("Users can only upsert their own documents.")
-        
-        print("***************** qdrant upset invoked! *****************")
+
         self._handler.upsert(summary_doc, chunk_docs, doc_id, self._persist_directory)
         self._connected = True
 
@@ -328,8 +308,6 @@ class VectorStore:
         scoped_filter = self._resolve_scope_filter(access_context, filter)
         return self._handler.count(scoped_filter)
 
-    # ------ CLEAN UP METHODS ------------------------------------
-
     def close(self):
         self._handler.close()
         self._connected = False
@@ -339,46 +317,3 @@ class VectorStore:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-
-
-
-if __name__ == "__main__":
-    text = """
-The document/documents begins with the idea that the organization is always doing something, even when it is not doing very much at all. On paper, the system appears organized, but in practice the system is mostly a collection of activities, operations, processes, notes, reports, and discussions that are repeated in different forms throughout the day. During the day, the team talks about coordination, and at night the same team talks about coordination again, but with slightly different words, as if repetition itself were a strategy. The report about the work refers to the report as if the report were both the cause and the effect of the work.
-
-In the first section, there is a mention of alignment, strategy, management, implementation, workflow, integration, and output. In the second section, those same terms appear again, but they are surrounded by words like thing, stuff, part, item, element, factor, aspect, and piece. The text keeps saying that one thing leads to another thing, that one activity influences another activity, and that one operation affects another operation, yet the exact relationship between these things is never fully explained. The result is a situation where the situation itself becomes the subject of the discussion.
-
-The project team is described in several ways. Sometimes it is the operations team. Sometimes it is the management team. Sometimes it is the delivery team. Sometimes it is simply the team. Sometimes it is not even a team but a group, a unit, a collection, or a set of people working on the same thing. The document also refers to the organization, the company, the department, the office, and the group as though these were interchangeable, which makes entity extraction difficult. The organization wants better organization, the company wants better coordination, and the department wants better management, but all of these goals are expressed using the same generic language.
-
-There are multiple references to the phase, the stage, the step, the process, the procedure, the cycle, and the sequence. Every phase contains a review, every review contains a note, every note contains a comment, every comment contains a remark, and every remark contains another reference to the same project. The implementation phase is mentioned alongside the planning phase, the analysis phase, the execution phase, the validation phase, and the closing phase, but each one seems to contain the same content repeated under a different heading. The document makes it look like there are many distinct stages when in reality there is very little variation.
-
-The text also includes a long discussion of data, logs, records, outputs, results, metrics, values, and summaries. The data is said to support the report, but the report is also said to define the data. The logs are said to show the output, but the output is also said to confirm the logs. The metrics are said to measure performance, but performance is never clearly separated from activity, work, or output. This creates a loop in which every noun points back to another noun, and every conclusion points back to the original statement.
-
-Sometimes the document switches to more abstract language. It talks about improvement, optimization, efficiency, quality, consistency, reliability, structure, clarity, and stability. These are repeated in different combinations, often with modifiers like better, more, less, stronger, clearer, faster, and simpler. The text claims that the workflow should be clearer, the operations should be smoother, the coordination should be stronger, the management should be better, and the integration should be tighter, but these claims are not backed by concrete detail. Instead, the document uses phrases like “the thing we need,” “the way forward,” “the right approach,” and “the better path,” which sound useful but do not add much semantic precision.
-
-At several points, the document becomes circular. It says that the report should improve the report. It says that the summary should summarize the summary. It says that the review should review the review. It says that the process should process the process. It says that the system should stabilize the system. These statements are grammatically valid but semantically weak. They create a worst-case scenario for a keyword extractor because the same words appear in many contexts, often without clear importance or hierarchy.
-
-The final section repeats the core themes one more time: team, report, work, process, system, output, management, operations, coordination, integration, workflow, phase, data, log, result, organization, and situation. The conclusion does not introduce new information; it only rephrases what has already been said. If a keyword extractor relies too heavily on frequency, it may surface the wrong terms. If it relies too heavily on shallow phrase matching, it may keep phrases that are merely repeated rather than truly meaningful. If it relies too heavily on surface form without normalization, it may treat plural and singular variants as unrelated terms even though they refer to the same concept.
-
-In that sense, the document is designed to be difficult. It is long enough to create many candidate spans, repetitive enough to inflate common terms, abstract enough to blur semantic boundaries, and vague enough to make subphrase pruning uncertain. It includes multiple references to day and night, to the same idea expressed in different ways, to overlapping concepts like management and coordination, and to generic nouns like thing, stuff, part, piece, item, and element. A keyword extractor has to decide what matters most, even though the text keeps suggesting that almost everything matters equally. That is exactly what makes it a useful stress test.
-"""
-    import time
-    start = time.time()
-    data = {
-        "text": text,
-        "user_id": "SAMPLEUSER01",
-        "folder_id": "SAMPLESFOLDER01",
-        "note_id": "SAMPLENOTE01",
-        "role": "user",
-        "tenant_id": "TENANT01",
-        "folder_title": "SAMPLE FOLDER TITLE1",
-        "note_title": "SAMPLE NOTE TITLE1",
-        "description": "SAMPLE DESCRIPTION 1",
-        "tags": [
-            "tag1",
-            "tag2"
-        ]
-    }
-
-    doc_id, summary_doc, chunk_docs = get_document_objects(data)
-    print(doc_id, summary_doc, '\n', chunk_docs[0], time.time() - start)

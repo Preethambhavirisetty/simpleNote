@@ -158,7 +158,7 @@ services:
       dockerfile: Dockerfile
     container_name: notelite-agent-celery
     restart: unless-stopped
-    command: ["python", "-m", "celery", "-A", "apis.worker.worker_app", "worker",
+    command: ["python", "-m", "celery", "-A", "workers.app", "worker",
               "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h"]
     environment:
       LLAMA_INDEX_CACHE_DIR:  /tmp/llama_index

@@ -134,7 +134,7 @@ Public API
 ~~~~~~~~~~
 ``extract_keywords(text, top_n=20) -> list[str]``
     Returns up to ``top_n`` deduplicated, pruned keywords ordered by
-    relevance.  Called by ``chunking_service.py`` during note ingestion.
+    relevance.  Called by ``pipeline.builder`` during note ingestion.
 
 terms to understand: pruning, NER, lemmatization, tokenization, 1-,2-,3- grams, inverted scores, entity label_ in spacy, function words, stemmed tokens, subsumes, _stem
 """
