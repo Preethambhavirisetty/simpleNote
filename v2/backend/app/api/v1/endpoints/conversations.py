@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from app.core.config import AGENT_API_KEY
+from app.core.feature_flags import require_feature
 from app.db.postgres.models.conversation import Conversation, Message
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
@@ -15,7 +16,11 @@ from app.schema.base import ErrorCode
 from app.schema.conversation import ConversationCreate, MessageCreate, MessageUpdate
 from app.services.conversations import ConversationService
 
-router = APIRouter(prefix="/conversations", tags=["conversations"])
+router = APIRouter(
+    prefix="/conversations",
+    tags=["conversations"],
+    dependencies=[Depends(require_feature("chat"))],
+)
 
 
 def get_conversation_service():

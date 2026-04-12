@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useChatStore } from '@/stores/chatStore'
+import { useFeatureFlagStore } from '@/stores/featureFlagStore'
 import ReactMarkdown from 'react-markdown'
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -144,6 +145,7 @@ function EmptyState() {
 export default function ChatPage() {
   const { conversationId } = useParams()
   const navigate = useNavigate()
+  const isHistoryEnabled = useFeatureFlagStore((s) => s.isEnabled)('chat.history')
 
   const conversations = useChatStore((s) => s.conversations)
   const activeConvId = useChatStore((s) => s.activeConvId)
@@ -219,15 +221,17 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full">
-      {/* Conversation sidebar */}
-      <ConversationSidebar
-        conversations={conversations}
-        activeConvId={activeConvId}
-        isLoading={isLoadingConvs}
-        onSelect={handleSelectConv}
-        onNew={handleNewChat}
-        onDelete={handleDeleteConv}
-      />
+      {/* Conversation sidebar — gated by chat.history flag */}
+      {isHistoryEnabled && (
+        <ConversationSidebar
+          conversations={conversations}
+          activeConvId={activeConvId}
+          isLoading={isLoadingConvs}
+          onSelect={handleSelectConv}
+          onNew={handleNewChat}
+          onDelete={handleDeleteConv}
+        />
+      )}
 
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">

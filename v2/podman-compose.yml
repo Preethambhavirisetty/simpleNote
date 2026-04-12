@@ -85,6 +85,9 @@ services:
       INGESTION_TASK_STRING:  tasks.process_ingestion
       INGESTION_QUEUE:        ingestion
       NOTE_SIZE_QUEUE:        note_size
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+    volumes:
+      - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
       - "3001:8000"
     networks:
@@ -146,6 +149,9 @@ services:
       INGESTION_TASK_STRING:  tasks.process_ingestion
       INGESTION_QUEUE:        ingestion
       POSTGRES_DB_URL:        *pg-url
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+    volumes:
+      - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
       - "3002:8000"
     networks:
@@ -187,5 +193,8 @@ services:
       INGESTION_TASK_STRING:  tasks.process_ingestion
       INGESTION_QUEUE:        ingestion
       POSTGRES_DB_URL:        *pg-url
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+    volumes:
+      - ./feature_flags.json:/app/feature_flags.json:ro
     networks:
       - notelite-net

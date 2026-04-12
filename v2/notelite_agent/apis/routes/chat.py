@@ -5,19 +5,20 @@ import logging
 import time
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from apis.schema import ChatRequest
 from core.config import CHAT_LLM_API_BASE, LLM_API_KEY
 from core.contracts import AccessContext
+from core.feature_flags import require_feature
 from services.retrieval import VectorStore
 from services import backend_client
 from workers.tasks import persist_message
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(tags=["chat"])
+router = APIRouter(tags=["chat"], dependencies=[Depends(require_feature("chat"))])
 
 
 def _sse(event: str, data: dict) -> str:

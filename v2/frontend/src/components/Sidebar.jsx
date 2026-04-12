@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useFolderStore } from '@/stores/folderStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useFeatureFlagStore } from '@/stores/featureFlagStore'
 import notelite_logo from '../assets/notelite_icon.png'
 
 const navCls = ({ isActive }) =>
@@ -29,6 +30,7 @@ export default function Sidebar() {
   const updateFolder = useFolderStore((s) => s.updateFolder)
   const deleteFolder = useFolderStore((s) => s.deleteFolder)
   const openSettings = useSettingsStore((s) => s.open)
+  const isChatEnabled = useFeatureFlagStore((s) => s.isEnabled)('chat')
   const navigate = useNavigate()
   const { folderId: activeFolderId } = useParams()
 
@@ -96,12 +98,14 @@ export default function Sidebar() {
           All Notes
         </NavLink>
 
-        <NavLink to="/chat" className={navCls}>
-          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          Chat
-        </NavLink>
+        {isChatEnabled && (
+          <NavLink to="/chat" className={navCls}>
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            Chat
+          </NavLink>
+        )}
 
         {/* Folders */}
         <div className="pt-3">
