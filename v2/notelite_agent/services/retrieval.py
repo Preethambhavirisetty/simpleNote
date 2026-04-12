@@ -346,6 +346,14 @@ class VectorStore:
         scoped_filter = self._resolve_scope_filter(access_context, filter)
         return self._handler.count(scoped_filter)
 
+    def scroll_all_chunks(self, access_context: AccessContext):
+        """Return every chunk document for the scoped user/tenant (text + metadata)."""
+        self._ensure_connected()
+        if not isinstance(access_context, AccessContext):
+            raise TypeError("access_context must be an AccessContext instance.")
+        scoped_filter = self._resolve_scope_filter(access_context)
+        return self._handler.scroll_chunks(filter=scoped_filter)
+
     def close(self):
         self._handler.close()
         self._connected = False

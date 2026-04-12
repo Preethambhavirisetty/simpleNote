@@ -12,6 +12,8 @@ from apis.schema import ChatRequest
 from core.config import CHAT_LLM_API_BASE, LLM_API_KEY
 from core.contracts import AccessContext
 from core.feature_flags import require_feature
+from pipeline.intent import QueryPlanner
+from pipeline.strategies import execute as execute_strategy
 from services.retrieval import VectorStore
 from services import backend_client
 from workers.tasks import persist_message
@@ -59,9 +61,43 @@ def chat_stream(request: ChatRequest):
             request.query, k=request.k, access_context=access_context,
         )
 
+        # ── 2b. Intent detection + strategy execution ────────────────────
+        intent_start = time.monotonic()
+        planner = QueryPlanner()
+        plan = planner.plan(request.query)
+        intent_ms = int((time.monotonic() - intent_start) * 1000)
+
+        strategy_result = None
+        if plan.strategy != "semantic":
+            strategy_start = time.monotonic()
+            all_chunks = db.scroll_all_chunks(access_context)
+            strategy_result = execute_strategy(plan, all_chunks)
+            strategy_ms = int((time.monotonic() - strategy_start) * 1000)
+        else:
+            strategy_ms = 0
+
+        log.info(
+            "chat.intent",
+            conv_id=conv_id,
+            user_id=request.user_id,
+            query=request.query,
+            strategy=plan.strategy,
+            search_term=plan.search_term,
+            source=plan.source,
+            confidence=plan.confidence,
+            intent_latency_ms=intent_ms,
+            strategy_latency_ms=strategy_ms,
+        )
+
     context = "\n\n".join(doc.text for doc in results)
     source_ids = list(dict.fromkeys(doc.metadata.get("note_id") for doc in results if doc.metadata.get("note_id")))
     retrieval_ms = int((time.monotonic() - retrieval_start) * 1000)
+
+    fact = strategy_result.fact if strategy_result else None
+    if strategy_result and strategy_result.source_ids:
+        for sid in strategy_result.source_ids:
+            if sid not in source_ids:
+                source_ids.append(sid)
 
     log.info(
         "chat.retrieval",
@@ -71,26 +107,30 @@ def chat_stream(request: ChatRequest):
         result_count=len(results),
         result_ids=[r.id_ for r in results],
         source_ids=source_ids,
+        fact=fact,
         latency_ms=retrieval_ms,
     )
 
     # ── 3. Inference (via chat LLM) ──────────────────────────────────────
+    system_content = (
+        "You are a helpful personal assistant that answers questions about the user's notes.\n\n"
+        "Rules:\n"
+        "- Answer using ONLY information from the provided context. Never use outside knowledge.\n"
+        "- Be conversational and direct — write naturally, like explaining to a friend.\n"
+        "- If the context does not contain enough information, say so honestly in one sentence.\n"
+        "- Do not invent details, steps, or facts not present in the context.\n"
+        "- When a 'Verified fact' section is present, treat it as ground truth and incorporate it "
+        "into your answer directly. Do not contradict or re-count it."
+    )
+
+    user_content = f"Context from my notes:\n{context}"
+    if fact:
+        user_content += f"\n\nVerified fact: {fact}"
+    user_content += f"\n\nQuestion: {request.query}"
+
     chat_messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful personal assistant that answers questions about the user's notes.\n\n"
-                "Rules:\n"
-                "- Answer using ONLY information from the provided context. Never use outside knowledge.\n"
-                "- Be conversational and direct — write naturally, like explaining to a friend.\n"
-                "- If the context does not contain enough information, say so honestly in one sentence.\n"
-                "- Do not invent details, steps, or facts not present in the context."
-            ),
-        },
-        {
-            "role": "user",
-            "content": f"Context from my notes:\n{context}\n\nQuestion: {request.query}",
-        },
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_content},
     ]
 
     answer = ""

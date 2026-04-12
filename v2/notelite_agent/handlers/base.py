@@ -26,6 +26,10 @@ class DBHandler(ABC):
     def get_all_documents(self, filter=None):
         """Return all stored chunk Documents for BM25 indexing."""
 
+    def scroll_chunks(self, filter=None):
+        """Paginated scroll over all chunks matching *filter*. Returns list of Documents."""
+        raise NotImplementedError("scroll_chunks not implemented for this handler.")
+
     def delete(self, filter=None):
         """Delete documents matching filter from all collections."""
         raise NotImplementedError("Delete operation not implemented for this handler.")

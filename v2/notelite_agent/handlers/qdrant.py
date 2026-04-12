@@ -494,6 +494,35 @@ class QdrantHandler(DBHandler):
                 break
         return all_docs
 
+    def scroll_chunks(self, filter=None):
+        """Paginated scroll returning all chunks matching *filter* (text + metadata only)."""
+        all_docs = []
+        offset = None
+        qdrant_filter = self._build_qdrant_filter(filter)
+        while True:
+            results, offset = self._client.scroll(
+                collection_name=CHUNK_COLLECTION,
+                limit=100,
+                offset=offset,
+                scroll_filter=qdrant_filter,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in results:
+                all_docs.append(
+                    LlamaDocument(
+                        id_=str(point.id),
+                        text=point.payload.get("text", ""),
+                        metadata={
+                            **point.payload.get("metadata", {}),
+                            "created_at": point.payload.get("created_at"),
+                        },
+                    )
+                )
+            if offset is None:
+                break
+        return all_docs
+
     def delete(self, filter=None):
         if not filter:
             return

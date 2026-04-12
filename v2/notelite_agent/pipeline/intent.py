@@ -1,107 +1,162 @@
-"""Query intent detection (experimental).
+"""Hybrid query intent detection — regex fast-path + LLM fallback.
 
-Classifies queries as aggregation vs factual and detects knowledge type
-filters via keyword matching with embedding similarity fallback.
-
-Not wired into the retrieval pipeline yet — available as a future stage.
+Classifies user queries into strategies (keyword_count, temporal, listing,
+semantic) so the chat pipeline can execute deterministic logic before
+handing off to the main LLM.
 """
 
+from __future__ import annotations
+
+import json
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
-import numpy as np
+import httpx
+import structlog
 
-AGGREGATION_PATTERN = re.compile(
-    r'\b(how many|how much|count|total\s+number|summarize|give\s+(?:me\s+)?(?:a\s+)?summary)\b',
-    re.IGNORECASE,
-)
+from core.config import CHAT_LLM_API_BASE, LLM_API_KEY, INTENT_LLM_MAX_TOKENS
 
-STOP_WORDS = frozenset({
-    'the', 'a', 'an', 'in', 'at', 'of', 'to', 'for', 'is', 'was',
-    'my', 'me', 'i', 'and', 'or', 'on', 'with', 'all', 'do', 'did',
-})
+log = structlog.get_logger()
+
+VALID_STRATEGIES = frozenset({"keyword_count", "temporal", "listing", "semantic"})
+
+# ── Regex tier ────────────────────────────────────────────────────────────
+# Each entry: (compiled_pattern, strategy, search_term_group_index_or_None)
+
+_REGEX_RULES: list[tuple[re.Pattern, str, int | None]] = [
+    (
+        re.compile(
+            r"how\s+many\s+times.*?"
+            r"(?:say|said|mention(?:ed)?|wrote|write|use[ds]?|written|type[ds]?)"
+            r"\s+['\"]?(.+?)['\"]?\s*\??$",
+            re.IGNORECASE,
+        ),
+        "keyword_count",
+        1,
+    ),
+    (
+        re.compile(
+            r"(?:count|total\s+number\s+of)\s+.*?['\"](.+?)['\"]",
+            re.IGNORECASE,
+        ),
+        "keyword_count",
+        1,
+    ),
+    (
+        re.compile(
+            r"when\s+did\s+(?:i|we)\s+.*?"
+            r"(?:say|said|mention|write|wrote|add|added|note|create)",
+            re.IGNORECASE,
+        ),
+        "temporal",
+        None,
+    ),
+    (
+        re.compile(
+            r"(?:list\s+all|show\s+(?:me\s+)?all|what\s+are\s+all)\b",
+            re.IGNORECASE,
+        ),
+        "listing",
+        None,
+    ),
+]
+
+# ── LLM planner prompt ───────────────────────────────────────────────────
+
+_PLANNER_SYSTEM_PROMPT = """\
+You are a query classifier. Given a user question about their personal notes, \
+output a JSON object with two fields:
+  "strategy": one of "keyword_count", "temporal", "listing", "semantic"
+  "search_term": the exact phrase to search for (only for keyword_count), or null
+
+Strategy definitions:
+- keyword_count: user wants an exact count of how many times a word or phrase \
+appears (e.g. "how many times did I say X", "count occurrences of X").
+- temporal: user wants to know *when* something happened or was written \
+(e.g. "when did I mention coffee?", "what date did I write about the meeting?").
+- listing: user wants a list or enumeration of items from their notes \
+(e.g. "list all my notes about travel", "show me everything about recipes").
+- semantic: any other question that requires understanding and reasoning \
+over the note content. This is the default.
+
+Output ONLY valid JSON, nothing else."""
 
 
 @dataclass
-class Intent:
-    query_type: str
-    knowledge_filter: dict | None
-    boost_summary: bool
-    detected_type: str | None
-    confidence: float
+class QueryPlan:
+    strategy: str
+    search_term: str | None = None
+    confidence: float = 1.0
+    source: str = "regex"
 
 
-class QueryProcessor:
-    """Lightweight query intent processor that routes queries to the right chunks.
+class QueryPlanner:
+    """Two-tier intent classifier: regex rules first, LLM fallback second."""
 
-    Two-tier knowledge type detection:
-      1. Keyword match against knowledge type names (fast, precise)
-      2. Embedding similarity fallback (handles synonyms and paraphrases)
-    """
+    def plan(self, query: str) -> QueryPlan:
+        plan = self._try_regex(query)
+        if plan is not None:
+            return plan
+        return self._try_llm(query)
 
-    def __init__(self, embedder, knowledge_types):
-        self._embedder = embedder
-        self._knowledge_types = knowledge_types
+    @staticmethod
+    def _try_regex(query: str) -> QueryPlan | None:
+        for pattern, strategy, group_idx in _REGEX_RULES:
+            m = pattern.search(query)
+            if m:
+                search_term = m.group(group_idx).strip() if group_idx is not None else None
+                return QueryPlan(
+                    strategy=strategy,
+                    search_term=search_term,
+                    confidence=1.0,
+                    source="regex",
+                )
+        return None
 
-        self._type_keywords = {
-            kt: [w for w in kt.lower().split('_') if len(w) > 2 and w not in STOP_WORDS]
-            for kt in knowledge_types
-        }
+    @staticmethod
+    def _try_llm(query: str) -> QueryPlan:
+        t0 = time.monotonic()
+        try:
+            resp = httpx.post(
+                f"{CHAT_LLM_API_BASE}/chat/completions",
+                headers={"Authorization": f"Bearer {LLM_API_KEY}"},
+                json={
+                    "model": "llama3.1",
+                    "messages": [
+                        {"role": "system", "content": _PLANNER_SYSTEM_PROMPT},
+                        {"role": "user", "content": query},
+                    ],
+                    "max_tokens": INTENT_LLM_MAX_TOKENS,
+                    "temperature": 0.0,
+                },
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+            parsed = json.loads(raw)
 
-        descriptions = [kt.replace('_', ' ') for kt in knowledge_types]
-        self._type_embeddings = [
-            (kt, np.array(self._embedder.embed_query(desc)))
-            for kt, desc in zip(knowledge_types, descriptions)
-        ]
+            strategy = parsed.get("strategy", "semantic")
+            if strategy not in VALID_STRATEGIES:
+                strategy = "semantic"
 
-    def _is_aggregation(self, query):
-        return bool(AGGREGATION_PATTERN.search(query))
+            search_term = parsed.get("search_term")
 
-    def _detect_knowledge_type(self, query):
-        q_lower = query.lower()
-
-        best_match = None
-        best_count = 0
-        for kt, keywords in self._type_keywords.items():
-            hits = sum(1 for kw in keywords if kw in q_lower)
-            if hits > best_count:
-                best_count = hits
-                best_match = kt
-
-        if best_match and best_count > 0:
-            return best_match, 1.0
-
-        query_emb = np.array(self._embedder.embed_query(query))
-        scores = []
-        for kt, type_emb in self._type_embeddings:
-            cosine = float(np.dot(query_emb, type_emb) / (
-                np.linalg.norm(query_emb) * np.linalg.norm(type_emb) + 1e-10
-            ))
-            scores.append((kt, cosine))
-
-        scores.sort(key=lambda x: x[1], reverse=True)
-        best_type, best_score = scores[0]
-
-        if best_score < 0.5:
-            return None, best_score
-
-        if len(scores) > 1 and best_score - scores[1][1] < 0.05:
-            return None, best_score
-
-        return best_type, best_score
-
-    def process(self, query):
-        is_agg = self._is_aggregation(query)
-        knowledge_type, confidence = self._detect_knowledge_type(query)
-
-        knowledge_filter = None
-        if knowledge_type:
-            knowledge_filter = {"knowledge_type": knowledge_type}
-
-        return Intent(
-            query_type="aggregation" if is_agg else "factual",
-            knowledge_filter=knowledge_filter,
-            boost_summary=is_agg,
-            detected_type=knowledge_type,
-            confidence=confidence,
-        )
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            log.info(
+                "intent.llm_plan",
+                query=query,
+                strategy=strategy,
+                search_term=search_term,
+                latency_ms=latency_ms,
+            )
+            return QueryPlan(
+                strategy=strategy,
+                search_term=search_term,
+                confidence=0.8,
+                source="llm",
+            )
+        except Exception:
+            latency_ms = int((time.monotonic() - t0) * 1000)
+            log.warning("intent.llm_fallback", query=query, latency_ms=latency_ms, exc_info=True)
+            return QueryPlan(strategy="semantic", confidence=0.0, source="llm")

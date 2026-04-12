@@ -51,6 +51,7 @@ CONVERSATION_QUEUE = os.getenv("CONVERSATION_QUEUE", "conversation")
 BACKEND_API_URL = _require_env("BACKEND_API_URL")
 
 CHAT_LLM_API_BASE = os.getenv("CHAT_LLM_API_BASE", LLM_API_BASE)
+INTENT_LLM_MAX_TOKENS = int(os.getenv("INTENT_LLM_MAX_TOKENS", "128"))
 
 # Used only for version guard checks — read-only, one query per upsert task.
 # Accepts the same URL format as the backend (postgresql+psycopg://... is normalised automatically).
