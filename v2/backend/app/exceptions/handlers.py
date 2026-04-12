@@ -1,3 +1,4 @@
+import structlog
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -5,11 +6,20 @@ from fastapi.responses import JSONResponse
 from app.exceptions.base import AppException
 from app.schema.base import ErrorCode
 
+logger = structlog.get_logger()
+
 
 def register_exceptions(app):
 
     @app.exception_handler(AppException)
     async def app_exception_handler(request: Request, exc: AppException):
+        logger.warning(
+            "app_exception",
+            path=request.url.path,
+            status_code=exc.status_code,
+            error_code=exc.error_code,
+            message=exc.message,
+        )
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -54,6 +64,12 @@ def register_exceptions(app):
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
+        logger.error(
+            "unhandled_exception",
+            path=request.url.path,
+            method=request.method,
+            exc_info=exc,
+        )
         return JSONResponse(
             status_code=500,
             content={

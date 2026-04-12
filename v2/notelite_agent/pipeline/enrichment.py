@@ -6,13 +6,14 @@ ingestion pipeline can continue with degraded quality rather than crashing.
 """
 
 import re
-import logging
+import time
 
 import httpx
+import structlog
 
 from core.config import LLM_API_BASE, LLM_API_KEY
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _MISTRAL_TIMEOUT = 120.0
 _MIN_SUMMARY_WORDS = 5
@@ -50,8 +51,16 @@ def _is_useless_summary(text: str) -> bool:
     return False
 
 
-def _llm_call(system_prompt: str, user_content: str, max_tokens: int = 80, temperature: float = 0.1) -> str | None:
+def _llm_call(
+    system_prompt: str,
+    user_content: str,
+    max_tokens: int = 80,
+    temperature: float = 0.1,
+    *,
+    purpose: str = "summarization",
+) -> str | None:
     """Shared helper for Mistral summarization calls. Returns None on failure."""
+    t0 = time.monotonic()
     try:
         with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
             resp = client.post(
@@ -72,9 +81,27 @@ def _llm_call(system_prompt: str, user_content: str, max_tokens: int = 80, tempe
                 },
             )
         resp.raise_for_status()
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        log.info(
+            "llm.call",
+            purpose=purpose,
+            input_chars=len(user_content),
+            max_tokens=max_tokens,
+            latency_ms=latency_ms,
+            status="ok",
+        )
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as exc:
-        log.warning("LLM call failed: %s", exc)
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        log.warning(
+            "llm.call",
+            purpose=purpose,
+            input_chars=len(user_content),
+            max_tokens=max_tokens,
+            latency_ms=latency_ms,
+            status="error",
+            error=str(exc),
+        )
         return None
 
 
@@ -97,6 +124,7 @@ def summarize_chunk(text: str) -> str:
         user_content=text,
         max_tokens=80,
         temperature=0.1,
+        purpose="summarization",
     )
 
     if result is None or _is_useless_summary(result):
@@ -159,6 +187,7 @@ def deduplicate_keywords_llm(keywords: list[str]) -> list[str]:
         user_content=keyword_text,
         max_tokens=150,
         temperature=0.1,
+        purpose="dedup",
     )
 
     if result is not None:
@@ -194,6 +223,7 @@ def generate_questions(overall_summary: str) -> list[str]:
         user_content=overall_summary,
         max_tokens=300,
         temperature=0.3,
+        purpose="questions",
     )
 
     if result is None:

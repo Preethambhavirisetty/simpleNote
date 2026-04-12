@@ -24,3 +24,4 @@ urllib3==2.6.3
 uvicorn==0.41.0
 structlog==25.5.0
 python-json-logger==4.1.0
+httpx==0.28.1

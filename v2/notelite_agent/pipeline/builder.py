@@ -5,9 +5,10 @@ assembles LlamaDocument objects ready for vector store upsert.
 """
 
 import hashlib
-import logging
+import time
 from collections import Counter
 
+import structlog
 from llama_index.core import Document as LlamaDocument
 
 from pipeline.chunking import split_into_sections
@@ -18,7 +19,7 @@ from pipeline.enrichment import (
     generate_questions,
 )
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 _TOP_N_KEYWORDS = 15
 
@@ -51,12 +52,13 @@ def get_document_objects(data: dict) -> tuple[str, LlamaDocument | None, list[Ll
     if "text" not in data:
         raise ValueError("provide text to get chunks")
 
+    pipeline_start = time.monotonic()
     full_text = data["text"]
     doc_id = f"{data['user_id']}-{data['folder_id']}-{data['note_id']}"
 
     # ── 1. Chunking ──────────────────────────────────────────────────────
     chunks = split_into_sections(full_text)
-    log.info("Chunking completed — %d chunks", len(chunks))
+    log.info("pipeline.chunking", chunk_count=len(chunks), doc_id=doc_id)
 
     # ── 2. Keyword + entity extraction per chunk ─────────────────────────
     chunk_results = [extract_keywords(c, _TOP_N_KEYWORDS) for c in chunks]
@@ -76,14 +78,14 @@ def get_document_objects(data: dict) -> tuple[str, LlamaDocument | None, list[Ll
 
     # ── 3. Keyword deduplication via LLM ─────────────────────────────────
     top_keywords = deduplicate_keywords_llm(sorted_keywords) if sorted_keywords else []
-    log.info("Keyword dedup completed — %d keywords", len(top_keywords))
+    log.info("pipeline.keyword_dedup", keyword_count=len(top_keywords), doc_id=doc_id)
 
     # ── 4. Recursive summarization ───────────────────────────────────────
     overall_summary = recursive_summarize(chunks)
 
     # ── 5. Question generation ───────────────────────────────────────────
     global_questions = generate_questions(overall_summary) if overall_summary else []
-    log.info("Summary + questions completed (questions=%d)", len(global_questions))
+    log.info("pipeline.questions", question_count=len(global_questions), doc_id=doc_id)
 
     # ── 6. Build documents ───────────────────────────────────────────────
 
@@ -131,6 +133,15 @@ def get_document_objects(data: dict) -> tuple[str, LlamaDocument | None, list[Ll
             )
         )
 
-    log.info("Built %d chunk docs + summary=%s for doc_id=%s",
-             len(chunk_docs), bool(summary_doc), doc_id)
+    total_latency_ms = int((time.monotonic() - pipeline_start) * 1000)
+    log.info(
+        "pipeline.complete",
+        doc_id=doc_id,
+        chunk_count=len(chunk_docs),
+        keyword_count=len(top_keywords),
+        entity_count=len(all_entities),
+        has_summary=bool(summary_doc),
+        question_count=len(global_questions),
+        total_latency_ms=total_latency_ms,
+    )
     return doc_id, summary_doc, chunk_docs

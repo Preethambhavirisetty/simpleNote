@@ -10,11 +10,12 @@ function normalize(f) {
 
 export const useFolderStore = create(
   devtools(
-    (set) => ({
+    (set, get) => ({
       folders: [],
       isLoading: false,
 
       fetchFolders: async () => {
+        if (get().isLoading) return
         set({ isLoading: true })
         try {
           const { data } = await foldersApi.list()

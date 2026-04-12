@@ -5,12 +5,26 @@ Start the worker with:
 """
 
 from celery import Celery
+from celery.signals import setup_logging as celery_setup_logging, worker_process_init
 from core.config import (
     INGESTION_TASK_STRING,
     MESSAGE_BROKER_URL,
     CELERY_RESULT_BACKEND,
     INGESTION_QUEUE,
 )
+from logger import setup_logging
+
+
+@celery_setup_logging.connect
+def _on_celery_setup_logging(**kwargs):
+    """Run our structlog config instead of Celery's default logging."""
+    setup_logging(service="agent-celery")
+
+
+@worker_process_init.connect
+def _on_worker_process_init(**kwargs):
+    """Re-init in each forked worker so the Loki pusher thread is alive."""
+    setup_logging(service="agent-celery")
 
 CONVERSATION_TASK = "tasks.persist_message"
 

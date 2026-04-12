@@ -5,11 +5,12 @@ import { unwrap, unwrapList } from '@/lib/api'
 
 export const useTagStore = create(
   devtools(
-    (set) => ({
+    (set, get) => ({
       tags: [],
       isLoading: false,
 
       fetchTags: async () => {
+        if (get().isLoading) return
         set({ isLoading: true })
         try {
           const { data } = await tagsApi.list()

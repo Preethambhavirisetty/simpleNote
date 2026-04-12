@@ -44,6 +44,7 @@ export const useNoteStore = create(
       isSaving: false,
 
       fetchNotes: async (params = {}) => {
+        if (get().isLoading) return
         set({ isLoading: true })
         try {
           const { data } = await notesApi.list(params)

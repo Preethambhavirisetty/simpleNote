@@ -1,10 +1,10 @@
 """Streaming chat endpoint — SSE with write-ahead persistence."""
 
 import json
-import logging
 import time
 
 import httpx
+import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
@@ -16,7 +16,7 @@ from services.retrieval import VectorStore
 from services import backend_client
 from workers.tasks import persist_message
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger()
 
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_feature("chat"))])
 
@@ -27,15 +27,7 @@ def _sse(event: str, data: dict) -> str:
 
 @router.post("/chat/stream")
 def chat_stream(request: ChatRequest):
-    """SSE streaming chat with write-ahead persistence.
-
-    Flow:
-    1. Create/reuse conversation → write-ahead user + assistant (partial) messages
-    2. Retrieve context from Qdrant
-    3. Call inference (blocking — server doesn't support SSE)
-    4. Stream response word-by-word to FE via SSE
-    5. Fire Celery task to finalize the assistant message
-    """
+    """SSE streaming chat with write-ahead persistence."""
     start_ms = time.monotonic()
 
     # ── 1. Conversation bookkeeping ──────────────────────────────────────
@@ -56,6 +48,7 @@ def chat_stream(request: ChatRequest):
     )
 
     # ── 2. RAG retrieval ─────────────────────────────────────────────────
+    retrieval_start = time.monotonic()
     access_context = AccessContext(
         user_id=request.user_id,
         role=request.role,
@@ -67,7 +60,19 @@ def chat_stream(request: ChatRequest):
         )
 
     context = "\n\n".join(doc.text for doc in results)
-    source_ids = [doc.metadata.get("note_id") for doc in results if doc.metadata.get("note_id")]
+    source_ids = list(dict.fromkeys(doc.metadata.get("note_id") for doc in results if doc.metadata.get("note_id")))
+    retrieval_ms = int((time.monotonic() - retrieval_start) * 1000)
+
+    log.info(
+        "chat.retrieval",
+        conv_id=conv_id,
+        user_id=request.user_id,
+        query=request.query,
+        result_count=len(results),
+        result_ids=[r.id_ for r in results],
+        source_ids=source_ids,
+        latency_ms=retrieval_ms,
+    )
 
     # ── 3. Inference (via chat LLM) ──────────────────────────────────────
     chat_messages = [
@@ -91,6 +96,9 @@ def chat_stream(request: ChatRequest):
     answer = ""
     error = None
     tokens_used = 0
+    prompt_tokens = 0
+    completion_tokens = 0
+    inference_start = time.monotonic()
     try:
         resp = httpx.post(
             f"{CHAT_LLM_API_BASE}/chat/completions",
@@ -101,15 +109,31 @@ def chat_stream(request: ChatRequest):
         resp.raise_for_status()
         body = resp.json()
         answer = body["choices"][0]["message"]["content"]
-        tokens_used = body.get("usage", {}).get("total_tokens", 0)
+        usage = body.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        tokens_used = usage.get("total_tokens", 0)
     except httpx.ConnectError:
-        log.error("Chat inference unreachable at %s — is the inference container running?", CHAT_LLM_API_BASE)
+        log.error("chat.inference_unreachable", target=CHAT_LLM_API_BASE)
         error = f"Inference service unreachable at {CHAT_LLM_API_BASE}. Start the chat inference container (port 8082)."
     except Exception:
-        log.exception("Chat inference failed")
+        log.error("chat.inference_error", exc_info=True)
         error = "Inference service error"
 
-    latency_ms = int((time.monotonic() - start_ms) * 1000)
+    inference_ms = int((time.monotonic() - inference_start) * 1000)
+
+    log.info(
+        "chat.inference",
+        conv_id=conv_id,
+        user_id=request.user_id,
+        latency_ms=inference_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=tokens_used,
+        error=error,
+    )
+
+    total_latency_ms = int((time.monotonic() - start_ms) * 1000)
 
     # ── 4. Stream response as SSE ────────────────────────────────────────
     def event_stream():
@@ -129,9 +153,20 @@ def chat_stream(request: ChatRequest):
                 time.sleep(0.02)
 
         yield _sse("done", {
-            "latency_ms": latency_ms,
+            "latency_ms": total_latency_ms,
             "sources": list(set(source_ids)),
         })
+
+        log.info(
+            "chat.complete",
+            conv_id=conv_id,
+            user_id=request.user_id,
+            latency_ms=total_latency_ms,
+            retrieval_ms=retrieval_ms,
+            inference_ms=inference_ms,
+            total_tokens=tokens_used,
+            has_error=error is not None,
+        )
 
         persist_message.delay({
             "user_id": request.user_id,
@@ -139,7 +174,7 @@ def chat_stream(request: ChatRequest):
             "message_id": assistant_msg["id"],
             "content": answer,
             "status": "error" if error else "complete",
-            "latency_ms": latency_ms,
+            "latency_ms": total_latency_ms,
             "tokens_used": tokens_used,
             "sources_used": list(set(source_ids)),
             "error_message": error,

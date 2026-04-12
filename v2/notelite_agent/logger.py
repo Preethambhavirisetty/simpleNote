@@ -81,7 +81,7 @@ def _start_loki_pusher(loki_url: str, service: str):
     t.start()
 
 
-def setup_logging(level: int = logging.INFO, service: str = "backend"):
+def setup_logging(level: int = logging.INFO, service: str = "agent"):
     loki_url = os.getenv("LOKI_URL")
     if loki_url:
         _start_loki_pusher(loki_url, service)
@@ -110,6 +110,3 @@ def setup_logging(level: int = logging.INFO, service: str = "backend"):
     handler.setFormatter(logging.Formatter("%(message)s"))
     root.addHandler(handler)
     root.setLevel(level)
-
-
-logger = structlog.get_logger()

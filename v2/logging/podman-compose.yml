@@ -3,8 +3,6 @@ version: '3.8'
 networks:
   logging:
     driver: bridge
-  app:
-    external: true          # your existing app network
 
 volumes:
   loki_data:
@@ -30,24 +28,6 @@ services:
       timeout: 10s
       retries: 3
 
-  fluent-bit:
-    image: fluent/fluent-bit:2.2
-    container_name: fluent-bit
-    volumes:
-      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
-      - /var/log/containers:/var/log/containers:ro   # podman log path
-      - /var/log/pods:/var/log/pods:ro
-      - fluent_db:/var/log
-    depends_on:
-      loki:
-        condition: service_healthy
-    networks:
-      - logging
-      - app
-    restart: unless-stopped
-    # needs read access to container logs
-    user: root
-
   grafana:
     image: grafana/grafana:10.2.0
     container_name: grafana
@@ -55,7 +35,7 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=changeme      # change this
+      - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
@@ -67,5 +47,23 @@ services:
       - logging
     restart: unless-stopped
 
-volumes:
-  fluent_db:
+  # ── Fluent Bit (optional — for tailing Qdrant/Postgres logs) ──────
+  # Requires changing Podman log driver from journald to k8s-file.
+  # For backend/agent logs, the apps push directly to Loki via LOKI_URL.
+  #
+  # fluent-bit:
+  #   image: fluent/fluent-bit:2.2
+  #   container_name: fluent-bit
+  #   volumes:
+  #     - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+  #     - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+  #     - ./fluent-bit/set_service.lua:/fluent-bit/etc/set_service.lua:ro
+  #     - /var/log/containers:/var/log/containers:ro
+  #     - /var/log/pods:/var/log/pods:ro
+  #   depends_on:
+  #     loki:
+  #       condition: service_healthy
+  #   networks:
+  #     - logging
+  #   restart: unless-stopped
+  #   user: root

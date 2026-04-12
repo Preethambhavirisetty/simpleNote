@@ -10,7 +10,10 @@ Orchestrates two-stage retrieval:
 import os
 import shutil
 import sys
+import time
 import importlib
+
+import structlog
 
 from core.config import (
     DB_PATH, VECTOR_DB, RERANKER_MODEL, QDRANT_URL,
@@ -20,6 +23,8 @@ from pipeline.keywords import extract_keywords
 from core.contracts import AccessContext
 from core.settings import is_llama_index_settings_initialized
 from llama_index.core import Settings
+
+log = structlog.get_logger()
 
 
 _SUMMARY_SCORE_HIGH = 0.8
@@ -217,6 +222,8 @@ class VectorStore:
         scoped_filter = self._resolve_scope_filter(access_context, filter)
         fetch_k = max(candidates, k)
 
+        # ── Summary search ───────────────────────────────────────────────
+        t0 = time.monotonic()
         summary_results = self._handler.search_summaries(query, k=10, filter=scoped_filter)
 
         doc_ids = None
@@ -243,10 +250,34 @@ class VectorStore:
                         for doc, _ in summary_results[:_MAX_FILTERED_DOCS]
                     ]
 
-        results = self._handler.search(query, fetch_k, scoped_filter, doc_ids=doc_ids)
-        results = _soft_score(query, results)
+        summary_ms = int((time.monotonic() - t0) * 1000)
+        log.info(
+            "retrieval.summary_search",
+            result_count=len(summary_results),
+            top_scores=[round(s, 4) for _, s in summary_results[:5]],
+            doc_ids_scoped=doc_ids,
+            latency_ms=summary_ms,
+        )
 
+        # ── Chunk search ─────────────────────────────────────────────────
+        t1 = time.monotonic()
+        results = self._handler.search(query, fetch_k, scoped_filter, doc_ids=doc_ids)
+        chunk_ms = int((time.monotonic() - t1) * 1000)
+        log.info(
+            "retrieval.chunk_search",
+            candidate_count=len(results),
+            latency_ms=chunk_ms,
+        )
+
+        # ── Soft scoring ─────────────────────────────────────────────────
+        t2 = time.monotonic()
+        results = _soft_score(query, results)
+        soft_ms = int((time.monotonic() - t2) * 1000)
+        log.info("retrieval.soft_score", latency_ms=soft_ms)
+
+        # ── Reranking ────────────────────────────────────────────────────
         if rerank and len(results) > 1:
+            t3 = time.monotonic()
             if self._reranker is None:
                 from sentence_transformers import CrossEncoder
                 self._reranker = CrossEncoder(RERANKER_MODEL)
@@ -255,6 +286,13 @@ class VectorStore:
             re_scores = self._reranker.predict(pairs)
             ranked = sorted(
                 zip(re_scores, rerank_pool), key=lambda x: x[0], reverse=True,
+            )
+            rerank_ms = int((time.monotonic() - t3) * 1000)
+            log.info(
+                "retrieval.rerank",
+                input_count=len(rerank_pool),
+                output_count=k,
+                latency_ms=rerank_ms,
             )
             return [doc for _, doc in ranked[:k]]
 

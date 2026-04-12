@@ -86,6 +86,7 @@ services:
       INGESTION_QUEUE:        ingestion
       NOTE_SIZE_QUEUE:        note_size
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://host.containers.internal:3100
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
@@ -150,6 +151,7 @@ services:
       INGESTION_QUEUE:        ingestion
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://host.containers.internal:3100
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
@@ -194,6 +196,7 @@ services:
       INGESTION_QUEUE:        ingestion
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://host.containers.internal:3100
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     networks:
