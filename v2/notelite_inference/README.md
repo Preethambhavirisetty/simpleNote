@@ -29,6 +29,14 @@ mkdir -p build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
+
+# Terminal 1
+export LLAMA_MODEL_PATH=../models/mistral_7b_instruct_v0_2_Q5_K_M.gguf
+./inference_api --port=8081
+
+# Terminal 2
+export LLAMA_MODEL_PATH=../models/Meta-Llama-3.1-8B-Instruct-Q5_K_M.gguf
+./inference_api --port=8082
 ```
 
 ### With CUDA (NVIDIA GPU)

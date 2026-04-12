@@ -42,11 +42,14 @@ class QdrantHandler(DBHandler):
     def _create_collection(self, name):
         sample = Settings.embed_model.get_text_embedding("dimension check")
         dim = len(sample)
+        vectors = {
+            "dense": models.VectorParams(size=dim, distance=models.Distance.COSINE),
+        }
+        if name == SUMMARY_COLLECTION:
+            vectors["questions"] = models.VectorParams(size=dim, distance=models.Distance.COSINE)
         self._client.create_collection(
             collection_name=name,
-            vectors_config={
-                "dense": models.VectorParams(size=dim, distance=models.Distance.COSINE)
-            },
+            vectors_config=vectors,
             sparse_vectors_config={
                 "sparse": models.SparseVectorParams(
                     modifier=models.Modifier.IDF,
@@ -230,21 +233,29 @@ class QdrantHandler(DBHandler):
                 raise ValueError("doc_id not found!")
             keywords = summary_doc.metadata.pop("keywords", [])
             entities = summary_doc.metadata.pop("entities", [])
+            questions = summary_doc.metadata.pop("questions", [])
             quality_score = self._compute_quality_score(
                 summary_doc.text, summary_doc.metadata,
                 keywords=keywords, entities=entities,
             )
+
+            vectors = {"dense": dense_vec, "sparse": sparse_vec}
+            questions_text = " ".join(questions).strip()
+            if questions_text:
+                vectors["questions"] = Settings.embed_model.get_text_embedding(questions_text)
+
             self._client.upsert(
                 collection_name=SUMMARY_COLLECTION,
                 points=[
                     models.PointStruct(
                         id=self._to_point_id(summary_doc.id_),
-                        vector={"dense": dense_vec, "sparse": sparse_vec},
+                        vector=vectors,
                         payload={
                             "doc_id": s_doc_id,
                             "text": summary_doc.text,
                             "keywords": keywords,
                             "entities": entities,
+                            "questions": questions,
                             "created_at": int(time.time()),
                             "doc_quality": quality_score,
                             "is_high_quality": quality_score > 0.7,
@@ -308,21 +319,67 @@ class QdrantHandler(DBHandler):
         ]
         return models.Filter(must=conditions)
 
-    def search_summaries(self, query, k, filter=None):
-        """Dense-only search on summaries for doc-level scoping.
+    def search_summaries(
+        self,
+        query,
+        k,
+        filter=None,
+        *,
+        questions_weight: float = 0.6,
+        summary_weight: float = 0.4,
+    ):
+        """Two-vector search on summaries: dense (summary text) + questions.
 
-        Kept dense-only so cosine scores (0-1) remain compatible with the
-        summary score thresholds used in VectorStore.retrieve_documents.
+        Runs both queries, merges by weighted score:
+            final = questions_weight * q_score + summary_weight * s_score
+
+        Falls back to dense-only when a point has no questions vector.
         """
         dense_vec = Settings.embed_model.get_query_embedding(query)
         qdrant_filter = self._build_qdrant_filter(filter)
-        results = self._client.query_points(
+        fetch_limit = max(k * 3, 20)
+
+        summary_results = self._client.query_points(
             collection_name=SUMMARY_COLLECTION,
             query=dense_vec,
             using="dense",
-            limit=k,
+            limit=fetch_limit,
             query_filter=qdrant_filter,
         ).points
+
+        questions_results = self._client.query_points(
+            collection_name=SUMMARY_COLLECTION,
+            query=dense_vec,
+            using="questions",
+            limit=fetch_limit,
+            query_filter=qdrant_filter,
+        ).points
+
+        q_scores = {str(p.id): p.score for p in questions_results}
+        s_scores = {str(p.id): p.score for p in summary_results}
+
+        all_points = {}
+        for p in summary_results:
+            all_points[str(p.id)] = p
+        for p in questions_results:
+            pid = str(p.id)
+            if pid not in all_points:
+                all_points[pid] = p
+
+        scored = []
+        for pid, point in all_points.items():
+            s_score = s_scores.get(pid, 0.0)
+            q_score = q_scores.get(pid)
+
+            if q_score is not None:
+                final = questions_weight * q_score + summary_weight * s_score
+            else:
+                final = s_score
+
+            scored.append((point, final))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+
         return [
             (
                 LlamaDocument(
@@ -330,9 +387,9 @@ class QdrantHandler(DBHandler):
                     text=point.payload.get("text", ""),
                     metadata=point.payload.get("metadata", {}),
                 ),
-                point.score,
+                score,
             )
-            for point in results
+            for point, score in scored[:k]
         ]
 
     def search(self, query, k, filter=None, doc_ids=None):

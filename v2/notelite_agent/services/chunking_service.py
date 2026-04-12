@@ -564,7 +564,7 @@ def _deduplicate_keywords_llm(keywords: list[str]) -> list[str]:
 
 
 def _generate_questions(overall_summary: str) -> list[str]:
-    """Generate 2-3 global questions from overall summary to improve retrieval."""
+    """Generate 5 diverse questions from the overall summary for the questions vector."""
     if not overall_summary:
         return []
     try:
@@ -583,14 +583,18 @@ def _generate_questions(overall_summary: str) -> list[str]:
                             "role": "system",
                             "content": (
                                 "You are a question generation assistant. "
-                                "Based on the provided summary, generate exactly 3 questions "
-                                "that someone might ask about this content. "
-                                "Return only the questions, one per line. No numbering."
+                                "Given a summary, generate exactly 5 questions a user might ask:\n"
+                                "  1 factual question (specific detail)\n"
+                                "  1 conceptual question (what/why/how)\n"
+                                "  1 summary question (overall/general)\n"
+                                "  1 keyword-style query (short, search-like)\n"
+                                "  1 follow-up style question (assumes prior context)\n"
+                                "Return only the questions, one per line. No numbering or bullets."
                             ),
                         },
                         {"role": "user", "content": overall_summary},
                     ],
-                    "max_tokens": 150,
+                    "max_tokens": 300,
                     "temperature": 0.3,
                 },
             )
@@ -600,7 +604,7 @@ def _generate_questions(overall_summary: str) -> list[str]:
         return [
             line.strip() for line in result.splitlines()
             if line.strip() and line.strip().endswith("?")
-        ][:3]
+        ][:5]
     except Exception as exc:
         log.warning("Question generation failed: %s", exc)
         return []
