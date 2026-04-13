@@ -58,6 +58,24 @@ class QdrantHandler(DBHandler):
         )
         log.info("Created Qdrant collection '%s' (dim=%d, sparse=IDF).", name, dim)
 
+    _PAYLOAD_INDEXES = [
+        ("metadata.user_id", models.PayloadSchemaType.KEYWORD),
+        ("metadata.tenant_id", models.PayloadSchemaType.KEYWORD),
+        ("metadata.doc_id", models.PayloadSchemaType.KEYWORD),
+    ]
+
+    def _ensure_payload_indexes(self, collection_name):
+        """Create payload indexes if they don't already exist"""
+        for field, schema_type in self._PAYLOAD_INDEXES:
+            try:
+                self._client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field,
+                    field_schema=schema_type,
+                )
+            except Exception:
+                pass
+
     def _ensure_collections(self):
         for name in (CHUNK_COLLECTION, SUMMARY_COLLECTION):
             if self._client.collection_exists(name):
@@ -73,6 +91,7 @@ class QdrantHandler(DBHandler):
                     self._create_collection(name)
             else:
                 self._create_collection(name)
+            self._ensure_payload_indexes(name)
 
     @staticmethod
     def _compute_quality_score(

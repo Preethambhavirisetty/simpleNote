@@ -119,14 +119,19 @@ def chat_stream(request: ChatRequest):
         "- Be conversational and direct — write naturally, like explaining to a friend.\n"
         "- If the context does not contain enough information, say so honestly in one sentence.\n"
         "- Do not invent details, steps, or facts not present in the context.\n"
-        "- When a 'Verified fact' section is present, treat it as ground truth and incorporate it "
-        "into your answer directly. Do not contradict or re-count it."
+        "- When a 'Verified fact' section is present, treat it as ground truth. Use the information "
+        "naturally in your answer without mentioning 'Verified fact' or explaining where the data came from."
     )
 
-    user_content = f"Context from my notes:\n{context}"
-    if fact:
-        user_content += f"\n\nVerified fact: {fact}"
-    user_content += f"\n\nQuestion: {request.query}"
+    skip_context = strategy_result.skip_context if strategy_result else False
+
+    if skip_context and fact:
+        user_content = f"Verified fact: {fact}\n\nQuestion: {request.query}"
+    else:
+        user_content = f"Context from my notes:\n{context}"
+        if fact:
+            user_content += f"\n\nVerified fact: {fact}"
+        user_content += f"\n\nQuestion: {request.query}"
 
     chat_messages = [
         {"role": "system", "content": system_content},

@@ -3,7 +3,8 @@
     "enabled": true,
     "children": {
       "streaming": { "enabled": true },
-      "history": { "enabled": true }
+      "history": { "enabled": true },
+      "intent_llm": { "enabled": false }
     }
   },
   "ingestion": {

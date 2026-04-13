@@ -16,6 +16,7 @@ import httpx
 import structlog
 
 from core.config import CHAT_LLM_API_BASE, LLM_API_KEY, INTENT_LLM_MAX_TOKENS
+from core.feature_flags import is_enabled
 
 log = structlog.get_logger()
 
@@ -98,7 +99,9 @@ class QueryPlanner:
         plan = self._try_regex(query)
         if plan is not None:
             return plan
-        return self._try_llm(query)
+        if is_enabled("chat.intent_llm"):
+            return self._try_llm(query)
+        return QueryPlan(strategy="semantic", confidence=1.0, source="regex")
 
     @staticmethod
     def _try_regex(query: str) -> QueryPlan | None:

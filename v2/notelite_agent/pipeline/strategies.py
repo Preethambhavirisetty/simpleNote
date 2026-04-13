@@ -19,6 +19,7 @@ from pipeline.intent import QueryPlan
 class StrategyResult:
     fact: str | None = None
     source_ids: list[str] = field(default_factory=list)
+    skip_context: bool = False
 
 
 def execute(plan: QueryPlan, all_chunks: list[LlamaDocument]) -> StrategyResult:
@@ -54,7 +55,7 @@ def _keyword_count(plan: QueryPlan, chunks: list[LlamaDocument]) -> StrategyResu
     else:
         fact = f"The phrase '{plan.search_term}' appears exactly {total} times in your notes."
 
-    return StrategyResult(fact=fact, source_ids=matched_note_ids)
+    return StrategyResult(fact=fact, source_ids=matched_note_ids, skip_context=True)
 
 
 # ── temporal ──────────────────────────────────────────────────────────────

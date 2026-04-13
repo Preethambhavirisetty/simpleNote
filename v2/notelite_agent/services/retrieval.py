@@ -133,6 +133,19 @@ def _soft_score(query, results):
     return scored
 
 
+# ── Reranker singleton ────────────────────────────────────────────────────
+
+_reranker_instance = None
+
+def _get_reranker():
+    global _reranker_instance
+    if _reranker_instance is None:
+        from sentence_transformers import CrossEncoder
+        _reranker_instance = CrossEncoder(RERANKER_MODEL)
+        log.info("reranker.loaded", model=RERANKER_MODEL)
+    return _reranker_instance
+
+
 # ── VectorStore ──────────────────────────────────────────────────────────
 
 class VectorStore:
@@ -144,8 +157,6 @@ class VectorStore:
                 "Call init_llama_index_settings() once at application startup."
             )
         self._embedder = Settings.embed_model
-        self._reranker = None
-
         self._handler = self._load_handler(VECTOR_DB)
         self._connected = False
 
@@ -278,12 +289,10 @@ class VectorStore:
         # ── Reranking ────────────────────────────────────────────────────
         if rerank and len(results) > 1:
             t3 = time.monotonic()
-            if self._reranker is None:
-                from sentence_transformers import CrossEncoder
-                self._reranker = CrossEncoder(RERANKER_MODEL)
+            reranker = _get_reranker()
             rerank_pool = [doc for doc, _ in results[:max(candidates, k * 2)]]
             pairs = [(query, doc.text) for doc in rerank_pool]
-            re_scores = self._reranker.predict(pairs)
+            re_scores = reranker.predict(pairs)
             ranked = sorted(
                 zip(re_scores, rerank_pool), key=lambda x: x[0], reverse=True,
             )
