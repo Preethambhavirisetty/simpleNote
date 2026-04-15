@@ -12,8 +12,9 @@ from fastapi.responses import StreamingResponse
 from apis.schema import ChatRequest
 from core.config import CHAT_LLM_API_BASE, LLM_API_KEY
 from core.contracts import AccessContext
-from core.feature_flags import require_feature
+from core.feature_flags import is_enabled, require_feature
 from pipeline.intent import QueryPlanner
+from pipeline.rewrite import rewrite_query
 from pipeline.strategies import execute as execute_strategy
 from services.retrieval import VectorStore
 from services import backend_client
@@ -56,7 +57,26 @@ def chat_stream(request: ChatRequest):
         user_msg = user_msg_future.result()
         assistant_msg = assistant_msg_future.result()
 
-    # ── 1b. Fetch history + RAG retrieval (parallel) ────────────────────
+    # ── 1b. Fetch conversation history ──────────────────────────────────
+    history_messages = []
+    rewrite_ms = 0
+    search_query = request.query  # query used for retrieval (may be rewritten)
+
+    if request.conversation_id:
+        exclude_ids = {user_msg["id"], assistant_msg["id"]}
+        raw = backend_client.get_messages(request.user_id, conv_id)
+        for m in raw:
+            if m["id"] in exclude_ids:
+                continue
+            if m["role"] == "assistant" and m.get("status") != "complete":
+                continue
+            history_messages.append({"role": m["role"], "content": m["content"]})
+        history_messages = history_messages[-MAX_HISTORY_MESSAGES:]
+
+        if history_messages and is_enabled("chat.query_rewrite"):
+            search_query, rewrite_ms = rewrite_query(request.query, history_messages)
+
+    # ── 2. RAG retrieval ─────────────────────────────────────────────────
     retrieval_start = time.monotonic()
     access_context = AccessContext(
         user_id=request.user_id,
@@ -64,57 +84,39 @@ def chat_stream(request: ChatRequest):
         tenant_id=request.tenant_id,
     )
 
-    def _fetch_history():
-        if not request.conversation_id:
-            return []
-        exclude_ids = {user_msg["id"], assistant_msg["id"]}
-        raw = backend_client.get_messages(request.user_id, conv_id)
-        msgs = []
-        for m in raw:
-            if m["id"] in exclude_ids:
-                continue
-            if m["role"] == "assistant" and m.get("status") != "complete":
-                continue
-            msgs.append({"role": m["role"], "content": m["content"]})
-        return msgs[-MAX_HISTORY_MESSAGES:]
+    with VectorStore() as db:
+        results = db.retrieve_documents(
+            search_query, k=request.k, access_context=access_context,
+        )
 
-    def _retrieve_and_plan():
-        with VectorStore() as db:
-            docs = db.retrieve_documents(
-                request.query, k=request.k, access_context=access_context,
-            )
-            intent_start = time.monotonic()
-            planner = QueryPlanner()
-            plan = planner.plan(request.query)
-            intent_ms = int((time.monotonic() - intent_start) * 1000)
+        # ── 2b. Intent detection + strategy execution ────────────────────
+        intent_start = time.monotonic()
+        planner = QueryPlanner()
+        plan = planner.plan(request.query)
+        intent_ms = int((time.monotonic() - intent_start) * 1000)
 
-            strategy_result = None
-            if plan.strategy != "semantic":
-                strategy_start = time.monotonic()
-                all_chunks = db.scroll_all_chunks(access_context)
-                strategy_result = execute_strategy(plan, all_chunks)
-                strategy_ms = int((time.monotonic() - strategy_start) * 1000)
-            else:
-                strategy_ms = 0
-        return docs, plan, strategy_result, intent_ms, strategy_ms
-
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        history_future = pool.submit(_fetch_history)
-        retrieval_future = pool.submit(_retrieve_and_plan)
-        history_messages = history_future.result()
-        results, plan, strategy_result, intent_ms, strategy_ms = retrieval_future.result()
+        strategy_result = None
+        if plan.strategy != "semantic":
+            strategy_start = time.monotonic()
+            all_chunks = db.scroll_all_chunks(access_context)
+            strategy_result = execute_strategy(plan, all_chunks)
+            strategy_ms = int((time.monotonic() - strategy_start) * 1000)
+        else:
+            strategy_ms = 0
 
     log.info(
         "chat.intent",
         conv_id=conv_id,
         user_id=request.user_id,
         query=request.query,
+        search_query=search_query,
         strategy=plan.strategy,
         search_term=plan.search_term,
         source=plan.source,
         confidence=plan.confidence,
         intent_latency_ms=intent_ms,
         strategy_latency_ms=strategy_ms,
+        rewrite_latency_ms=rewrite_ms,
     )
 
     context = "\n\n".join(doc.text for doc in results)
@@ -175,12 +177,12 @@ def chat_stream(request: ChatRequest):
     skip_context = strategy_result.skip_context if strategy_result else False
 
     if skip_context and fact:
-        user_content = f"Verified fact: {fact}\n\nQuestion: {request.query}"
+        user_content = f"Verified fact: {fact}\n\nQuestion: {search_query}"
     else:
         user_content = f"Context from my notes:\n{context}"
         if fact:
             user_content += f"\n\nVerified fact: {fact}"
-        user_content += f"\n\nQuestion: {request.query}"
+        user_content += f"\n\nQuestion: {search_query}"
 
     chat_messages = [
         {"role": "system", "content": system_content},

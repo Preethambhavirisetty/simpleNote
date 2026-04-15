@@ -4,7 +4,8 @@
     "children": {
       "streaming": { "enabled": true },
       "history": { "enabled": true },
-      "intent_llm": { "enabled": false }
+      "intent_llm": { "enabled": false },
+      "query_rewrite": { "enabled": true }
     }
   },
   "ingestion": {
