@@ -2,6 +2,7 @@
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import structlog
@@ -19,6 +20,8 @@ from services import backend_client
 from workers.tasks import persist_message
 
 log = structlog.get_logger()
+
+MAX_HISTORY_MESSAGES = 16  # 8 turns × 2 (user + assistant)
 
 router = APIRouter(tags=["chat"], dependencies=[Depends(require_feature("chat"))])
 
@@ -41,53 +44,78 @@ def chat_stream(request: ChatRequest):
         )
         conv_id = conv["id"]
 
-    user_msg = backend_client.create_message(
-        request.user_id, conv_id, role="user", content=request.query,
-    )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        user_msg_future = pool.submit(
+            backend_client.create_message,
+            request.user_id, conv_id, role="user", content=request.query,
+        )
+        assistant_msg_future = pool.submit(
+            backend_client.create_message,
+            request.user_id, conv_id, role="assistant", content="", status="partial",
+        )
+        user_msg = user_msg_future.result()
+        assistant_msg = assistant_msg_future.result()
 
-    assistant_msg = backend_client.create_message(
-        request.user_id, conv_id, role="assistant", content="", status="partial",
-    )
-
-    # ── 2. RAG retrieval ─────────────────────────────────────────────────
+    # ── 1b. Fetch history + RAG retrieval (parallel) ────────────────────
     retrieval_start = time.monotonic()
     access_context = AccessContext(
         user_id=request.user_id,
         role=request.role,
         tenant_id=request.tenant_id,
     )
-    with VectorStore() as db:
-        results = db.retrieve_documents(
-            request.query, k=request.k, access_context=access_context,
-        )
 
-        # ── 2b. Intent detection + strategy execution ────────────────────
-        intent_start = time.monotonic()
-        planner = QueryPlanner()
-        plan = planner.plan(request.query)
-        intent_ms = int((time.monotonic() - intent_start) * 1000)
+    def _fetch_history():
+        if not request.conversation_id:
+            return []
+        exclude_ids = {user_msg["id"], assistant_msg["id"]}
+        raw = backend_client.get_messages(request.user_id, conv_id)
+        msgs = []
+        for m in raw:
+            if m["id"] in exclude_ids:
+                continue
+            if m["role"] == "assistant" and m.get("status") != "complete":
+                continue
+            msgs.append({"role": m["role"], "content": m["content"]})
+        return msgs[-MAX_HISTORY_MESSAGES:]
 
-        strategy_result = None
-        if plan.strategy != "semantic":
-            strategy_start = time.monotonic()
-            all_chunks = db.scroll_all_chunks(access_context)
-            strategy_result = execute_strategy(plan, all_chunks)
-            strategy_ms = int((time.monotonic() - strategy_start) * 1000)
-        else:
-            strategy_ms = 0
+    def _retrieve_and_plan():
+        with VectorStore() as db:
+            docs = db.retrieve_documents(
+                request.query, k=request.k, access_context=access_context,
+            )
+            intent_start = time.monotonic()
+            planner = QueryPlanner()
+            plan = planner.plan(request.query)
+            intent_ms = int((time.monotonic() - intent_start) * 1000)
 
-        log.info(
-            "chat.intent",
-            conv_id=conv_id,
-            user_id=request.user_id,
-            query=request.query,
-            strategy=plan.strategy,
-            search_term=plan.search_term,
-            source=plan.source,
-            confidence=plan.confidence,
-            intent_latency_ms=intent_ms,
-            strategy_latency_ms=strategy_ms,
-        )
+            strategy_result = None
+            if plan.strategy != "semantic":
+                strategy_start = time.monotonic()
+                all_chunks = db.scroll_all_chunks(access_context)
+                strategy_result = execute_strategy(plan, all_chunks)
+                strategy_ms = int((time.monotonic() - strategy_start) * 1000)
+            else:
+                strategy_ms = 0
+        return docs, plan, strategy_result, intent_ms, strategy_ms
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        history_future = pool.submit(_fetch_history)
+        retrieval_future = pool.submit(_retrieve_and_plan)
+        history_messages = history_future.result()
+        results, plan, strategy_result, intent_ms, strategy_ms = retrieval_future.result()
+
+    log.info(
+        "chat.intent",
+        conv_id=conv_id,
+        user_id=request.user_id,
+        query=request.query,
+        strategy=plan.strategy,
+        search_term=plan.search_term,
+        source=plan.source,
+        confidence=plan.confidence,
+        intent_latency_ms=intent_ms,
+        strategy_latency_ms=strategy_ms,
+    )
 
     context = "\n\n".join(doc.text for doc in results)
     source_ids = list(dict.fromkeys(doc.metadata.get("note_id") for doc in results if doc.metadata.get("note_id")))
@@ -111,17 +139,38 @@ def chat_stream(request: ChatRequest):
         latency_ms=retrieval_ms,
     )
 
-    # ── 3. Inference (via chat LLM) ──────────────────────────────────────
+    # ── 3. Build prompt ───────────────────────────────────────────────────
     system_content = (
         "You are a helpful personal assistant that answers questions about the user's notes.\n\n"
         "Rules:\n"
-        "- Answer using ONLY information from the provided context. Never use outside knowledge.\n"
+        "- Answer using ONLY the 'Context from my notes' or 'Verified fact' in the current message. "
+        "These are freshly retrieved from the user's notes and are the sole source of truth.\n"
+        "- Use the Previous conversation ONLY to understand what 'it', 'that', 'the same one', etc. "
+        "refer to, or to answer meta-questions like 'what did I ask earlier?'. "
+        "NEVER pull facts, details, or quotes from prior answers — they may be outdated.\n"
         "- Be conversational and direct — write naturally, like explaining to a friend.\n"
-        "- If the context does not contain enough information, say so honestly in one sentence.\n"
-        "- Do not invent details, steps, or facts not present in the context.\n"
+        "- If the context does not contain enough information, say so honestly in one sentence. "
+        "Do NOT fill gaps with information from prior answers.\n"
+        "- Do not invent details, steps, or facts.\n"
+        "- Never start responses with 'Based on our conversation so far' or similar preamble.\n"
+        "- NEVER echo passwords, secrets, or API keys from the context. "
+        "If the user asks about credentials, confirm they exist and where, but mask the values "
+        "(e.g. 'Username: Cisco***', 'Password: ****').\n"
         "- When a 'Verified fact' section is present, treat it as ground truth. Use the information "
         "naturally in your answer without mentioning 'Verified fact' or explaining where the data came from."
     )
+
+    if history_messages:
+        history_block = "\n".join(
+            f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
+            for m in history_messages
+        )
+        system_content += (
+            "\n\nPrevious conversation (for reference — use to resolve pronouns, "
+            "follow-ups, and questions about the conversation itself, "
+            "but do NOT treat old answers as factual sources for note-related questions):\n"
+            + history_block
+        )
 
     skip_context = strategy_result.skip_context if strategy_result else False
 
@@ -138,6 +187,7 @@ def chat_stream(request: ChatRequest):
         {"role": "user", "content": user_content},
     ]
 
+    # ── 4. Inference ────────────────────────────────────────────────────
     answer = ""
     error = None
     tokens_used = 0
@@ -180,7 +230,7 @@ def chat_stream(request: ChatRequest):
 
     total_latency_ms = int((time.monotonic() - start_ms) * 1000)
 
-    # ── 4. Stream response as SSE ────────────────────────────────────────
+    # ── 5. Stream response as SSE ────────────────────────────────────────
     def event_stream():
         yield _sse("meta", {
             "conversation_id": conv_id,

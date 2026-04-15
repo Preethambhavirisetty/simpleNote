@@ -151,6 +151,19 @@ def delete_conversation(
 # ── Internal service routes (Agent -> Backend) ────────────────────────────────
 # These use X-Internal-Key + X-User-Id headers instead of cookies.
 
+@router.get("/internal/{conv_id}")
+def internal_get_conversation(
+    conv_id: UUID,
+    x_internal_key: str = Header(...),
+    x_user_id: str = Header(...),
+    db: Session = Depends(get_postgres_session),
+    service: ConversationService = Depends(get_conversation_service),
+):
+    user_id = _resolve_user_id(x_internal_key=x_internal_key, x_user_id=x_user_id)
+    conv = service.get(db, conv_id, user_id)
+    return success_response(_conv_detail_dict(conv), "Conversation retrieved")
+
+
 @router.post("/internal/")
 def internal_create_conversation(
     payload: ConversationCreate,

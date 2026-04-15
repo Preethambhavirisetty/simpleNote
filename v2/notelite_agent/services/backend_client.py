@@ -26,6 +26,21 @@ def _url(path: str) -> str:
     return f"{BACKEND_API_URL.rstrip('/')}/api/conversations/internal{path}"
 
 
+def get_messages(user_id: str, conversation_id: str) -> list[dict]:
+    """Fetch all messages for a conversation. Returns [] on any failure."""
+    try:
+        resp = httpx.get(
+            _url(f"/{conversation_id}"),
+            headers=_headers(user_id),
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return resp.json()["data"].get("messages", [])
+    except Exception:
+        log.warning("backend_client.get_messages failed", exc_info=True)
+        return []
+
+
 def create_conversation(user_id: str, title: Optional[str] = None) -> dict:
     resp = httpx.post(
         _url("/"),
