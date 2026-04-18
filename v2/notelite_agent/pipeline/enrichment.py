@@ -1,21 +1,21 @@
 """LLM-powered enrichment stages: summarization, keyword dedup, question generation.
 
-All calls use the Mistral inference endpoint (routed via purpose=summarization).
 Each function is fault-tolerant — returns empty results on failure so the
 ingestion pipeline can continue with degraded quality rather than crashing.
+All LLM HTTP traffic goes through the single ``llm_call`` in pipeline/llm.py.
 """
 
 import re
-import time
 
-import httpx
 import structlog
 
-from core.config import LLM_API_BASE, LLM_API_KEY
+from core.config import LLM_API_BASE
+from pipeline.llm import llm_call
 
 log = structlog.get_logger()
 
 _MISTRAL_TIMEOUT = 120.0
+_MISTRAL_MODEL = "mistral-7b"
 _MIN_SUMMARY_WORDS = 5
 _MIN_CHUNK_CHARS_FOR_SUMMARY = 30
 _SUMMARIZATION_CHAR_CAP = 2000
@@ -51,84 +51,41 @@ def _is_useless_summary(text: str) -> bool:
     return False
 
 
-def _llm_call(
-    system_prompt: str,
-    user_content: str,
-    max_tokens: int = 80,
-    temperature: float = 0.1,
-    *,
-    purpose: str = "summarization",
-) -> str | None:
-    """Shared helper for Mistral summarization calls. Returns None on failure."""
-    t0 = time.monotonic()
-    try:
-        with httpx.Client(timeout=_MISTRAL_TIMEOUT) as client:
-            resp = client.post(
-                f"{LLM_API_BASE}/chat/completions",
-                params={"purpose": "summarization"},
-                headers={
-                    "Authorization": f"Bearer {LLM_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "mistral-7b",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                },
-            )
-        resp.raise_for_status()
-        latency_ms = int((time.monotonic() - t0) * 1000)
-        log.info(
-            "llm.call",
-            purpose=purpose,
-            input_chars=len(user_content),
-            max_tokens=max_tokens,
-            latency_ms=latency_ms,
-            status="ok",
-        )
-        return resp.json()["choices"][0]["message"]["content"].strip()
-    except Exception as exc:
-        latency_ms = int((time.monotonic() - t0) * 1000)
-        log.warning(
-            "llm.call",
-            purpose=purpose,
-            input_chars=len(user_content),
-            max_tokens=max_tokens,
-            latency_ms=latency_ms,
-            status="error",
-            error=str(exc),
-        )
-        return None
-
-
 def summarize_chunk(text: str) -> str:
     """Summarize a chunk into 1-2 sentences. Returns empty string on failure."""
     stripped = text.strip()
     if not stripped or len(stripped) < _MIN_CHUNK_CHARS_FOR_SUMMARY:
         return ""
 
-    result = _llm_call(
-        system_prompt=(
-            "You are a summarization assistant. "
-            "Write 1-2 sentences that capture the main idea of the text. "
-            "If the text is a heading, label, or single phrase with no body, "
-            "describe what kind of content it introduces. "
-            "Never say 'no text provided' or 'no summary to provide' — "
-            "always produce a real sentence about the content. "
-            "Output only the summary — nothing else."
-        ),
-        user_content=text,
-        max_tokens=80,
-        temperature=0.1,
-        purpose="summarization",
-    )
+    try:
+        body = llm_call(
+            {
+                "model": _MISTRAL_MODEL,
+                "messages": [
+                    {"role": "system", "content": (
+                        "You are a summarization assistant. "
+                        "Write 1-2 sentences that capture the main idea of the text. "
+                        "If the text is a heading, label, or single phrase with no body, "
+                        "describe what kind of content it introduces. "
+                        "Never say 'no text provided' or 'no summary to provide' — "
+                        "always produce a real sentence about the content. "
+                        "Output only the summary — nothing else."
+                    )},
+                    {"role": "user", "content": text},
+                ],
+                "max_tokens": 80,
+                "temperature": 0.1,
+            },
+            base_url=LLM_API_BASE,
+            timeout=_MISTRAL_TIMEOUT,
+            params={"purpose": "summarization"},
+        )
+        result = body["choices"][0]["message"]["content"].strip()
+    except Exception:
+        log.warning("enrichment.summarize_failed", input_chars=len(text), exc_info=True)
+        return ""
 
-    if result is None or _is_useless_summary(result):
-        log.debug("Discarding useless summary (text len=%d)", len(text))
+    if _is_useless_summary(result):
         return ""
     return result
 
@@ -177,23 +134,31 @@ def deduplicate_keywords_llm(keywords: list[str]) -> list[str]:
         return []
 
     keyword_text = ", ".join(keywords)
-    result = _llm_call(
-        system_prompt=(
-            "You are a keyword analysis assistant. "
-            "Given a list of keywords from a document, deduplicate them "
-            "and identify the top 15 unique, high-signal themes. "
-            "Return only the themes, one per line. No numbering, no explanations."
-        ),
-        user_content=keyword_text,
-        max_tokens=150,
-        temperature=0.1,
-        purpose="dedup",
-    )
-
-    if result is not None:
+    try:
+        body = llm_call(
+            {
+                "model": _MISTRAL_MODEL,
+                "messages": [
+                    {"role": "system", "content": (
+                        "You are a keyword analysis assistant. "
+                        "Given a list of keywords from a document, deduplicate them "
+                        "and identify the top 15 unique, high-signal themes. "
+                        "Return only the themes, one per line. No numbering, no explanations."
+                    )},
+                    {"role": "user", "content": keyword_text},
+                ],
+                "max_tokens": 150,
+                "temperature": 0.1,
+            },
+            base_url=LLM_API_BASE,
+            timeout=_MISTRAL_TIMEOUT,
+            params={"purpose": "dedup"},
+        )
+        result = body["choices"][0]["message"]["content"].strip()
         return [line.strip() for line in result.splitlines() if line.strip()][:15]
+    except Exception:
+        log.warning("enrichment.dedup_failed", exc_info=True)
 
-    log.warning("LLM keyword dedup failed — using simple dedup")
     seen = set()
     deduped = []
     for kw in keywords:
@@ -209,24 +174,33 @@ def generate_questions(overall_summary: str) -> list[str]:
     if not overall_summary:
         return []
 
-    result = _llm_call(
-        system_prompt=(
-            "You are a question generation assistant. "
-            "Given a summary, generate exactly 5 questions a user might ask:\n"
-            "  1 factual question (specific detail)\n"
-            "  1 conceptual question (what/why/how)\n"
-            "  1 summary question (overall/general)\n"
-            "  1 keyword-style query (short, search-like)\n"
-            "  1 follow-up style question (assumes prior context)\n"
-            "Return only the questions, one per line. No numbering or bullets."
-        ),
-        user_content=overall_summary,
-        max_tokens=300,
-        temperature=0.3,
-        purpose="questions",
-    )
-
-    if result is None:
+    try:
+        body = llm_call(
+            {
+                "model": _MISTRAL_MODEL,
+                "messages": [
+                    {"role": "system", "content": (
+                        "You are a question generation assistant. "
+                        "Given a summary, generate exactly 5 questions a user might ask:\n"
+                        "  1 factual question (specific detail)\n"
+                        "  1 conceptual question (what/why/how)\n"
+                        "  1 summary question (overall/general)\n"
+                        "  1 keyword-style query (short, search-like)\n"
+                        "  1 follow-up style question (assumes prior context)\n"
+                        "Return only the questions, one per line. No numbering or bullets."
+                    )},
+                    {"role": "user", "content": overall_summary},
+                ],
+                "max_tokens": 300,
+                "temperature": 0.3,
+            },
+            base_url=LLM_API_BASE,
+            timeout=_MISTRAL_TIMEOUT,
+            params={"purpose": "questions"},
+        )
+        result = body["choices"][0]["message"]["content"].strip()
+    except Exception:
+        log.warning("enrichment.questions_failed", exc_info=True)
         return []
 
     return [

@@ -110,3 +110,15 @@ class ChatRequest(BaseModel):
         return v
 
 
+class ChatMessage(BaseModel):
+    role: str = Field(..., description="Role of the message sender, e.g., 'user' or 'system'")
+    content: str = Field(..., description="Content of the message")
+
+class ChatCompletionModel(BaseModel):
+    model: str = Field(..., example="llama3.1")
+    messages: List[ChatMessage] = Field(..., description="List of chat messages for completion")
+    max_tokens: int = Field(..., description="Maximum number of tokens in the completion")
+    temperature: float = Field(..., description="Sampling temperature")
+
+       
+

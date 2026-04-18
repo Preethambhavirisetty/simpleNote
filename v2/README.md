@@ -1,3 +1,106 @@
+Existing pipeline stages(04/16/2026)
+1. ingestion
+    1. chunking: structural + semantic
+    2. keywords + entities extraction
+    3. keywords dedup(llm)
+    4. recursive summarization(llm)
+    5. question generation(llm)
+    6. llama document assembly
+2. chat stream
+    0. llm call(standalone)
+    1. query rewriting(standalone)
+    2. rag retrival
+        1. summary search(cosine)
+        2. doc scoping
+        3. chunk search(cosine)
+        4. soft scoring
+        5. reranking(model)
+    3. intent + strategy
+    4. context assembly
+    5. build prompt
+    6. inference(llm)
+    7. stream(sse)
+
+
+### intent classification
+intents / converage of user goals
+- understand / recall - semantic
+- intent=locate / find
+    - which note has ...? / where did I put the API key section? / Find my recepe for z
+    - if need a structured "note title + snippet"
+    - include folder name + note title + snippet
+    - semantic intent still covers but need to include folder id and note id details in every prompt(citations) 
+- enumerate / inventory
+    - list all notes about travel / everything tagged work / notes in folder
+    - distinguis scoped list vs vague
+    - deterministic + short answers
+- count / quantify
+    - how many times did I mention x / how many notes talk about debt
+    - keyword_count / phrase occurences vs note count
+- time
+    - when did I write this / what did I add last week / notes from march
+    - via metadata: filters, sorts, lists
+    - extract dates from text vs semantic
+- yes / no / presence
+    - did I ever note down x / do i have something on y
+    - semantic + boolean path with explicit yes/no + sources
+- compare synthesize across notes
+    - compare a and b / contradictions between 2 write ups
+    - compare only as a prompt template
+- "category": "Tasks / Todos",
+    - "intent": "todo_management",
+    - "description": "Manage or query tasks and to-do items within notes.",
+    - "goal": "Reserved for future enhancement to integrate explicit task extraction and management."
+- meta about the corpus
+    - how many notes do i have / largest note / empty folders
+    - corpus_stats
+- conversation / UI meta
+    - what did I ask you before / repeat last answer
+    - separate handling so "note intents" don't get polluted
+    - conversation support + route users to this intent when needed
+- unsafe / ambigous
+    - missing topic / contradictory request / needs disambuation
+    - clarify intent (as one question) stable than adding 5 new content intents
+
+User Query
+    │
+    ▼
+┌───────────────────────────────┐
+│  Layer 0: Quick Rules         │  (regex for obvious cases)
+│  "how many notes do I have"   │  → corpus_stats (skip everything)
+│  "repeat that"                │  → conversation_meta
+│  Cost: 0, Latency: <5ms      │
+└──────────────┬────────────────┘
+               │ no match
+               ▼
+┌───────────────────────────────┐
+│  Layer 1: Vector DB Lookup    │
+│  Top 1 per intent → best 3   │
+│  Evaluate agreement + scores  │
+└──────────────┬────────────────┘
+               │
+       ┌───────┴────────┐
+       │                 │
+   High confidence    Low confidence
+   (agree + >0.78)   (disagree or <0.72)
+       │                 │
+       ▼                 ▼
+  Return intent    ┌─────────────────┐
+  directly         │  Layer 2: LLM   │
+  (no LLM call)    │  with exemplars  │
+                   │  as few-shot     │
+                   └────────┬────────┘
+                            │
+                    ┌───────┴────────┐
+                    │                 │
+                Confident        Still unsure
+                (>0.60)          (<0.60)
+                    │                 │
+                    ▼                 ▼
+              Return intent    clarify_intent
+                              (ask user)
+
+
 ### Run postgres with podman:
 podman run -d \
   --name notelite-postgres \

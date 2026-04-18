@@ -66,6 +66,39 @@ def is_enabled(key: str) -> bool:
     return True
 
 
+def toggle_flag(name: str, mode: bool) -> bool:
+    """Toggle a feature flag by name (root or child) and persist to disk.
+
+    Returns True if the flag was found and updated, False otherwise.
+    """
+    from core.feature_flags import _FLAGS_PATH, load_flags
+
+    resolved = os.path.realpath(_FLAGS_PATH)
+    with open(resolved, "r") as f:
+        flags = json.load(f)
+
+    for root, data in flags.items():
+        if root == name:
+            data["enabled"] = mode
+            break
+        for child_name, child_data in data.get("children", {}).items():
+            if child_name == name:
+                child_data["enabled"] = mode
+                break
+        else:
+            continue
+        break
+    else:
+        return False
+
+    with open(resolved, "w") as f:
+        json.dump(flags, f, indent=4)
+
+    load_flags(resolved)
+    return True
+
+
+
 def require_feature(flag_key: str):
     """FastAPI dependency factory — returns 404 when the flag is off."""
 

@@ -9,10 +9,11 @@ import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from apis.schema import ChatRequest
-from core.config import CHAT_LLM_API_BASE, LLM_API_KEY
+from apis.schema import ChatCompletionModel, ChatRequest
+from core.config import CHAT_LLM_API_BASE
 from core.contracts import AccessContext
 from core.feature_flags import is_enabled, require_feature
+from pipeline.llm import llm_call
 from pipeline.intent import QueryPlanner
 from pipeline.rewrite import rewrite_query
 from pipeline.strategies import execute as execute_strategy
@@ -30,6 +31,10 @@ router = APIRouter(tags=["chat"], dependencies=[Depends(require_feature("chat"))
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
+
+@router.post("/chat/completions")
+def chat_completions(request: ChatCompletionModel):
+    return llm_call(request)
 
 @router.post("/chat/stream")
 def chat_stream(request: ChatRequest):
@@ -197,14 +202,10 @@ def chat_stream(request: ChatRequest):
     completion_tokens = 0
     inference_start = time.monotonic()
     try:
-        resp = httpx.post(
-            f"{CHAT_LLM_API_BASE}/chat/completions",
-            headers={"Authorization": f"Bearer {LLM_API_KEY}"},
-            json={"model": "llama3.1", "messages": chat_messages, "max_tokens": 1024},
+        body = llm_call(
+            {"model": "llama3.1", "messages": chat_messages, "max_tokens": 1024},
             timeout=300.0,
         )
-        resp.raise_for_status()
-        body = resp.json()
         answer = body["choices"][0]["message"]["content"]
         usage = body.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens", 0)
