@@ -8,6 +8,9 @@
             "history": {
                 "enabled": true
             },
+            "intent_exemplar": {
+                "enabled": true
+            },
             "intent_llm": {
                 "enabled": true
             },

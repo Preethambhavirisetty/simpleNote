@@ -71,8 +71,6 @@ def toggle_flag(name: str, mode: bool) -> bool:
 
     Returns True if the flag was found and updated, False otherwise.
     """
-    from core.feature_flags import _FLAGS_PATH, load_flags
-
     resolved = os.path.realpath(_FLAGS_PATH)
     with open(resolved, "r") as f:
         flags = json.load(f)

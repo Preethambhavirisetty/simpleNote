@@ -23,44 +23,82 @@ Existing pipeline stages(04/16/2026)
 
 
 ### intent classification
-intents / converage of user goals
-- understand / recall - semantic
-- intent=locate / find
-    - which note has ...? / where did I put the API key section? / Find my recepe for z
-    - if need a structured "note title + snippet"
-    - include folder name + note title + snippet
-    - semantic intent still covers but need to include folder id and note id details in every prompt(citations) 
-- enumerate / inventory
-    - list all notes about travel / everything tagged work / notes in folder
-    - distinguis scoped list vs vague
-    - deterministic + short answers
-- count / quantify
-    - how many times did I mention x / how many notes talk about debt
-    - keyword_count / phrase occurences vs note count
-- time
-    - when did I write this / what did I add last week / notes from march
-    - via metadata: filters, sorts, lists
-    - extract dates from text vs semantic
-- yes / no / presence
-    - did I ever note down x / do i have something on y
-    - semantic + boolean path with explicit yes/no + sources
-- compare synthesize across notes
-    - compare a and b / contradictions between 2 write ups
-    - compare only as a prompt template
-- "category": "Tasks / Todos",
-    - "intent": "todo_management",
-    - "description": "Manage or query tasks and to-do items within notes.",
-    - "goal": "Reserved for future enhancement to integrate explicit task extraction and management."
-- meta about the corpus
-    - how many notes do i have / largest note / empty folders
-    - corpus_stats
-- conversation / UI meta
-    - what did I ask you before / repeat last answer
-    - separate handling so "note intents" don't get polluted
-    - conversation support + route users to this intent when needed
-- unsafe / ambigous
-    - missing topic / contradictory request / needs disambuation
-    - clarify intent (as one question) stable than adding 5 new content intents
+INTENT_CATEGORIES = [
+    {
+        "category": "General Understanding / Recall",
+        "intent": "semantic",
+        "description": "Understand, recall, or summarize user notes using semantic search.",
+        "strategy": "Default / low confidence / “explain” queries",
+        "goal": "Answer subjective or content-based queries that require understanding or summarizing information."
+    },
+    {
+        "category": "Locate / Find",
+        "intent": "locate_note",
+        "description": "Find a specific note based on content, section, or keyword (e.g., 'Which note has ...?', 'Where did I put the API key section?').",
+        "strategy": "LLM or embed exemplars; often same retrieval as semantic, different prompt/response shape",
+        "goal": "Return structured results with folder name, note title, snippets, and relevant IDs for citations."
+    },
+    {
+        "category": "Enumerate / Inventory",
+        "intent": "list_notes",
+        "description": "Enumerate notes matching criteria (e.g., 'List all notes about travel', 'Everything tagged work').",
+        "strategy": "LLM + slots for scope; rules for “list all” only if you accept broad inventory",
+        "goal": "Return a list view, support both scoped (filtered) and broad inventory requests. Prefer deterministic and concise answers."
+    },
+    {
+        "category": "Count / Quantify",
+        "intent": "keyword_count",
+        "description": "Count occurrences or quantify content (e.g., 'How many times did I mention x?', 'How many notes talk about debt?').",
+        "strategy": "Rules for obvious phrases + slot for phrase vs note count + executor",
+        "goal": "Return numerical answers based on keyword or note occurrence, distinguish between phrase matches and note counts."
+    },
+    {
+        "category": "Time-based",
+        "intent": "temporal",
+        "description": "Find notes based on time (e.g., 'When did I write this?', 'What did I add last week?', 'Notes from March').",
+        "strategy": "Rules for “last week / March” + date parser; LLM for messy phrasing; separate metadata vs content time if you can",
+        "goal": "Support by extracting/using metadata for filtering, sorting, and listing by date. May require date parsing from text or semantic matching."
+    },
+    {
+        "category": "Presence Check / Yes-No",
+        "intent": "presence_check",
+        "description": "Determine if a concept or note exists ('Did I ever note down x?', 'Do I have something on y?').",
+        "strategy": "Rules + retrieval threshold (“any hit?”) + short LLM yes/no",
+        "goal": "Provide a yes/no answer with reasoning and sourced context when possible."
+    },
+    {
+        "category": "Compare / Synthesize Across Notes",
+        "intent": "compare_notes",
+        "description": "Compare or synthesize between notes (e.g., 'Compare a and b', 'Contradictions between 2 write-ups').",
+        "strategy": "Rules/triggers + multi-retrieval template; intent can be “compare” with semantic execution",
+        "goal": "Support comparison via prompt templates. Generally requires LLM or multi-context reasoning."
+    },
+    {
+        "category": "Meta / Corpus Stats",
+        "intent": "corpus_stats",
+        "description": "Obtain statistics about the corpus (e.g., 'How many notes do I have?', 'Largest note', 'Empty folders').",
+        "strategy": "API / DB, rules; LLM only routes, does not compute",
+        "goal": "Return corpus-level data, such as counts, largest note, and folder status."
+    },
+    {
+        "category": "Conversation / UI Meta",
+        "intent": "conversation_meta",
+        "description": "Handle meta-questions about the ongoing conversation (e.g., 'What did I ask you before?', 'Repeat last answer').",
+        "strategy": "History + rules; no note index",
+        "goal": "Provide conversation-aware assistance and route users appropriately, avoiding polluting note-related intents."
+    },
+    {
+        "category": "Ambiguous / Clarification Required",
+        "intent": "clarify_intent",
+        "description": "Handle unsafe or ambiguous queries (e.g., missing topic, contradictory request, disambiguation required).",
+        "strategy": "Explicit policy when slots or confidence fail",
+        "goal": "Ask clarifying questions or prompt the user for specificity before proceeding."
+    }
+]
+
+endpoint for intent ingestion
+clarifying question
+include metadata(folder name, note name)
 
 User Query
     │

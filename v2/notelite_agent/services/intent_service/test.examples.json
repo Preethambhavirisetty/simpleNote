@@ -1,0 +1,352 @@
+[
+    {
+      "id": 1,
+      "query": "summarize my notes on hiking",
+      "expected_intent": "semantic",
+      "difficulty": "straightforward",
+      "notes": "Classic recall/summarize"
+    },
+    {
+      "id": 2,
+      "query": "where's the note with my wifi password?",
+      "expected_intent": "locate_note",
+      "difficulty": "straightforward",
+      "notes": "Clear 'where' + specific item"
+    },
+    {
+      "id": 3,
+      "query": "show me all my recipe notes",
+      "expected_intent": "list_notes",
+      "difficulty": "straightforward",
+      "notes": "'all' + category"
+    },
+    {
+      "id": 4,
+      "query": "how many notes mention rent?",
+      "expected_intent": "keyword_count",
+      "difficulty": "straightforward",
+      "notes": "'how many' + keyword"
+    },
+    {
+      "id": 5,
+      "query": "what did I add last week?",
+      "expected_intent": "temporal",
+      "difficulty": "straightforward",
+      "notes": "Explicit time reference"
+    },
+    {
+      "id": 6,
+      "query": "did I ever write about yoga?",
+      "expected_intent": "presence_check",
+      "difficulty": "straightforward",
+      "notes": "'did I ever' pattern"
+    },
+    {
+      "id": 7,
+      "query": "compare my two workout plans",
+      "expected_intent": "compare_notes",
+      "difficulty": "straightforward",
+      "notes": "Explicit 'compare'"
+    },
+    {
+      "id": 8,
+      "query": "how many notes do I have total?",
+      "expected_intent": "corpus_stats",
+      "difficulty": "straightforward",
+      "notes": "Corpus-level count"
+    },
+    {
+      "id": 9,
+      "query": "what did I just ask you?",
+      "expected_intent": "conversation_meta",
+      "difficulty": "straightforward",
+      "notes": "About the chat itself"
+    },
+    {
+      "id": 10,
+      "query": "find the note about my dentist appointment",
+      "expected_intent": "locate_note",
+      "difficulty": "straightforward",
+      "notes": "'find the note'"
+    },
+    {
+      "id": 11,
+      "query": "everything tagged personal",
+      "expected_intent": "list_notes",
+      "difficulty": "straightforward",
+      "notes": "'everything' + filter"
+    },
+    {
+      "id": 12,
+      "query": "when did I write the grocery note?",
+      "expected_intent": "temporal",
+      "difficulty": "straightforward",
+      "notes": "'when did I'"
+    },
+    {
+      "id": 13,
+      "query": "what are my thoughts on intermittent fasting?",
+      "expected_intent": "semantic",
+      "difficulty": "straightforward",
+      "notes": "Asking for content understanding"
+    },
+    {
+      "id": 14,
+      "query": "count how many times I wrote 'deadline'",
+      "expected_intent": "keyword_count",
+      "difficulty": "straightforward",
+      "notes": "Explicit 'count' + word"
+    },
+    {
+      "id": 15,
+      "query": "do I have anything about car insurance?",
+      "expected_intent": "presence_check",
+      "difficulty": "straightforward",
+      "notes": "'do I have anything about'"
+    },
+    {
+      "id": 16,
+      "query": "travel notes",
+      "expected_intent": "list_notes",
+      "difficulty": "casual",
+      "notes": "Fragment, no verb. Bare topic + plural 'notes' implies enumeration."
+    },
+    {
+      "id": 17,
+      "query": "that note about the birthday party",
+      "expected_intent": "locate_note",
+      "difficulty": "casual",
+      "notes": "'that note' — singular, demonstrative"
+    },
+    {
+      "id": 18,
+      "query": "what do I know about sourdough?",
+      "expected_intent": "semantic",
+      "difficulty": "casual",
+      "notes": "Casual phrasing, no explicit 'notes' mention"
+    },
+    {
+      "id": 19,
+      "query": "anything from this weekend?",
+      "expected_intent": "temporal",
+      "difficulty": "casual",
+      "notes": "Time-based but very casual. 'anything' could pull toward presence_check, but time is the primary filter."
+    },
+    {
+      "id": 20,
+      "query": "show me the one about taxes",
+      "expected_intent": "locate_note",
+      "difficulty": "casual",
+      "notes": "'the one' — singular specific"
+    },
+    {
+      "id": 21,
+      "query": "stuff about morning routines",
+      "expected_intent": "semantic",
+      "difficulty": "casual",
+      "notes": "Vague 'stuff about' — recall/understand"
+    },
+    {
+      "id": 22,
+      "query": "did I make a note after the meeting on Friday?",
+      "expected_intent": "presence_check",
+      "difficulty": "casual",
+      "notes": "Presence + temporal element. Primary intent is existence check."
+    },
+    {
+      "id": 23,
+      "query": "pull up my finance notes",
+      "expected_intent": "list_notes",
+      "difficulty": "casual",
+      "notes": "Casual 'pull up' + plural"
+    },
+    {
+      "id": 24,
+      "query": "latest notes",
+      "expected_intent": "temporal",
+      "difficulty": "casual",
+      "notes": "Two-word fragment. 'latest' = time-based"
+    },
+    {
+      "id": 25,
+      "query": "what's in my work folder?",
+      "expected_intent": "list_notes",
+      "difficulty": "casual",
+      "notes": "Asking for folder contents"
+    },
+    {
+      "id": 26,
+      "query": "the packing list, where is it?",
+      "expected_intent": "locate_note",
+      "difficulty": "casual",
+      "notes": "Inverted structure, clear locate intent"
+    },
+    {
+      "id": 27,
+      "query": "tell me about my January goals",
+      "expected_intent": "semantic",
+      "difficulty": "casual",
+      "notes": "'tell me about' + time-scoped topic"
+    },
+    {
+      "id": 28,
+      "query": "notes notes notes how many do I have",
+      "expected_intent": "corpus_stats",
+      "difficulty": "casual",
+      "notes": "Messy typing, but 'how many do I have' → corpus stats"
+    },
+    {
+      "id": 29,
+      "query": "hmm what was that thing about the landlord",
+      "expected_intent": "locate_note",
+      "difficulty": "casual",
+      "notes": "Thinking-out-loud phrasing, 'that thing' = specific item"
+    },
+    {
+      "id": 30,
+      "query": "give me everything on budgeting",
+      "expected_intent": "list_notes",
+      "difficulty": "casual",
+      "notes": "'everything on' → enumerate all"
+    },
+    {
+      "id": 31,
+      "query": "notes about meditation",
+      "expected_intent": "list_notes",
+      "difficulty": "edge_case",
+      "notes": "Bare plural 'notes about X' with no verb requesting understanding → list_notes. Confusable with semantic."
+    },
+    {
+      "id": 32,
+      "query": "do I have many notes on travel?",
+      "expected_intent": "keyword_count",
+      "difficulty": "edge_case",
+      "notes": "'many' implies quantity interest, not just existence. Confusable with presence_check."
+    },
+    {
+      "id": 33,
+      "query": "what did I write in March about fitness?",
+      "expected_intent": "temporal",
+      "difficulty": "edge_case",
+      "notes": "Time is the primary filter ('in March'), topic is secondary. Confusable with semantic."
+    },
+    {
+      "id": 34,
+      "query": "anything interesting in my notes?",
+      "expected_intent": "semantic",
+      "difficulty": "edge_case",
+      "notes": "User wants content insight, not metadata. 'Interesting' requires understanding. Confusable with corpus_stats."
+    },
+    {
+      "id": 35,
+      "query": "my longest journal entry",
+      "expected_intent": "corpus_stats",
+      "difficulty": "edge_case",
+      "notes": "'longest' is a metadata stat. Confusable with locate_note."
+    },
+    {
+      "id": 36,
+      "query": "what changed in my project notes?",
+      "expected_intent": "compare_notes",
+      "difficulty": "edge_case",
+      "notes": "'what changed' implies comparison over time. Confusable with semantic."
+    },
+    {
+      "id": 37,
+      "query": "show me the notes from the trip",
+      "expected_intent": "locate_note",
+      "difficulty": "edge_case",
+      "notes": "'the trip' — singular specific event. Confusable with list_notes."
+    },
+    {
+      "id": 38,
+      "query": "have I been writing about sleep lately?",
+      "expected_intent": "presence_check",
+      "difficulty": "edge_case",
+      "notes": "Primary question is 'have I been' (existence/frequency). 'lately' is a modifier. Confusable with temporal."
+    },
+    {
+      "id": 39,
+      "query": "which folder has my health stuff?",
+      "expected_intent": "locate_note",
+      "difficulty": "edge_case",
+      "notes": "'which folder' is asking for location of content. Confusable with corpus_stats."
+    },
+    {
+      "id": 40,
+      "query": "what have I been up to this month?",
+      "expected_intent": "temporal",
+      "difficulty": "edge_case",
+      "notes": "'this month' is the driving filter. Confusable with semantic."
+    },
+    {
+      "id": 41,
+      "query": "is there more about cooking or about fitness?",
+      "expected_intent": "compare_notes",
+      "difficulty": "edge_case",
+      "notes": "Comparing volume across two topics. Confusable with keyword_count."
+    },
+    {
+      "id": 42,
+      "query": "you mentioned something about my goals earlier",
+      "expected_intent": "conversation_meta",
+      "difficulty": "edge_case",
+      "notes": "'you mentioned' — referring to AI's previous response, not user's notes. Confusable with locate_note."
+    },
+    {
+      "id": 43,
+      "query": "notes",
+      "expected_intent": "clarify_intent",
+      "difficulty": "adversarial",
+      "notes": "Single word, completely ambiguous. System should ask for clarification."
+    },
+    {
+      "id": 44,
+      "query": "how do I organize my notes better?",
+      "expected_intent": "clarify_intent",
+      "difficulty": "adversarial",
+      "notes": "Not a query about note content — asking for advice. None of the retrieval intents apply."
+    },
+    {
+      "id": 45,
+      "query": "delete my old travel notes",
+      "expected_intent": "clarify_intent",
+      "difficulty": "adversarial",
+      "notes": "Action request (delete), not a retrieval intent. Should route to different handler or clarify."
+    },
+    {
+      "id": 46,
+      "query": "what did I write about that thing at the place with the guy",
+      "expected_intent": "semantic",
+      "difficulty": "adversarial",
+      "notes": "Extremely vague but structurally a recall query. System should attempt semantic search."
+    },
+    {
+      "id": 47,
+      "query": "March notes and also count how many mention budget",
+      "expected_intent": "clarify_intent",
+      "difficulty": "adversarial",
+      "notes": "Multi-intent query — temporal + keyword_count. System should pick primary or ask user to split."
+    },
+    {
+      "id": 48,
+      "query": "🏖️ vacation",
+      "expected_intent": "list_notes",
+      "difficulty": "adversarial",
+      "notes": "Emoji + single word. Treat like 'notes about vacation'."
+    },
+    {
+      "id": 49,
+      "query": "I think I wrote something last year about maybe switching jobs or something",
+      "expected_intent": "presence_check",
+      "difficulty": "adversarial",
+      "notes": "Hedging language — 'I think', 'maybe', 'or something'. Structurally a presence check."
+    },
+    {
+      "id": 50,
+      "query": "thanks that's all",
+      "expected_intent": "conversation_meta",
+      "difficulty": "adversarial",
+      "notes": "Conversation closer, not a note query."
+    }
+  ]
