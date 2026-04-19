@@ -106,7 +106,7 @@ SEED EXAMPLE: "{example}"
 AVOID generating queries like these (they belong to OTHER intents):
 {confusable_examples}
 
-Generate exactly 5 NEW queries that clearly belong to intent "{intent}".
+Generate exactly 2 NEW queries that clearly belong to intent "{intent}".
 
 Requirements:
 1. Each query must be something a real person would actually type — vary between \
@@ -118,7 +118,7 @@ with any other intent. Think about what makes this intent distinct.
 4. Include at least one SHORT query (2-5 words) and one LONGER natural query.
 5. Do NOT include any labels, numbers, prefixes, quotes, or annotations.
 
-Output exactly 5 lines, one raw query per line, nothing else."""
+Output exactly 2 lines, one raw query per line, nothing else."""
 
 _AUGMENTATION_MODEL = "mistral-7b"
 
@@ -222,7 +222,7 @@ def augment_exemplars(path: str | None = None) -> int:
                         "messages": [
                             {"role": "user", "content": prompt},
                         ],
-                        "max_tokens": 300,
+                        "max_tokens": 200, # 3 ques x ~15 words x ~2 token/word = 90, still more head room
                         "temperature": 0.9,
                     },
                     base_url=LLM_API_BASE,
@@ -234,12 +234,12 @@ def augment_exemplars(path: str | None = None) -> int:
                     q = _clean_paraphrase(line)
                     if q:
                         cleaned.append(q)
-                augmented.setdefault(intent, []).extend(cleaned[:5])
+                augmented.setdefault(intent, []).extend(cleaned[:2])
                 log.info(
                     "augment.generated",
                     intent=intent,
                     seed=example,
-                    count=len(cleaned[:5]),
+                    count=len(cleaned[:2]),
                 )
             except Exception:
                 log.warning(

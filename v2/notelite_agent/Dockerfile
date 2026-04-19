@@ -28,6 +28,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LLAMA_INDEX_CACHE_DIR="/app/.cache/llama_index" \
     TRANSFORMERS_CACHE="/app/.cache/huggingface"
 
+# Pre-download the intent classifier's sentence-transformer model so
+# the container doesn't need HuggingFace access at runtime.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-mpnet-base-v2')"
+
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

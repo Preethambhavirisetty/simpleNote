@@ -1,8 +1,7 @@
 """Intent classifier: sentence-transformer embeddings + LogisticRegression.
 
-Uses the sentence-transformers model to embed queries, then trains a
-LogisticRegression head that learns decision boundaries between intents.
-No SetFit dependency — just sentence-transformers + sklearn.
+Uses all-mpnet-base-v2 to embed queries, then trains a LogisticRegression
+head that learns decision boundaries between intents.
 
 Usage — training:
     cd notelite_agent
@@ -55,15 +54,9 @@ LABEL2ID: dict[str, int] = {
 }
 ID2LABEL: dict[int, str] = {v: k for k, v in LABEL2ID.items()}
 
-# BASE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-# BASE_MODEL = "BAAI/bge-large-en-v1.5"
 BASE_MODEL = "all-mpnet-base-v2"
 
-CONFIDENCE_THRESHOLD = 0.48
-
-# CONFIDENCE_THRESHOLD = 0.55
-
-# is this a good one for llm fallback
+CONFIDENCE_THRESHOLD = 0.45
 
 # ── Data collection ──────────────────────────────────────────────────────
 
@@ -113,11 +106,6 @@ def _load_qdrant_exemplars() -> list[dict]:
 
     client.close()
     log.info("classifier.qdrant_loaded", count=len(rows))
-    
-    with open("augumented_examples.txt", 'a') as fw:
-        for row in rows:
-            fw.write(row['text']+'\n')
-    
     return rows
 
 
@@ -151,7 +139,6 @@ def collect_training_data() -> list[dict]:
     seen: set[str] = set()
     merged: list[dict] = []
     for row in corrections + seed + qdrant:
-    # for row in corrections + seed:
         key = row["text"].strip().lower()
         if key not in seen:
             seen.add(key)
@@ -357,7 +344,14 @@ class IntentClassifier:
         log.info("classifier.loaded", path=str(model_dir))
 
     def predict(self, query: str) -> tuple[str, float]:
-        """Return (intent_label, confidence) for a single query."""
+        """
+        Return (intent_label, confidence) for a single query.
+        - query -> embeddings via SF.encode([query])
+        - probability scores for embeddings via LogisticRegression.predic_proba(embeddings)
+        - intent predicate index for the maximum score via argmax
+        - get the prediction score from that index
+        - return its intent label and score
+        """
         emb = self._encoder.encode([query])
         probs = self._clf.predict_proba(emb)[0]
         pred_idx = int(probs.argmax())

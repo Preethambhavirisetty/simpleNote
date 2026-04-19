@@ -16,7 +16,7 @@ from core.settings import init_llama_index_settings
 from services.intent_service.intent import QueryPlanner
 
 # _TEST_PATH = os.path.join(os.path.dirname(__file__), "test.examples.json")
-_TEST_PATH = os.path.join(os.path.dirname(__file__), "test2.examples.json")
+_TEST_PATH = os.path.join(os.path.dirname(__file__), "test.examples.json")
 
 # ANSI colors
 _GREEN = "\033[92m"
@@ -161,8 +161,60 @@ def _summarize(results: list[dict]) -> dict:
         "errors": errors,
     }
 
+def threshold_analysis(cases: list[dict]) -> None:
+    """Evaluate classifier-only accuracy at various confidence thresholds."""
+    from services.intent_service.classifier import IntentClassifier
+
+    clf = IntentClassifier.load()
+    results = []
+    for tc in cases:
+        label, conf = clf.predict(tc["query"])
+        results.append({
+            "text": tc["query"],
+            "true": tc["expected_intent"],
+            "predicted": label,
+            "confidence": conf,
+            "correct": label == tc["expected_intent"],
+        })
+
+    print(f"\n{_BOLD}CLASSIFIER THRESHOLD ANALYSIS{_RESET}")
+    print(f"{'Threshold':<12} {'Accuracy':<10} {'Coverage':<10} {'Wrong+Confident':<16}")
+    print("-" * 50)
+
+    for threshold in [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70]:
+        above = [r for r in results if r["confidence"] >= threshold]
+        if above:
+            accuracy = sum(1 for r in above if r["correct"]) / len(above)
+            wrong_confident = sum(1 for r in above if not r["correct"])
+        else:
+            accuracy = 0.0
+            wrong_confident = 0
+        coverage = len(above) / len(results)
+        print(f"{threshold:<12.2f} {accuracy:<10.1%} {coverage:<10.1%} {wrong_confident}")
+
+    wrong = sorted(
+        (r for r in results if not r["correct"]),
+        key=lambda x: x["confidence"],
+        reverse=True,
+    )
+    if wrong:
+        print(f"\n  {_BOLD}Wrong predictions by confidence:{_RESET}")
+        for r in wrong[:15]:
+            print(
+                f"    conf={r['confidence']:.2f}  "
+                f"{r['predicted']:<20s} (expected {r['true']:<20s})  "
+                f"\"{r['text'][:55]}\""
+            )
+    print()
+
 
 if __name__ == "__main__":
+    try:
+        import multiprocess.resource_tracker as _rt
+        _rt.ResourceTracker.__del__ = lambda self: None
+    except Exception:
+        pass
     init_llama_index_settings()
     cases = _load_cases()
     run_evaluation(cases)
+    # threshold_analysis(cases)

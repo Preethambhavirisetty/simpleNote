@@ -1,13 +1,12 @@
-"""Three-tier intent detection: regex → classifier → LLM fallback.
+"""Two-tier intent detection: classifier → LLM fallback.
 
-Layer 0 (Regex):       Catches obvious patterns (corpus_stats, conversation_meta,
-                       keyword_count, temporal, list_notes, etc.) with zero latency.
 Layer 1 (Classifier):  Sentence-transformer embeddings + LogisticRegression head.
                        Returns intent + calibrated confidence.  Falls through if
                        conf < threshold or model not trained yet.
-Layer 1b (Exemplar):   Legacy fallback — Qdrant exemplar similarity.  Used only
-                       when the classifier is unavailable.
-Layer 2 (LLM):         Structured LLM classification with few-shot context.
+Layer 2 (LLM):         Structured LLM classification with few-shot context from
+                       the Qdrant exemplar bank (when available).
+
+If both tiers fail or are disabled, defaults to ``semantic``.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from core.config import (
 )
 from core.feature_flags import is_enabled
 from pipeline.llm import llm_call
-from services.intent_service.regex_rules import _REGEX_RULES
 
 log = structlog.get_logger()
 
@@ -46,8 +44,6 @@ VALID_INTENTS = frozenset({
     "clarify_intent",
 })
 
-# Maps each intent to the execution strategy consumed by pipeline/strategies.py.
-# Intents without a dedicated handler fall through to "semantic".
 INTENT_ACTIONS: dict[str, str] = {
     "semantic":          "semantic",
     "locate_note":       "semantic",
@@ -60,11 +56,6 @@ INTENT_ACTIONS: dict[str, str] = {
     "conversation_meta": "conversation_meta",
     "clarify_intent":    "clarify_intent",
 }
-
-# ── Exemplar similarity thresholds ───────────────────────────────────────
-
-EXEMPLAR_HIGH_THRESHOLD = 0.78
-EXEMPLAR_AGREE_THRESHOLD = 0.68
 
 # ── QueryPlan ────────────────────────────────────────────────────────────
 
@@ -80,7 +71,7 @@ class QueryPlan:
     intent: str = "semantic"
     search_term: str | None = None
     confidence: float = 1.0
-    source: str = "regex"
+    source: str = "classifier"
     slots: dict = field(default_factory=dict)
 
 
@@ -123,8 +114,6 @@ class IntentStore:
         )
         log.info("intent_store.created", collection=INTENT_COLLECTION)
 
-    # ── ingestion ─────────────────────────────────────────────────────
-
     def ingest(
         self,
         exemplars: dict[str, list[str]],
@@ -136,7 +125,7 @@ class IntentStore:
             if intent not in VALID_INTENTS:
                 log.warning("intent_store.unknown_intent", intent=intent)
                 continue
-            for i, text in enumerate(texts):
+            for text in texts:
                 vec = self._settings.embed_model.get_text_embedding(text)
                 point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{intent}:{text}"))
                 points.append(
@@ -154,21 +143,16 @@ class IntentStore:
         batch_size = 100
         for i in range(0, len(points), batch_size):
             self._client.upsert(
-                collection_name=INTENT_COLLECTION, points=points[i:i + batch_size],
+                collection_name=INTENT_COLLECTION,
+                points=points[i : i + batch_size],
             )
         log.info("intent_store.ingested", count=len(points), source=source)
         return len(points)
 
-    # ── search ────────────────────────────────────────────────────────
-
     def search_best_per_intent(
         self, query: str, *, fetch_limit: int = 50,
     ) -> list[tuple[str, str, float]]:
-        """Return the single best-scoring exemplar per intent, sorted by score.
-
-        Executes one broad search, groups by intent, keeps the highest
-        scorer per intent, and returns them in descending score order.
-        Result length equals the number of intents that have exemplars.
+        """Return the single best-scoring exemplar per intent, sorted desc.
 
         Returns list of ``(exemplar_text, intent, cosine_score)``.
         """
@@ -205,12 +189,11 @@ class IntentStore:
         self._client.close()
 
 
-# Module-level lazy singleton
 _intent_store: IntentStore | None = None
 
 
 def get_intent_store() -> IntentStore | None:
-    """Return a shared IntentStore, creating it on first call.
+    """Return a shared IntentStore (lazy singleton).
 
     Returns None if the store cannot be initialised (e.g. Qdrant is down).
     """
@@ -223,6 +206,7 @@ def get_intent_store() -> IntentStore | None:
             return None
     return _intent_store
 
+
 # ── LLM classification prompt ───────────────────────────────────────────
 
 _LLM_SYSTEM_PROMPT = """\
@@ -232,23 +216,42 @@ You are an intent classifier for a personal notes app. Classify the user's query
 {exemplar_block}
 
 ## Intents:
-- semantic: Understand, recall, or summarize note CONTENT ("what did I write about", "summarize", "explain")
-- locate_note: Find ONE SPECIFIC note ("which note has", "where is", "the note about", "that one about")
-- list_notes: Enumerate MULTIPLE notes matching a filter ("all notes about", "everything tagged", "list", "every note")
-- keyword_count: Get a NUMBER — occurrences or note counts ("how many", "count", "how often")
-- temporal: Notes filtered primarily by TIME ("last week", "yesterday", "in March", "latest", "when did I")
-- presence_check: YES/NO existence check ("did I ever", "do I have anything about", "is there a note", "any note about")
-- compare_notes: Compare or contrast two+ notes/topics ("compare", "differences", "what changed", "contradictions")
-- corpus_stats: Metadata/statistics about the collection, not content ("how many notes total", "largest note", "empty folders")
-- conversation_meta: About THIS CONVERSATION or closers ("what did I ask you", "repeat that", "thanks", "bye")
-- clarify_intent: Query is ambiguous, a non-retrieval action (delete/edit/move), or combines conflicting intents
+- semantic: Understand, recall, or summarize note CONTENT. User wants insight, meaning, or a recap. \
+("what did I write about", "summarize", "explain", "what are my thoughts on", "any gems in", "anything worth rereading", "any actionable stuff")
+- locate_note: Find a SPECIFIC note, or find WHERE a note/folder is stored. Includes notes about a SPECIFIC EVENT \
+("the note about", "that one about", "which note has", "where is", "which folder has/stores/contains X", "the notes about the [event]", "the notes I made during the [event]")
+- list_notes: Enumerate MULTIPLE notes matching a GENERAL topic, tag, or folder. The topic is a CATEGORY, not a specific event. \
+("all notes about cooking", "everything tagged work", "list my travel notes", "every note", bare topic like "recipes")
+- keyword_count: Get a NUMBER — how many notes mention X, or how frequently. Quantity words like "many", "a lot", "how much". \
+("how many notes mention", "count", "how often", "are there many notes on X", "do I have a lot of notes about X")
+- temporal: Notes filtered primarily by TIME ("last week", "yesterday", "in March", "latest", "when did I write")
+- presence_check: Simple YES/NO existence check — does a note exist on a topic? The answer is strictly "yes" or "no". \
+No quantity (that's keyword_count), no content retrieval (that's semantic), no finding it (that's locate_note). \
+("did I ever write about X", "is there a note about X", "have I mentioned X", "do I have anything on X"). \
+NOT "are there many" (keyword_count), NOT "any insights/gems/actionable stuff" (semantic).
+- compare_notes: Compare, contrast, or find DIFFERENCES/SIMILARITIES between two or more specific notes or topics. \
+Requires at least two subjects being weighed against each other. \
+("compare my notes on X and Y", "differences between X and Y", "what changed between draft A and B", \
+"is there more about X or Y", "are X and Y notes consistent", "do I write more about X or Y")
+- corpus_stats: Metadata/statistics about the entire COLLECTION — total counts, sizes, structure. NOT about finding a specific folder. \
+("how many notes total", "largest note", "total word count", "most recently edited note")
+- conversation_meta: About THIS CHAT CONVERSATION or closers ("what did I ask you", "repeat that", "say that again", "thanks", "bye", "nope that's not what I meant")
+- clarify_intent: Query is AMBIGUOUS, requests a NON-RETRIEVAL ACTION the app cannot perform, or COMBINES MULTIPLE conflicting intents. \
+Use when: (1) query is too vague to determine intent ("stuff", "help", single word with no verb), \
+(2) user asks to delete/edit/export/share/move/merge/duplicate/rename — these are write actions, not retrieval, \
+(3) query chains two distinct intents ("show me X and also compare Y", "list X then count Y"), \
+(4) query references an action + a destructive modifier ("find X and then delete it"). \
+("delete my notes", "export to PDF", "merge these two", "show me X and also compare Y", "find X and then delete the old one")
 
 ## Decision Rules:
 1. Time reference + understanding goal → semantic, NOT temporal
-2. "the note" (singular specific) → locate_note, NOT list_notes
-3. Answer is yes/no → presence_check, even if time is mentioned
-4. Non-retrieval actions (delete, rename, move, edit) → clarify_intent
-5. When uncertain, prefer semantic over other intents
+2. "the [specific event/thing]" (renovation, conference, move, plumber) → locate_note, even if "notes" is plural. A specific event is not a general category.
+3. "which folder has/stores/contains X" or "where do I keep X" → locate_note, NOT corpus_stats. User wants to FIND something.
+4. "are there many", "do I have a lot of", "how much" + topic → keyword_count, NOT presence_check. User wants quantity.
+5. "any [qualifier] stuff/gems/insights" where user seeks content understanding → semantic, NOT presence_check. User wants to explore content.
+6. Non-retrieval actions (delete, rename, move, edit, export, share) → clarify_intent
+7. Query combines two distinct intents with "and also", "then", "plus" → clarify_intent
+8. When uncertain between intents, prefer semantic
 
 ## User Query:
 "{user_query}"
@@ -256,119 +259,39 @@ You are an intent classifier for a personal notes app. Classify the user's query
 Respond with ONLY valid JSON:
 {{"intent": "<intent_name>", "confidence": 0.0-1.0, "slots": {{"topic": null, "time_range": null, "scope": null}}, "reasoning": "<one sentence>"}}"""
 
-# _LLM_SYSTEM_PROMPT = """\
-# You are an intent classifier for a personal notes app.
-
-# ## User's Query:
-# "{user_query}"
-
-# ## Most Similar Known Examples (from our database):
-# {exemplar_block}
-
-# ## Available Intents (read descriptions carefully):
-# - semantic: User wants to UNDERSTAND, RECALL, or SUMMARIZE note content. \
-# Signals: "what did I write about", "tell me about", "summarize", "explain my notes on". \
-# Use when the user wants insight or comprehension, not just finding/listing.
-# - locate_note: User wants to find ONE SPECIFIC note or item. \
-# Signals: "the note", "that note", "the one about", "which note has", "where is", "find the". \
-# Key: SINGULAR reference to a specific document.
-# - list_notes: User wants to ENUMERATE or LIST MULTIPLE notes matching a topic or filter. \
-# Signals: "all notes", "everything about", "every note", "list", "show me notes about". \
-# Key: PLURAL, wants a collection of results.
-# - keyword_count: User wants a NUMBER — how many times a word/phrase appears or how many notes mention it. \
-# Signals: "how many", "count", "how often", "number of".
-# - temporal: User wants notes filtered by TIME — when something was written, or notes from a date range. \
-# Signals: "last week", "yesterday", "in March", "most recent", "when did I", "latest". \
-# Key: a time expression is the PRIMARY filter.
-# - presence_check: User wants a YES/NO answer about whether something EXISTS in their notes. \
-# Signals: "did I ever", "do I have anything about", "is there a note", "have I mentioned", "any note about". \
-# Key: the answer is fundamentally yes or no.
-# - compare_notes: User wants to COMPARE, CONTRAST, or find DIFFERENCES between two or more notes/topics. \
-# Signals: "compare", "differences between", "contrast", "what changed", "consistent", "contradictions".
-# - corpus_stats: User wants METADATA/STATISTICS about their note collection, not content. \
-# Signals: "how many notes do I have", "largest note", "empty folders", "total word count", "breakdown per folder".
-# - conversation_meta: User is referring to THIS CONVERSATION, not their notes. \
-# Signals: "what did I ask you", "repeat that", "say that again", "thanks", "bye", "that's all".
-# - clarify_intent: The query is TOO AMBIGUOUS to classify. Use this when: \
-# (1) the query is a single word or fragment with no clear intent (e.g. "notes", "help"), \
-# (2) the query is an ACTION REQUEST that is not retrieval (e.g. "delete my notes", "organize my folders"), \
-# (3) the query combines MULTIPLE INTENTS that conflict (e.g. "list X and also count Y"), or \
-# (4) you genuinely cannot determine what the user wants.
-
-# ## Rules:
-# - Pick the SINGLE best intent based on the PRIMARY purpose of the query.
-# - If a query has a time reference but the main goal is recall/understanding, pick semantic, not temporal.
-# - If a query mentions "the note" (singular, specific), pick locate_note, not list_notes.
-# - If the answer would be yes/no, pick presence_check, even if a time reference is present.
-# - Do NOT hesitate to return clarify_intent for genuinely ambiguous or non-retrieval queries.
-
-# Respond with ONLY a JSON object, nothing else:
-# {{"intent": "<intent_name>", "confidence": 0.0-1.0, "slots": {{"topic": null, "time_range": null, "scope": null}}, "reasoning": "<one sentence>"}}"""
-
 
 # ── QueryPlanner ─────────────────────────────────────────────────────────
 
 
 class QueryPlanner:
-    """Three-tier intent classifier: regex → SetFit classifier → LLM fallback."""
+    """Two-tier intent classifier: trained classifier → LLM fallback."""
 
     def plan(self, query: str) -> QueryPlan:
-        # Layer 0: regex fast-path
-        # plan = self._try_regex(query)
-        # if plan is not None:
-        #     return plan
-
-        # Layer 1: SetFit classifier (replaces exemplar similarity)
+        # Layer 1: trained classifier
         if is_enabled("chat.intent_classifier"):
             plan = self._try_classifier(query)
             if plan is not None:
                 return plan
 
-        # Fetch exemplar results once (shared between fallback tiers)
+        # Gather exemplar context for LLM few-shot (best-effort, never blocks)
         exemplar_results: list[tuple[str, str, float]] = []
         if is_enabled("chat.intent_exemplar"):
             store = get_intent_store()
             if store is not None:
                 exemplar_results = store.search_best_per_intent(query)
 
-        # Layer 1 fallback: exemplar similarity (used when classifier not available)
-        plan = self._evaluate_exemplars(exemplar_results)
-        if plan is not None:
-            return plan
-
         # Layer 2: LLM fallback
         if is_enabled("chat.intent_llm"):
             return self._try_llm(query, exemplar_results)
 
-    # "confidence": result["confidence"],  # ← actual classifier confidence
-    # "method": "default_fallback",
-    # "original_prediction": result["intent"],
-
+        # All tiers exhausted — safe default
+        log.info("intent.default_fallback", query=query[:80])
         return QueryPlan(
             strategy="semantic", intent="semantic",
-            confidence=1.0, source="default",
+            confidence=0.0, source="default",
         )
 
-    # ── Layer 0 ───────────────────────────────────────────────────────
-
-    @staticmethod
-    def _try_regex(query: str) -> QueryPlan | None:
-        for pattern, intent, group_idx in _REGEX_RULES:
-            m = pattern.search(query)
-            if m:
-                search_term = (
-                    m.group(group_idx).strip() if group_idx is not None else None
-                )
-                return QueryPlan(
-                    strategy=INTENT_ACTIONS.get(intent, "semantic"),
-                    intent=intent,
-                    search_term=search_term,
-                    confidence=1.0,
-                    source="regex",
-                )
-        return None
-
-    # ── Layer 1: SetFit classifier ──────────────────────────────────
+    # ── Layer 1: trained classifier ───────────────────────────────────
 
     @staticmethod
     def _try_classifier(query: str) -> QueryPlan | None:
@@ -380,7 +303,7 @@ class QueryPlanner:
                 append_low_confidence,
             )
             clf = IntentClassifier.load()
-        except (FileNotFoundError, Exception):
+        except Exception:
             log.debug("intent.classifier_unavailable", exc_info=True)
             return None
 
@@ -394,10 +317,7 @@ class QueryPlanner:
             append_low_confidence(query, intent, confidence)
             return None
 
-        log.info(
-            "intent.classifier",
-            intent=intent, confidence=confidence,
-        )
+        log.info("intent.classifier", intent=intent, confidence=confidence)
         return QueryPlan(
             strategy=INTENT_ACTIONS.get(intent, "semantic"),
             intent=intent,
@@ -405,68 +325,13 @@ class QueryPlanner:
             source="classifier",
         )
 
-    # ── Layer 1 fallback: exemplar similarity ────────────────────────
-
-    @staticmethod
-    def _evaluate_exemplars(
-        results: list[tuple[str, str, float]],
-    ) -> QueryPlan | None:
-        """Evaluate per-intent best scores.
-
-        Each entry in *results* represents a different intent's best exemplar.
-        - Top-1 ≥ 0.92 → return directly (single exemplar is very close).
-        - Top-1 and top-2 both ≥ 0.78 → the exemplar space covers the
-          query well; trust the top-scoring intent.
-        """
-        if not results:
-            return None
-
-        _text_1, intent_1, score_1 = results[0]
-
-        if score_1 >= EXEMPLAR_HIGH_THRESHOLD:
-            log.info(
-                "intent.exemplar_high",
-                intent=intent_1, score=round(score_1, 3),
-            )
-            return QueryPlan(
-                strategy=INTENT_ACTIONS.get(intent_1, "semantic"),
-                intent=intent_1,
-                confidence=round(score_1, 3),
-                source="exemplar",
-            )
-
-        if len(results) >= 2:
-            _text_2, _intent_2, score_2 = results[1]
-            if (
-                score_1 >= EXEMPLAR_AGREE_THRESHOLD
-                and score_2 >= EXEMPLAR_AGREE_THRESHOLD
-            ):
-                log.info(
-                    "intent.exemplar_confident",
-                    intent=intent_1,
-                    scores=(round(score_1, 3), round(score_2, 3)),
-                )
-                return QueryPlan(
-                    strategy=INTENT_ACTIONS.get(intent_1, "semantic"),
-                    intent=intent_1,
-                    confidence=round(score_1, 3),
-                    source="exemplar",
-                )
-
-        log.debug(
-            "intent.exemplar_low",
-            top_3=[(i, round(s, 3)) for _, i, s in results[:3]],
-        )
-        return None
-
-    # ── Layer 2 ───────────────────────────────────────────────────────
+    # ── Layer 2: LLM fallback ─────────────────────────────────────────
 
     @staticmethod
     def _try_llm(
         query: str,
         exemplar_results: list[tuple[str, str, float]],
     ) -> QueryPlan:
-        # Results are already best-per-intent sorted by score; take top 3
         top_3 = exemplar_results[:3]
         if top_3:
             lines = [

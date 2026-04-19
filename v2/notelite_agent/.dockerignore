@@ -5,3 +5,7 @@ __pycache__
 db/
 .pytest_cache
 *.egg-info
+.cache/
+*.examples.json
+augumented_examples.txt
+low_confidence_queries.jsonl
