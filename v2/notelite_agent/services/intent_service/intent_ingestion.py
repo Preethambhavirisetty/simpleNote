@@ -24,53 +24,135 @@ from core.config import LLM_API_BASE
 from pipeline.llm import llm_call
 from services.intent_service.intent import IntentStore, VALID_INTENTS
 
+
 log = structlog.get_logger()
 
 _EXAMPLES_PATH = os.path.join(os.path.dirname(__file__), "examples.json")
 
+_CONFUSABLE_INTENTS = {
+    "semantic":         ["list_notes", "locate_note"],
+    "locate_note":      ["list_notes", "semantic"],
+    "list_notes":       ["semantic", "locate_note"],
+    "keyword_count":    ["presence_check", "corpus_stats"],
+    "temporal":         ["semantic", "list_notes"],
+    "presence_check":   ["keyword_count", "semantic"],
+    "compare_notes":    ["keyword_count", "semantic"],
+    "corpus_stats":     ["keyword_count", "locate_note"],
+    "conversation_meta":["locate_note", "semantic"],
+    "clarify_intent":   ["semantic", "list_notes"],
+}
+
+
+def build_confusable_block(intent: str, all_examples: dict) -> str:
+    confusable_intents = _CONFUSABLE_INTENTS.get(intent, [])
+    lines = []
+    for conf_intent in confusable_intents:
+        examples = all_examples.get(conf_intent, [])[:3]  # just 3 examples
+        for ex in examples:
+            lines.append(f"- \"{ex}\" → this is {conf_intent}, NOT {intent}")
+    return "\n".join(lines)
+
+_INTENT_DESCRIPTIONS = {
+    "semantic": "User wants to understand, summarize, or recall the CONTENT of their notes. "
+        "Key signals: 'summarize', 'what did I write about', 'what do my notes say', "
+        "'tell me about', 'what are my thoughts on', 'recap', 'gist of'. "
+        "NOT list_notes (which just enumerates titles), NOT locate_note (which finds a specific one).",
+    "locate_note": "User wants to find ONE specific note or the folder/location where it lives. "
+        "Key signals: 'find the note', 'which note has', 'where is the note', 'show me the one about', "
+        "'that note about', 'which folder has'. Singular 'note'/'one', demonstratives 'that'/'the'. "
+        "NOT list_notes (which wants ALL notes on a topic).",
+    "list_notes": "User wants to see ALL notes matching a topic, tag, or folder. "
+        "Key signals: 'all my notes on', 'list notes about', 'everything tagged', "
+        "'show me every note', 'pull up all', plural 'notes'. Bare topic+plural like 'travel notes'. "
+        "NOT semantic (which wants content understanding), NOT locate_note (which wants one specific note).",
+    "keyword_count": "User wants a COUNT or frequency of how often a keyword/topic appears. "
+        "Key signals: 'how many notes mention', 'count notes that', 'how often', 'how frequently', "
+        "'number of notes mentioning'. Wants a NUMBER, not a list. "
+        "NOT presence_check (which asks yes/no existence), NOT list_notes (which wants the notes themselves).",
+    "temporal": "User wants notes filtered by TIME or wants to know WHEN something was written. "
+        "Key signals: 'last week', 'from March', 'yesterday', 'most recent', 'when did I write', "
+        "'this month', 'oldest'. Time is the PRIMARY filter. "
+        "NOT semantic (even if a topic is mentioned, time is the main axis).",
+    "presence_check": "User wants a YES/NO answer about whether a note exists on a topic. "
+        "Key signals: 'did I ever write about', 'do I have anything on', 'is there a note about', "
+        "'have I mentioned', 'any note about'. Existence check, not retrieval. "
+        "NOT keyword_count (which wants how many), NOT locate_note (which wants to find it).",
+    "compare_notes": "User wants to COMPARE, CONTRAST, or find DIFFERENCES between two or more notes/topics. "
+        "Key signals: 'compare', 'contrast', 'differences between', 'how do X and Y differ', "
+        "'is there more about X or Y', 'what changed between', 'consistent'. "
+        "NOT keyword_count (which counts one keyword), NOT presence_check.",
+    "corpus_stats": "User wants METADATA or STATISTICS about their entire note collection. "
+        "Key signals: 'how many notes do I have', 'total word count', 'largest/smallest/longest note', "
+        "'how many folders', 'average length', 'breakdown per folder'. About the COLLECTION, not content. "
+        "NOT keyword_count (which counts mentions of a specific word).",
+    "conversation_meta": "User is referring to THIS CHAT CONVERSATION, not their notes. OR saying goodbye. "
+        "Key signals: 'what did I just ask you', 'repeat your last answer', 'what were we talking about', "
+        "'you mentioned earlier', 'thanks that's all', 'bye', 'I'm done'. "
+        "NOT semantic (which asks about note content), NOT locate_note.",
+    "clarify_intent": "Query is AMBIGUOUS, contains MULTIPLE intents combined, or requests an UNSUPPORTED ACTION. "
+        "Key signals: vague single words ('notes', 'stuff'), multi-intent ('list my notes and also count...'), "
+        "unsupported actions ('delete', 'edit', 'export', 'share', 'create'). "
+        "NOT any specific intent — this is the catch-all for unclear queries.",
+}
+
 _AUGMENTATION_PROMPT = """\
-A personal notes app classifies user queries by intent.
-The intent "{intent}" covers queries like: "{example}"
+You are generating training data for an intent classifier in a personal notes app.
 
-Write 5 realistic queries a real person would actually type into this app \
-that clearly belong to the same intent.
+TARGET INTENT: "{intent}"
+DESCRIPTION: {intent_description}
 
-Critical rules:
-- Output ONLY the raw query text, exactly as a user would type it.
-- NO labels, prefixes, tags, or annotations (no "Formal:", "Casual:", \
-  "Terse:", "Fragment:", "(verbose)", numbering, etc.).
-- NO quotation marks around the query.
-- Each query must be a natural, standalone sentence or phrase.
-- Vary vocabulary and sentence structure across the 5 queries.
-- Every query must unambiguously belong to intent "{intent}".
+SEED EXAMPLE: "{example}"
 
-Output exactly 5 lines, one query per line, nothing else."""
+AVOID generating queries like these (they belong to OTHER intents):
+{confusable_examples}
+
+Generate exactly 5 NEW queries that clearly belong to intent "{intent}".
+
+Requirements:
+1. Each query must be something a real person would actually type — vary between \
+formal, casual, terse, and conversational styles.
+2. Use DIFFERENT vocabulary, sentence structures, and topics from the seed. \
+Don't just swap one word — change the whole phrasing.
+3. Each query must UNAMBIGUOUSLY belong to "{intent}" and NOT be confusable \
+with any other intent. Think about what makes this intent distinct.
+4. Include at least one SHORT query (2-5 words) and one LONGER natural query.
+5. Do NOT include any labels, numbers, prefixes, quotes, or annotations.
+
+Output exactly 5 lines, one raw query per line, nothing else."""
 
 _AUGMENTATION_MODEL = "mistral-7b"
 
 # Patterns that indicate leaked prompt artifacts rather than real queries
 _NOISE_RE = re.compile(
     r"^\s*[\(\[]*\s*"
-    r"(?:formal|casual|terse|verbose|fragment|variation|example|query|paraphrase)"
+    r"(?:formal|casual|terse|verbose|fragment|variation|example|query|paraphrase|short|long|longer|natural)"
     r"\s*[\)\]:]*\s*",
     re.IGNORECASE,
 )
 
+_INTENT_LEAK_RE = re.compile(
+    r"\b(?:intent|classify|classification|belongs?\s+to|category)\b",
+    re.IGNORECASE,
+)
 
 def _clean_paraphrase(line: str) -> str | None:
     """Strip numbering, quotes, and prompt artifacts. Returns None if junk."""
     s = line.strip()
     if not s:
         return None
-    # strip leading numbering: "1.", "1)", "1 -", etc.
+    # skip lines that look like instructions or commentary
+    if s.startswith("Here") or s.startswith("Sure") or s.startswith("Note:"):
+        return None
+    # strip leading numbering: "1.", "1)", "1 -", "- ", "* "
     s = re.sub(r"^\d+[\.\)\-]\s*", "", s)
+    s = re.sub(r"^[-*]\s+", "", s)
     # strip wrapping quotes
     if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
         s = s[1:-1].strip()
     # strip leaked labels like "(Casual)" or "Formal:"
     s = _NOISE_RE.sub("", s).strip()
-    # reject if too short or still looks like a label
-    if len(s) < 5 or s.endswith(":"):
+    # reject if too short, still looks like a label, or leaks intent terminology
+    if len(s) < 5 or s.endswith(":") or _INTENT_LEAK_RE.search(s):
         return None
     return s
 
@@ -125,9 +207,13 @@ def augment_exemplars(path: str | None = None) -> int:
     for intent, examples in exemplars.items():
         if intent not in VALID_INTENTS:
             continue
+        confusable_block = build_confusable_block(intent, exemplars)
         for example in examples:
             prompt = _AUGMENTATION_PROMPT.format(
-                intent=intent, example=example,
+                intent=intent,
+                example=example,
+                intent_description=_INTENT_DESCRIPTIONS.get(intent, ""),
+                confusable_examples=confusable_block or "(none)",
             )
             try:
                 body = llm_call(
@@ -137,7 +223,7 @@ def augment_exemplars(path: str | None = None) -> int:
                             {"role": "user", "content": prompt},
                         ],
                         "max_tokens": 300,
-                        "temperature": 0.7,
+                        "temperature": 0.9,
                     },
                     base_url=LLM_API_BASE,
                     timeout=60.0,
@@ -175,7 +261,15 @@ def augment_exemplars(path: str | None = None) -> int:
         store.close()
 
 
+
+
 if __name__ == "__main__":
+    try:
+        import multiprocess.resource_tracker as _rt
+        _rt.ResourceTracker.__del__ = lambda self: None
+    except Exception:
+        pass
+
     from core.settings import init_llama_index_settings
     init_llama_index_settings()
 

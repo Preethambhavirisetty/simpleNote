@@ -99,45 +99,178 @@ INTENT_CATEGORIES = [
 endpoint for intent ingestion
 clarifying question
 include metadata(folder name, note name)
+clarify intent ask one clarifying question
 
-User Query
-    │
-    ▼
-┌───────────────────────────────┐
-│  Layer 0: Quick Rules         │  (regex for obvious cases)
-│  "how many notes do I have"   │  → corpus_stats (skip everything)
-│  "repeat that"                │  → conversation_meta
-│  Cost: 0, Latency: <5ms      │
-└──────────────┬────────────────┘
-               │ no match
-               ▼
-┌───────────────────────────────┐
-│  Layer 1: Vector DB Lookup    │
-│  Top 1 per intent → best 3   │
-│  Evaluate agreement + scores  │
-└──────────────┬────────────────┘
-               │
-       ┌───────┴────────┐
-       │                 │
-   High confidence    Low confidence
-   (agree + >0.78)   (disagree or <0.72)
-       │                 │
-       ▼                 ▼
-  Return intent    ┌─────────────────┐
-  directly         │  Layer 2: LLM   │
-  (no LLM call)    │  with exemplars  │
-                   │  as few-shot     │
-                   └────────┬────────┘
-                            │
-                    ┌───────┴────────┐
-                    │                 │
-                Confident        Still unsure
-                (>0.60)          (<0.60)
-                    │                 │
-                    ▼                 ▼
-              Return intent    clarify_intent
-                              (ask user)
+Overall:  24/50 (48.0%)    avg: 273.9ms  min: 0.0ms  max: 2483.5ms  total: 13.70s
+Overall:  24/50 (48.0%)    avg: 120.1ms  min: 0.0ms  max: 2290.6ms  total: 6.01s
+Overall:  24/50 (48.0%)    avg: 95.7ms  min: 0.0ms  max: 1541.0ms  total: 4.78s
 
+
+Scenario	Example	Why SetFit Struggles
+Completely novel phrasing	"yo check if I scribbled anything about that landlord drama"	Never seen anything remotely like this in training data
+Complex multi-signal queries	"I think maybe last month I had something about switching jobs or something"	Hedging language + temporal + presence — conflicting signals confuse the classification head
+Queries requiring reasoning	"which of my notes would be useful for my tax filing?"	This isn't just classification — it needs understanding of what "useful for tax filing" means
+
+CONFUSABLE_PAIRS = {
+    "temporal":       {"nearby": ["semantic", "list_notes"],
+                       "examples": ["what did I write about fitness?", "all my travel notes"]},
+    "list_notes":     {"nearby": ["semantic", "locate_note"],
+                       "examples": ["summarize my cooking notes", "find the recipe note"]},
+    "locate_note":    {"nearby": ["list_notes", "semantic"],
+                       "examples": ["all notes about travel", "what did I write about rent?"]},
+    "presence_check": {"nearby": ["semantic", "keyword_count"],
+                       "examples": ["tell me about yoga", "how many notes mention yoga?"]},
+    "keyword_count":  {"nearby": ["presence_check", "corpus_stats"],
+                       "examples": ["did I ever mention rent?", "how many notes do I have?"]},
+}
+
+Query
+  │
+  ├─ Layer 0: Regex (unchanged, 0ms, 100% accurate)
+  │
+  ├─ Layer 1: SetFit classifier (replaces Qdrant exemplar search)
+  │           - Single forward pass, ~5-10ms
+  │           - Returns intent + calibrated confidence
+  │           - If confidence ≥ threshold → return
+  │
+  └─ Layer 2: LLM fallback (only for low-confidence edge cases)
+              - Much rarer now, maybe 5-10% of queries
+
+todos:
+- store examples on vector store(llama 3.1)
+  - retrain head on top (83.3)
+    - improved? good
+    - else:
+      - change ST model to BAAI/bge-large-en-v1.5
+        - retrain
+          - improved? good
+          - else:
+            - generate more examples with mistral model
+            - reingest + retrain
+              - improved? good
+              - else:
+                - generate more examples
+                  - reingest + retrain
+                  - improved? good
+                  - else
+                    - setup sitfit
+                      - retrain
+                        - improved? good
+                        - else: do nothing, accept the defeat
+Test 2: regex + classifier
+INTENT DETECTION EVALUATION
+======================================================================
+
+  PASS  [3226.7ms]  summarize my notes on hiking                              default  1.00
+  PASS  [   0.0ms]  where's the note with my wifi password?                     regex  1.00
+  PASS  [   0.0ms]  show me all my recipe notes                                 regex  1.00
+  PASS  [  32.8ms]  how many notes mention rent?                             classifier  0.39
+  PASS  [   6.6ms]  what did I add last week?                                classifier  0.81
+  PASS  [   0.0ms]  did I ever write about yoga?                                regex  1.00
+  PASS  [  33.9ms]  compare my two workout plans                             classifier  0.95
+  PASS  [   0.0ms]  how many notes do I have total?                             regex  1.00
+  PASS  [   0.0ms]  what did I just ask you?                                    regex  1.00
+  PASS  [   0.0ms]  find the note about my dentist appointment                  regex  1.00
+  PASS  [  29.9ms]  everything tagged personal                               classifier  0.40
+  PASS  [   0.0ms]  when did I write the grocery note?                          regex  1.00
+  PASS  [  33.2ms]  what are my thoughts on intermittent fasting?            classifier  0.53
+  PASS  [   0.0ms]  count how many times I wrote 'deadline'                     regex  1.00
+  PASS  [   0.0ms]  do I have anything about car insurance?                     regex  1.00
+  FAIL  [  32.5ms]  travel notes                                             classifier  0.43
+        expected: list_notes  got: clarify_intent
+  PASS  [   8.5ms]  that note about the birthday party                       classifier  0.37
+  PASS  [   8.4ms]  what do I know about sourdough?                          classifier  0.42
+  PASS  [   8.9ms]  anything from this weekend?                              classifier  0.69
+  PASS  [   0.0ms]  show me the one about taxes                                 regex  1.00
+  PASS  [  37.2ms]  stuff about morning routines                             classifier  0.31
+  PASS  [  29.5ms]  did I make a note after the meeting on Friday?           classifier  0.52
+  FAIL  [   8.5ms]  pull up my finance notes                                  default  1.00
+        expected: list_notes  got: semantic
+  PASS  [   7.0ms]  latest notes                                             classifier  0.62
+  FAIL  [  36.1ms]  what's in my work folder?                                 default  1.00
+        expected: list_notes  got: semantic
+  PASS  [   8.1ms]  the packing list, where is it?                           classifier  0.56
+  FAIL  [   8.2ms]  tell me about my January goals                           classifier  0.32
+        expected: semantic  got: temporal
+  PASS  [   8.1ms]  notes notes notes how many do I have                     classifier  0.55
+  FAIL  [   9.2ms]  hmm what was that thing about the landlord               classifier  0.34
+        expected: locate_note  got: presence_check
+  PASS  [   7.7ms]  give me everything on budgeting                          classifier  0.62
+  FAIL  [   7.9ms]  notes about meditation                                    default  1.00
+        expected: list_notes  got: semantic
+  FAIL  [   8.6ms]  do I have many notes on travel?                          classifier  0.32
+        expected: keyword_count  got: presence_check
+  PASS  [   8.0ms]  what did I write in March about fitness?                 classifier  0.65
+  PASS  [   8.1ms]  anything interesting in my notes?                         default  1.00
+  PASS  [   8.6ms]  my longest journal entry                                 classifier  0.51
+  PASS  [   8.5ms]  what changed in my project notes?                        classifier  0.33
+  FAIL  [  11.2ms]  show me the notes from the trip                           default  1.00
+        expected: locate_note  got: semantic
+  PASS  [   9.2ms]  have I been writing about sleep lately?                  classifier  0.71
+  PASS  [   0.0ms]  which folder has my health stuff?                           regex  1.00
+  PASS  [   8.9ms]  what have I been up to this month?                       classifier  0.71
+  FAIL  [   9.0ms]  is there more about cooking or about fitness?            classifier  0.31
+        expected: compare_notes  got: list_notes
+  FAIL  [  10.2ms]  you mentioned something about my goals earlier            default  1.00
+        expected: conversation_meta  got: semantic
+  PASS  [  37.4ms]  notes                                                    classifier  0.35
+  PASS  [   7.3ms]  how do I organize my notes better?                       classifier  0.34
+  PASS  [   8.3ms]  delete my old travel notes                               classifier  0.71
+  PASS  [  31.4ms]  what did I write about that thing at the place with the   default  1.00
+  FAIL  [   6.9ms]  March notes and also count how many mention budget       classifier  0.46
+        expected: clarify_intent  got: keyword_count
+  FAIL  [   7.4ms]  🏖️ vacation                                              classifier  0.43
+        expected: list_notes  got: clarify_intent
+  PASS  [   8.2ms]  I think I wrote something last year about maybe switchi  classifier  0.34
+  PASS  [   8.7ms]  thanks that's all                                        classifier  0.62
+
+analysis: regex + classifier + llm
+────────────────────────────────────────────────────────────────────
+  Overall:  38/50 (76.0%)    avg: 3842.3ms  min: 0.0ms  max: 12699.4ms  total: 192.12s
+
+  By difficulty:
+    straightforward      15/15 (100%)
+    casual               11/15 (73%)
+    edge_case             9/12 (75%)
+    adversarial           3/8  (38%)
+
+  By intent:
+    clarify_intent          1/4  (25%)
+    compare_notes           3/3  (100%)
+    conversation_meta       3/3  (100%)
+    corpus_stats            2/3  (67%)
+    keyword_count           2/3  (67%)
+    list_notes              6/8  (75%)
+    locate_note             6/8  (75%)
+    presence_check          4/5  (80%)
+    semantic                6/7  (86%)
+    temporal                5/6  (83%)
+
+  Misclassifications (12):
+    #21 "stuff about morning routines"
+         expected semantic -> got list_notes (llm, conf=0.80)
+    #23 "pull up my finance notes"
+         expected list_notes -> got locate_note (llm, conf=1.00)
+    #28 "notes notes notes how many do I have"
+         expected corpus_stats -> got keyword_count (llm, conf=1.00)
+    #29 "hmm what was that thing about the landlord"
+         expected locate_note -> got semantic (llm, conf=0.80)
+    #32 "do I have many notes on travel?"
+         expected keyword_count -> got presence_check (llm, conf=1.00)
+    #33 "what did I write in March about fitness?"
+         expected temporal -> got semantic (llm, conf=1.00)
+    #37 "show me the notes from the trip"
+         expected locate_note -> got list_notes (llm, conf=1.00)
+    #43 "notes"
+         expected clarify_intent -> got list_notes (llm, conf=1.00)
+    #44 "how do I organize my notes better?"
+         expected clarify_intent -> got corpus_stats (llm, conf=0.80)
+    #47 "March notes and also count how many mention budget"
+         expected clarify_intent -> got list_notes (llm, conf=0.80)
+    #48 "🏖️ vacation"
+         expected list_notes -> got semantic (llm, conf=0.80)
+    #49 "I think I wrote something last year about maybe switching jo"
+         expected presence_check -> got semantic (llm, conf=0.80)
 
 ### Run postgres with podman:
 podman run -d \

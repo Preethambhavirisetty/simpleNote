@@ -1,0 +1,2313 @@
+Show me the note with the address for the hotel
+You mentioned something interesting about books earlier, remind me please.
+Remind me of the essential points in my project proposal notes
+the one where I wrote about the interview
+Help me remember the key points from my study notes.
+Which note do I have about the grocery list?
+When did I write the note about interviews?
+Have I taken notes on my groceries before?
+Thanks for the information. That concludes our conversation for now.
+My lengthiest journal entry
+I'd like to see all the notes I've taken on books I've read
+Can you explain what I mean by 'this and that' in my notes?
+Do I have a note concerning last week's team meeting?
+Which note do I have about my sister's birthday?
+I need to find the note with the password for my email.
+I'd like to see all notes with the 'work' tag
+How frequently do I jot down ideas about travel?
+Is there a note in here about my project deadline?
+Contrast my ideas in two notes about project management.
+hmm what was that thing about the landlord
+List the notes I've taken on the topic of literature.
+Is there a note in here regarding my child's school event?
+What are the key differences between my notes on project management and time management?
+Could you explain what I meant by 'this project' in my notes?
+Count the instances of the keyword 'exercise' in my notebook.
+The thing from the place
+Summarize the main points from my travel journal.
+Which topic do I write about more, vacation or food?
+Can you explain the relationship between these concepts mentioned in my notes?
+Give me all the tech notes
+Can you help me recall the details of my brainstorming session?
+Show me all my finance-related notes.
+Summarize the ideas in my creative writing journal for the past week
+What did I note down this morning?
+Number of occurrences of keyword 'study' in my notes.
+notes from last week and also anything about the dentist
+Can you pull up all the notes I've taken for 'presentations'?
+Give me the main points of my jogging plan notes.
+show me the notes from the trip
+I need to find the note about my doctor's appointment.
+Help me understand the main ideas in my study notes
+Help me find the note on the project proposal at work
+Display all the notes tagged 'vacation'
+How many notes include the word 'project'?
+List notes I've taken on travel
+Have I got something on that meeting?
+Show me the note I took during the team meeting.
+Remind me, what was your last response?
+I want to find a note about a 'vague project' but can't remember the exact title.
+In what ways do my notes on meditation differ from my notes on prayer?
+Remind me of the key points in my last project notes.
+How many notes contain the word 'ideas' more than once?
+Did I make a note to buy milk at the store?
+Have I taken note of the meeting agenda?
+How frequently do I jot down travel plans?
+health related notes
+Can I see my notes from last year?
+What points did I cover in these notes?
+How do my current and past ideas on dieting differ?
+Find the note about my doctor's appointment
+How frequently did I mention meditation?
+Show me notes from the beginning of this month
+Can you tell me how frequently the term 'movie' appears in my personal notes?
+Notes I added in January
+Have I jotted down some ideas about my goal setting?
+Find the note about vacation planning
+Show me notes from June and July.
+Is there any inconsistency between my notes on exercise routines and their effectiveness?
+What's the gist of my ideas written down?
+Which note was created closest to the current date?
+Show me the note on last month's doctor appointment
+Can you help me understand the key takeaways from my research?
+Find the specific note about making pasta
+What are the key ideas in these jottings?
+Compare my project notes from last year and this year
+Which of my notes on cooking techniques is more detailed?
+What can I find in my notes about the project proposal?
+I've taken some vague notes, could you help make them clearer?
+How many folders contain my notes and what's the average length?
+Did I jot down any information on my favorite book's author?
+Where is the note I took about my doctor's appointment?
+How do my meeting notes from last week compare to this week's?
+Show me the note on my hiking trip.
+What were my reflections on the book I read, as noted down?
+Can you please clarify which notes you'd like me to consolidate?
+Where is the note regarding my son's school project?
+I need to know the number of notes where 'study' is a keyword.
+I'd like to see the contrast between my notes from the sales and product design meetings.
+I'm confused, what did I mean by 'that symbol' in my scribble?
+How often did I write about exercise?
+My notes contain multiple intents: list my 'to-do' tasks and give me an estimated time for each.
+Which note covers more details about my last project versus the current one?
+Present all my notes about hobbies
+Have I documented any ideas for cooking experiments?
+I see multiple actions mentioned in these notes, which one should I prioritize?
+Where did I save the packing checklist?
+Can you help me find the note I made about my doctor appointment?
+Help me understand the meaning behind the abbreviation 'BTW' in my note.
+How frequently do I jot down 'travel' in my personal notes?
+Is there a note on my phone about my daughter's birthday?
+When did I jot down those things about the project?
+Is there a note in here about my doctor's appointment?
+How many times did I jot down the topic 'exercise'?
+What was my perspective on project development in my journal entries?
+Are my Monday and Friday meeting notes consistent?
+How often do I write about 'cooking' in this app?
+Can you show me the note about the important client contact details?
+Show me all the notes related to cooking
+Compare and contrast my handwritten notes from classes, how do they differ?
+Show me my oldest notes
+What do my notes say about yoga?
+Where is the note I took during the team meeting last Monday?
+How frequently does the keyword 'project' appear in my notes?
+Do I have a note regarding my grocery list?
+Count notes that reference meetings
+What thoughts did I jot down about the book 'To Kill a Mockingbird'?
+Is there a note in here about studying for math exams?
+Have I taken notes about gardening tips?
+Which meeting notes from last month have more details about project A versus project B?
+Every note about wellness
+Can you help me find the inconsistencies between the notes I took during two different meetings?
+Help me differentiate between my travel and study notes—what's the difference?
+Could you clarify if these notes refer to my personal goals or professional objectives?
+List my notes about cooking and also count how many mention pasta
+Count the occurrences of the word 'love' in my notes.
+Any notes mentioning my sister's birthday?
+What were my key takeaways in that article?
+What's the main idea of my gardening notes?
+How many times did I write about sleep?
+What are my opinions on the book notes I took last month?
+What were my thoughts on that article I saved in my readings notes?
+Can I see my oldest saved note?
+Count the frequency of 'project' in all my saved notes.
+I'm unsure about the meaning of 'this part' in my text. Please clarify.
+Have I taken note of the recipe for lasagna?
+I'd like a list of all my notes with the keyword 'recipe'
+How many folders do I have in my collection and what's the word count for each?
+Could you help me understand the difference between 'ideas' and 'goals' in this note?
+Count notes related to 'exercise'
+I think I have a note with a phone number in it, but I can't remember which one.
+Have I made any comments on the topic of learning Spanish?
+Can you tell me the main points of my last report?
+Show me notes from last month
+Which notes contain insights on project A versus project B?
+What's the total word count in my notes?
+Summarize this conversation
+Contrast my ideas on project management and team leadership
+Show me all my work notes
+Pull up everything tagged investments
+Read my notes out loud
+Can you help me understand the ideas in my brainstorming session?
+What are the key points in my last meeting notes?
+Find the most recent note about grocery list
+what were my thoughts on that thing from work
+I've got 'a bunch' of unlabeled notes, how can I sort them?
+list my travel notes and tell me when I wrote them
+Is there any mention of my project proposal in my notes?
+Last year's entries related to project X
+Locate the note I took during the team meeting last Tuesday.
+List the notes I took during the project
+What's the essence of the notes I made on that project?
+What's the gist of my brainstorming session about marketing?
+Did I take notes on my last performance review?
+I'm unsure of what I meant by 'project X' in these notes.
+How do my notes on recipe A and recipe B differ in ingredients?
+Can you pull up all my study materials?
+Which folder contains the note about my interview?
+Are the notes I took on my last two project status updates consistent?
+All notes I have about meditation
+All notes mentioning vacation
+Number of notes with the tag 'travel'
+My note says 'research,' but I can't remember which topic. What's inside?
+Which note holds the record for the most words?
+Locate the nap tracking note
+Did I jot down anything about the summit?
+What are the key distinctions between my notes on plant care for succulents and ferns?
+List all the research notes I've taken.
+Have I made any notes concerning my grocery list for this week?
+You mentioned something interesting earlier, can you repeat?
+List out every recipe note I have.
+Have I ever noted down a pasta recipe?
+Where's the folder with my interview preparation?
+Which notes were created this morning?
+Help me remember the key ideas in my research notes.
+Find the differences in my notes about cooking Italian and Mexican dishes
+What was the last thing I wrote?
+How do my notes on this subject in 2020 compare to those from 2019?
+Show me a list of all my 'Study' notes
+I need to see every note tagged as 'work'
+Summarize the key points from my meeting notes.
+Can you help me understand the thoughts in my notes?
+Which notes have I written this week about health?
+Find my oldest notes about learning a new language
+Summarize the topic of the notes I've written.
+List all my notes about recipes.
+Which of my notes on cooking recipes is better?
+List my notes in chronological order
+Which notes were written in the past 30 days?
+Can you display all the notes about recipes?
+Which note has the maximum word count?
+Can you give me a rundown of this note?
+Where is the note with my book recommendations?
+Let's go back to what we were talking about.
+Have I taken notes on my last doctor appointment?
+what was that note about the phone call
+What was my reaction to the article I noted down?
+Find the note with the details about my car insurance renewal
+I mean, what do you call those notes I saved under 'Misc'?
+Summarize the content of my meeting notes from yesterday
+Did I jot down anything about my dentist appointment?
+Recall the main points from my travel diary.
+I have a note with multiple meanings, please clarify.
+That's a good question, what was our previous exchange about?
+Did I jot down anything regarding the doctor's appointment?
+What's the word count for all the notes combined?
+Could you tell me the meaning of this abbreviation in my notes: 'FB'?
+List every note with the tag 'work' please.
+Can you help me understand the contents of my previous notes?
+I think I had some thoughts about that, what were they?
+Find the note on my last doctor's appointment
+I need help finding specific info in my notes
+Give me a run-down of the content in my interview preparation notes
+What's the summary of our latest chat?
+I need to locate the note where I jotted down my passwords.
+Could you explain what's meant by 'results from tag search "important""'?
+List every note I've made on health
+Which folder contains the note on my daughter's school project?
+What's the frequency of my mentions of 'travel' in my notes?
+Ok bye
+What's the size of my note corpus in terms of words?
+I believe we touched on this before, could you clarify?
+Let's recap our previous conversation, please.
+Is there a note in here about my passport details?
+Summarize the content of my notes regarding the upcoming presentation.
+Give me a rundown of my exercise notes
+Give me all my travel notes
+Which folder contains the note on my gardening project?
+Can you help me understand the meaning of these symbols in my notes?
+what's the summary of what we've covered?
+What's the frequency of 'meeting' in my notes?
+I mean, what do I need to do when I write 'action required' in my notes?
+Count notes having 'deadline' in them
+What are the major similarities and differences between my notes on philosophy and spirituality?
+Which is the note I took during the last marketing meeting?
+I've written something down but it's vague, could you make it clear?
+Let's discuss what we talked about before ending this conversation
+Have I jotted down anything regarding hiking trails?
+Show me the note I made about the deadline for the project proposal.
+Give me a list of all my notes on recipes
+Give me a list of notes tagged 'finance'.
+Recap the key points from my language notes
+How do the notes I took on economics lectures differ?
+What's the total tally of mentions for 'project'
+What's the longest thing I've written?
+How often do my notes mention 'technology trends'?
+3: "Hey, I thought you said something about that earlier."
+List notes from January this year
+Show me every note tagged 'recipes'
+Give me all tags for my study notes
+When was the note about the project deadline created?
+What I noted last Wednesday about the project
+Summarize the content of my recent notes, please.
+What are my thoughts on remote work?
+Show me the note where I mentioned the dentist
+This morning's newest notes
+Give me the gist of my notes about the new marketing strategy.
+notes notes notes how many do I have
+How many folders contain my notes and what's the average length per note?
+I'm unsure of the action I want to take on these notes.
+I believe I asked about that once, could you clarify?
+Can I see the most current note about a project?
+Summarize the contents of my notes on the product development strategy
+Let's go back to our previous discussion about the weather.
+Which note contains the recipe for banana bread?
+Find the note with the math equations
+How many notes do I have in total?
+Did I make a note on the topic of vegan recipes?
+What do my notes imply about my views on learningnew skills?
+How many times did I jot down the word 'exercise'?
+Can you remind me of the topic we discussed?
+What's in my projects folder?
+Help me understand the content of my research notes.
+I'd like to see all the notes I've taken about learning Spanish
+Can you display every note related to my project?
+What ideas did I jot down in my brainstorming session?
+Let's look at the contrast between my gardening and cooking notes.
+I need to locate the note with the Recipe for lasagna.
+Some of the notes in my journal seem to be about work, but others appear to be related to my personal life. Can you help me clarify which ones are which and in what order they were written?
+Did I make a note about the deadline for my tax returns?
+How many times does 'deadline' appear in my notes?
+Summarize my notes on the project progress.
+List every note I've taken about fitness
+Summarize the key findings from my research notes, please.
+Can you pull up all my scribbles about science?
+My most recent folder stats
+Summarize the thoughts I jotted down on this topic.
+Can you help me recall the arguments I made in that email?
+What notes do I have in the health folder?
+Compare my baking notes with my running notes
+Can you give me the key insights from my research notes?
+Can I see all notes before this date (e.g., February 1st)
+Have I saved any notes on my fruits and vegetables intake?
+Can you pull up all the notes regarding my work projects?
+Show me the total number of notes and their average length.
+Can you give me the main points of my last report?
+Do I have lots of notes on fitness?
+Do I have any note mentioning the keyword 'presentation'?
+What's the lengths distribution of all my notes?
+cooking stuff
+I'd like to view all my notes on hobbies
+Everything on investing
+Which notebook has the sketch I made for my garden design?
+Have I jotted down any thoughts on learning a new language?
+Can you help me find the note with the recipe for grandma's cake?
+Is there a note about my kid's school event in my app?
+Have I made a note of my daughter's birthday plans?
+Locate the note about the recipe for my grandmother's cake
+Help me find the note about the password for my email account.
+Show me notes older than two weeks on vacation
+Find the specific entry about my bike repair
+what did I write about that thing at the place with the guy
+What's the summary of what we talked about before ending?
+Did I document anything about my garden ideas last year?
+Can you help clarify the meaning of 'this' note?
+I'm curious, how often do I write about 'cooking'?
+I meant to say 'find all my flags' instead of 'list my folders'
+I've written something about 'Project X' in my notes, but I can't remember which one. Could you please help me clarify?
+Can you help me find the note where I jotted down my passwords?
+Which folder contains the note about my car insurance details?
+Show me notes from two weeks ago about health
+Did I make a note about my doctor's appointment next Tuesday?
+Can you find the note about my doctor appointment?
+Is there more detail about vacation plans in note A or B?
+Which folder contains the note on my project proposal?
+I need to know: how often does the term 'restaurant' appear in my personal notes?
+What are my ideas on side hustles?
+Which notes were created in the past hour?
+What's the total count of notes relating to project X?
+What's the average length of a note and how many notes are there?
+These notes seem too vague, could you clarify their meaning?
+What do these abbreviations mean in my jotted-down notes?
+Did I write anything down about last week's meeting?
+How many folders do I have?
+Which notes were created in the past month?
+How many notes have the word 'important'?
+I'd like to clarify if 'this' action can be performed across all my notes or just one particular one. Please confirm.
+Can you give me a summary of my brainstorming session?
+Help me locate the note where I jotted down my idea for a new business
+I've jotted down some words that don't make sense to me, could you clarify their meanings?
+List notes with the tag " vacation"
+How many folders do I have and how many notes are in each?
+I'd like to see a list of all my 'travel' notes from last year
+Can you help me find the note I saved about my car's oil change?
+Give me a list of all my work-related notes.
+Is there a note in here about last month's meeting?
+I'd like to see all the notes tagged 'work'.
+Alright, I think that's it for now. Goodbye.
+Can you help me distinguish between two similar notes?
+Where is the note I saved about the book I Want to Read?
+Show me where I saved the note on my vacation
+What's the gist of the notes about my project?
+How often do I take note of the term 'team meeting'?
+What do these abbreviations in my notes stand for? I can't remember now.
+Have I jotted down anything regarding gardening?
+Display all the notes tagged 'work'
+That's a good point, can you elaborate on that from our conversation?
+Count the occurrences of 'project X' in my notes.
+Is there a note in here regarding the project deadline?
+Locate the note about the important phone number
+Can you help me recall the main ideas in my research notes?
+I'd like to view all my travel journal entries.
+Let's go back to the topic we were on before.
+How many times does the word 'travel' appear in my notes?
+I have a note taking up a lot of space. How can I determine if it's relevant before deleting it?
+When was the earliest note about project X created?
+Nothing else, thanks
+Display every note I've created related to 'work projects'
+Is there a note in here about the meeting with marketing?
+List the notes tagged with 'work'
+Can you help clarify if I'm supposed to jot down ideas under 'Projects' or 'Tasks'?
+I'd like to see the note I jotted down about the recipe for vegetarian lasagna
+Open the note about the important client meeting from last week
+Give me all my tech notes.
+I need to find the note with the password.
+Can you explain what I meant by 'ideas for project' in this note?
+Summarize the key points I made about the new product development.
+List every note about vacation plans
+Can I see the most recent note about the meeting?
+Show me notes from the past month
+What is the total number of my notes?
+List notes I've taken on science projects
+Give me all notes tagged with 'health'
+Show me all the notes I've made about art, please
+Do you remember what we were thinking about just now?
+Show me my notes from last month.
+Show every note related to recipes
+Where's the one about the phone interview?
+Summarize the key ideas from the notes I took during the meeting.
+Everything I have about tea
+What are the key differences between my notes on programming languages Python and Java?
+Have I penned down my thoughts on learning a new language?
+List the most recent notes I've taken
+Locate the note with the topic 'project X'
+I need assistance in understanding the intended meaning of my sketchy jottings about 'ideas'.
+I need to see every appointment note
+Can you recall the main topics discussed in my study notes?
+What do you understand by the term 'research notes'? I'd appreciate your clarification.
+Compare my notes on cooking pasta versus rice
+you mentioned something about my goals earlier
+What's the gist of these notes I took during the lecture?
+Show me the note I took during the presentation on AI.
+query: "Clarify note meaning"
+Show me the total number of notes in my account.
+Did I make notes on the project status?
+Give me a list of all notes tagged 'work'
+What's the word count for my entire note collection?
+I believe we covered this earlier. Can you remind me of that?
+Number of occurrences of 'technology' in all my notes.
+I'm unsure of the information I need
+Can you help clarify the meaning of 'notes regarding my meeting with John'?
+Frequency of notes on gardening
+I'd like to see all my notes about science.
+Which note is the longest/shortest in my entire collection?
+Does this note contain information about my gym routine?
+that thing I noted about the apartment
+Have I noted down anything regarding vegan recipes?
+Let me check if I have your correct answer from before.
+Show me notes written this year
+Which note is titled 'interview preparation'
+List all the notes tagged with "work".
+Where is the note regarding my password update?
+Show me the note about the important deadline for the project
+Hmm
+I need to locate the note about the doctor's appointment. Where is it?
+Can you decipher my unclear notes about 'things to do'?
+What are the key points in my notes about health?
+Which folder contains the note on my project progress?
+Help me locate the note on my laptop about the project deadline.
+In how many notes have I discussed 'machine learning'?
+All the notes I've made about my travels
+I'd like you to clarify the meaning of several notes.
+List every note tagged 'work'
+Differences between my morning routine and evening routine notes
+Pull up all the notes I've taken on art.
+vacation
+Frequency of notes on travel
+Display the oldest note in my tech notes folder.
+Show me where I saved the note on my last project
+Could you shed light on the purpose of these vague remarks?
+That's everything I needed
+What's the note with the highest word count?
+Can I see the most recent gardening note?
+What were my key takeaways from these notes?
+Remind me of the main points in my last report
+How many times do I write about traveling?
+You said something interesting earlier, can you remind me?
+Do I have a brief note about the steps to bake a cake?
+List every note I've taken on books
+Can you give me a statistics overview of my note collection?
+Find and open the note with the subject 'Important Project Deadlines'
+Show me all notes related to work
+Have I taken notes on my son's birthday party?
+Show me my notes from last year
+Can you clarify the meaning of this note?
+Is there anything in my notes about meditation?
+What can I infer from my notes about the client's feedback?
+Which notes were written this past month?
+My notes are filled with abbreviations, could you clarify what 'ASAP' stands for in this context?
+I mean, what do you call those jumbled entries I made earlier?
+What do I need to do with the note labeled '?'?
+Not sure what I'm looking for
+These notes appear to contain multiple intents, can you clarify?
+Locate the note containing my password for the email account.
+I'd like to find the one note where I wrote down my sister's phone number. Can you help?
+Show me all my notes related to work projects
+What thoughts did I jot down about the interface design?
+Uh let me think
+I'd like to know the count of notes that mention the keyword 'presentation'.
+Thanks for the dialogue today, I'm signing off now.
+How have my notes on German vocabulary evolved over the past year? (Shorter: Vocab evolution)
+What do my jotted down thoughts on 'the project' exactly mean?
+Could you clarify which actions I can perform on my notes and how to do them, please?
+Help me understand the main points in these notes
+I'd like you to clarify the meaning of several phrases in my jotted down information.
+Which has more subtopics: my notes on politics or my notes on economics?
+Summarize the significant points from my interview prep
+I need to find the note about the project deadline.
+Remind me of the arguments I made in that essay draft
+Can you give me a tally of the keyword 'work' in my notes?
+Let's go back to our last discussion about...
+What was the earliest note about health that I took?
+Can you give me every note related to projects?
+Give me a list of all my notes on fitness and health.
+Anything mentioning the dentist?
+What are the key differences between my notes on physics and my notes on chemistry?
+Have I documented anything about my garden project?
+Which note is the longest one in my collection?
+Which note mentions the restaurant we liked?
+Can you help clarify if I need to add more details to a note?
+Help me understand: do my notes include details about my meetings with both John and Sarah?
+How do my thoughts on running differ from walking?
+Where is the note regarding my doctor's appointment?
+Is there more information on studying for exam A or exam B in my notes?
+Let's go back to our earlier discussion aboutX.
+Give me notes from the beginning of this week.
+Find notes from July 2021
+Could you clarify your previous point?
+How many times does the word 'urgent' appear in my notes?
+Where is the note I made about the password for my work account?
+I want to see all my grocery list notes
+Can you clarify what I meant by 'project X' notes?
+What have I asked you so far in this chat?
+Find the note with the title 'Project Proposal'. I can't seem to locate it.
+Summarize the key findings from my research project.
+Show me travel notes and also compare them and count keywords
+I'd like to know how many times the topic 'travel' comes up in my notes.
+Show all notes related to home improvement
+Can you help clarify what I meant by 'that idea' in my notes?
+Tell me the total number of notes in my collection.
+What did you suggest earlier?
+What's been our conversation topic so far?
+I've written something unclear, could you aid in deciphering it?
+Find the oldest note related to health and wellness.
+Show me every mathematics note I have.
+Summarize the arguments in these meeting notes for me.
+Tell me the total number of notes and their word count.
+Did I save a note about last year's Thanksgiving dinner?
+You mentioned something interesting before, what was it?
+What's the gist of my last meeting notes?
+This conversation is getting long, see you later.
+There seem to be multiple intents in this query, could you please clarify?
+Where is the note on my last doctor's appointment?
+Can you bring up all my gardening notes at once?
+What's the overall length of all my notes combined?
+Show me notes from last Tuesday.
+Can you display all notes labeled 'work project'?
+Let's go back to what we were talking about a moment ago.
+February notes on investing
+Find the notes I took during the evening of yesterday's meeting
+Find the note on my last doctor appointment
+What did I intend to do with the 'file marked with a star'? Please clarify.
+How old is the note with the topic 'vacation'?
+What's different between my old and new exercise plans?
+List all the notes tagged with 'family'.
+What do you suggest I do with these unclear notes?
+My shortest note
+What's the gist of my notes on the novel I've been reading?
+Spot differences between my two project outlines
+Show me every note related to cooking
+Did I jot down some thoughts about my last project?
+Could you clarify if these markings signify an action or a thought?
+I've found a note with 'question mark' symbol. What could that signify?
+Can you help me comprehend the contents of my previous jottings?
+Show me the note on my last doctor appointment
+What's the main point of my last note?
+Did I write anything about moving to a new city?
+Find the note that has my workout routine
+Show me that note about my project deadline.
+I need to find the note I took during the team brainstorming session last week.
+I'd like to see every note related to my project
+Give me a summary of my thoughts on the novel I read.
+Ever written about car insurance?
+Summarize the main arguments in my debate preparation notes.
+Did I make a note regarding my car's maintenance?
+Help me remember the main points of my last meeting.
+Remind me of the key points in my last report
+Show me my meal prep notes
+I have a confusing term in my document, can you explain it?
+Rename the fitness folder
+Display all the notes in my "research" folder.
+What's the breakdown of notes per folder?
+Could you explain the key ideas from my lectures?
+I've written something down, but now it's unclear - can you aid me?
+I need to see every note I've taken on books
+Is there a note in my journal about my goals for the next year?
+Display most recent journal entry
+Show me every study material note
+What were my arguments in the notes for that debate?
+I meant 'yesterday's' note, not today's, which one is it?
+Compare my notes on the two apartments I visited
+Tell me about the project ideas I had
+How many times does the word 'project' appear in my notes?
+How have my notes on learning a language evolved over time? Which one is more detailed?
+Find the differences in my notes about two different books I've read
+where's the folder with my work notes?
+Find where I wrote down the gift ideas
+Check if I noted down anything regarding project progress.
+How frequently do I write about 'books' in my personal notes?
+Describe my notes on time management
+Can you help me decipher the meaning of these cryptic notes?
+Could you kindly clarify if 'weekend plans' in my notes implies a to-do list or a discussion?
+What were the key points of our last conversation?
+Frequency of 'travel' in my notes
+Can I see the differences between my notes on public speaking and presentation skills?
+This note contains multiple intents, please 'help me organize tasks and schedule'.
+How do my notes on studying for exam X compare to those for exam Y?
+Can you tell me the average length of a note and the number of notes per folder?
+I'd like to know the word count across all my notes.
+Can you help me understand these confusing notes?
+I have some confused jottings, could you make sense of them please?
+Have I mentioned this book before?
+Give me an overview of my total note count and folder count.
+What do you suggest I do with these confusing and seemingly unrelated notes?
+I want to see every note I've ever written about health
+Which notes were written before yesterday?
+Find my notes with a time stamp: last Tuesday
+Sum up the total number of my notes and their word count.
+Do I have a note from my professor regarding the midterm date?
+Number of notes with 'project' mentioned
+Help me understand the context of this note with the title 'question mark'
+That's enough for now, thanks for your assistance in our chat.
+Can you tell me the key ideas from my project proposal?
+Did I make a note about the garden supplies I need?
+Notes on renovation, all
+Is there significant contrast between my notes on studying for an exam versus preparing for an interview?
+Is there a jotting about my last vacation in my notes?
+I'm not sure I followed, could you elaborate?
+what's the most important thing I wrote?
+Show me every note related to project X
+What did I write in April about fitness?
+Summarize the content of my notes on the marketing strategy.
+All my notes on recipes
+I have a note about an important call, but I forgot the date. Could you please determine the exact date for me?
+Can you help me find the note about my daughter's birthday party?
+Have I jotted down anything regarding my anniversary plans?
+Things
+Did I create a note on the topic of my sister's birthday?
+Find the number of notes tagged 'work'
+What were my opinions on the article I read last week?
+Show me all my sleep-related notes
+Show me the note about last week's project meeting
+What did I write over the holidays?
+Could you help clarify the context of 'recurring expenses' mentioned here?
+Which note was written on Monday last month?
+Summarize the notes from my last psychology lecture.
+Show me all my project notes.
+What changed between my first and latest budget notes?
+Do I have notes from the webinar?
+Can you give me the number of occurrences of the topic 'books' in my notes?
+List every note I've taken about cooking
+How often have I written about my family?
+Is there a note in my app about the upcoming family vacation?
+How many notes do I have?
+Can you help me recall the arguments in my debate notes?
+Give me a list of all the notes related to finance.
+Can you pull up all my research notes on biology?
+Assess the similarities and differences in my notes about work and life
+Can you help me find the note on my next presentation?
+Create a new note about groceries
+Can you pull up all the notes on science experiments?
+Did I make a note of my phone number?
+Can you bring up all my notes about science?
+How have the ideas in note C and note D on leadership evolved over time?
+I wrote down some ideas for a project but I'm not sure which idea is which, could you help clarify?
+Give me a list of my technology notes
+Could you clarify if 'next steps' in this note refer to actions or deadlines?
+Which folder contains the note with the recipe for lasagna?
+Give me a list of my study notes
+Please tell me again what we decided on during our last chat.
+Let's go back to our last conversation.
+Which folder contains the note about our team meeting next week?
+Summarize the notes I took during the marketing strategy meeting.
+Did I make any notes on my last doctor's appointment?
+Show me every note about side projects
+Give me all the notes tagged with "work" or "projects"
+Notes from the beginning of the year
+Can you pull up all the notes I've taken on fitness?
+Give me a list of all my work notes
+something about that idea I had, what did I say?
+I'm unsure about my note's content: 'developer notes or research notes?'
+work related
+I need to find that study note, which file is it in?
+Analyze the differences in my notes on cooking techniques for chicken
+Which folder contains the note on my next interview?
+You said something interesting earlier, remind me.
+Can you bring up all my gardening notes?
+Can we go over our previous discussion?
+Did I jot down anything related to architecture?
+Is there anything in my notes regarding last week's meeting?
+What did I add recently about yoga?
+Do I have a quick note about my password for this account?
+pull up my finance notes
+Can you help me understand the meaning behind 'project X' notes?
+I'd like to see all the notes I've taken on gardening.
+Can I see my notes written before 2021?
+I'd like to know the count of notes mentioning 'health'.
+How many folders and notes do I have in total?
+Did I make a note about my electricity bill last month?
+what was I going on about in that note
+Could you kindly explain what 'this' note refers to in the app?
+Show me my notes from last Monday
+When did I last write about food in my notes?
+Count the occurrences of 'swimming' in my notes.
+Any note about gift ideas?
+What thoughts did I jot down about the project?
+Has anything in my notes touched upon chemistry?
+Where is the single note I saved for my project proposal?
+Summarize my vacation notes
+I'd like to know the distribution of notes across folders and the largest folder's size.
+Can you remind me of our previous discussion?
+What are the key points in my brainstorming session?
+How have my notes on my baseball team's performance changed over the season?
+Show me the stats of my note collection.
+How many folders do I have in this app?
+Give me a list of my work notes
+What themes are present in my notes?
+List notes with the tag 'work'
+I'd like to find the note on the next page about the project deadline.
+Contrast my summer and winter reading lists
+Could you clarify the meaning of 'next steps' mentioned in my plan?
+Summarize my thoughts on the topic of relationships in my notes.
+Show me the note about last week's doctor appointment
+When was the last time I jotted down thoughts on project X?
+What have been the key changes in my notes about learning Spanish?
+Could you help clarify the meaning of 'these keywords' in my note?
+Can you help me locate the note with the recipe for my grandmother's cake?
+Show me every note related to my project
+Could you clarify if this is a new note or a continuation of an older one?
+Can you help me find the note I saved for my project proposal?
+Let me see a list of my food recipes notes.
+Count the occurrences of 'food' in all my saved notes.
+Could you help me understand the context of 'urgent tasks' in this section?
+When was my travel note last updated?
+What exactly did I write under the title 'project ideas'?
+Remind me of the main points in my research notes.
+I need to find the note about my daughter's birthday party
+Goodbye
+How many notes have I created in total?
+List all the notes tagged 'family'
+What ideas did I jot down during our brainstorming session?
+Can I find the note about the doctor's appointment?
+how many notes mention cooking?
+Summarize the content of my project progress notes for me.
+Can you help me understand the main points in my last lecture notes?
+How many times did I jot down the word 'stress'?
+Show me notes from last Thursday.
+Give me my notes from last month on vacation
+Give me a summary of my reading notes
+Did I make a note about that doctor's appointment last week?
+How do my notes on gardening strategies differ?
+Can I see a side-by-side comparison of my notes on topic A and topic B?
+Can you help me figure out which notes are related to my project?
+That note about my vacation plans, where is it?
+Number of notes that mention goals
+Hold on, go back to what you said before
+Can you help me locate the note I made about my doctor's appointment?
+What's the size of my note collection in words?
+My most recent notes
+Can you explain what's meant by 'this' note?
+What were my opinions on the project in my meeting notes?
+Remind me what my notes imply about that topic.
+Can you give me a tally of occurrences for the word 'productivity'?
+Can you show me all my holiday notes?
+Can you display all my notes from last month?
+Which folder contains the note on my last meeting with the client?
+What is the gist of my brainstorming session?
+What did I write about machine learning?
+Could you please clarify the purpose of these vague texts?
+"I'd like to see the one about the important Deadline, please.
+Can I see all the notes under 'research' folder?
+Where is the note about my doctor appointment?
+What were my notes called 'last Monday' or 'last Friday'?
+What was our latest conversation about?
+Does this collection contain a note with the topic of 'learning PHP'?
+All the notes I've taken on health and wellness
+What changed in my notes regarding effective communication skills over time?
+My notes comprise several intents mixed together, please separate them.
+Do I have a note about my daughter's birthday party?
+What is the gist of my notes from the marketing strategy session?
+What's the frequency of occurrences of the word 'happy' in my notes?
+What topics did I cover in the notes I took last week?
+Which note has the WiFi password?
+Comparing my notes on cooking recipes: which one yields better results?
+I think we talked about this before, can you elaborate?
+Is there more detail in my notes about hiking trails A and B?
+Which note contains more information about my last vacation: A or B?
+4: "Wait, what was the last thing you mentioned?"
+Howcommon is the topic 'technology' in my notes?
+I think there's a mix-up in my notes – could you clarify?
+show me all my recipes and compare the pasta ones
+Show me everything tagged work
+Can you remind me of our conversation points?
+What are my reflections on the career change?
+Do I have a note confirming my sister's birthday date?
+Where is the note I took during the marketing strategy meeting?
+Tell me about the content in these notes, please.
+Can you help me find the note with the recipe for lasagna?
+Can you help me understand the main ideas in my study notes?
+How frequently have I mentioned productivity?
+I'm uncertain about the action I wanted to take for 'the document with the blue cover'. Could you shed some light?
+Which entry was written exactly a week before yesterday?
+Which folder contains the note with my doctor's appointment?
+Is there a note on my app about my best friend's birthday?
+Can you give me a summary of the size and volume of my note collection?
+List every note tagged 'research'
+Show me the note about my daughter's birthday.
+Which folder contains the note regarding the team meeting next week?
+List everything I've tagged as work-related.
+Which folder contains the note about my sister's birthday?
+Can you give me statistics about my entire note archive?
+Can you explain the context of this vague note?
+How many notes are about baking?
+Tell me about my February goals
+Is there anything about my work project 'Alpha' in my notes?
+I can't find my journal, which folder?
+Have I jotted down any thoughts on meditation techniques?
+Which note discusses the new house?
+List all notes tagged with "work"
+What's the total word count of all my notes?
+Compare my two notes on diet plans
+Cool, thanks for the help
+Show me the note with the recipe for chili con carne.
+I need to know how often I've written the word 'goal'.
+recipes
+List every note I've made about books.
+I need to locate a note with the recipe for my mom's chocolate cake.
+How many folders are there in my note archive?
+Is there a noticeable consistency between the notes I took during my language classes and the notes from my writing seminars?
+I need to find the note with the recipe for my sister's birthday cake.
+Give me a hand translating 'Czech words' found in my jumbled notes.
+Where is the note with my new year resolutions?
+Which folder contains the note with my vacation plans?
+How many times do I note down the topic 'travel'?
+Did I jot down anything about my car maintenance?
+Could you assist me in understanding the difference between 'ideas' and 'notes' in my app?
+What's the frequency of the term 'math equations' in my older notes?
+Which notes were written this week?
+Can you help me understand this?
+Give me a list of mynotes with the tag 'work'.
+Summarize the ideas in my study notes for the exam.
+Which is more detailed: my notes on gardening or my notes on cooking?
+What did I jot down about professional development?
+Can you explain the difference between 'notes' and 'memos'? I find myself mixing them up.
+How often do I jot down the keyword 'research'?
+Did I ever jot down notes from that webinar?
+I'd like to know the count of notes mentioning 'exercise'.
+What's the size of my note collection?
+Do I have a note about the password for this account?
+Give me a synopsis of the content in my notebook.
+Which folder contains the note with the project plan?
+Give me a summary of what I jotted down about the book
+What do you think I meant when I wrote 'next steps' in this entry?
+Is there anything in my notes concerning project deadlines?
+What were my thoughts on the project proposal?
+Can you display all my notes with the 'work' tag?
+Did I make a note regarding the grocery list?
+Can you recall our previous discussion?
+Translate my notes to Spanish
+Display all notes on recipe ideas
+Could you find and explain the meaning of a note with the title 'Project X'?
+Locate the note about my car maintenance schedule
+I forgot what we discussed, recap please
+You already told me this, what was it?
+Which note is the longest in my collection?
+Help me find the note with the details about the doctor's appointment.
+I'd like to see every note I've taken on the subject of art.
+Outline the main ideas in my health notes
+Which of my study notes covers more ground on physics and chemistry?
+What's the overall word count for all my notes?
+What are the key differences between my notes on history class and science class?
+I believe we were wrapping up, is that correct?
+Do I have more notes on saving or investing?
+Did I make any comments about the project timeline?
+Did I ever note anything about baking techniques?
+Does my note book contain any info on project deadlines?
+Give me an overview of the size and scope of my entire note collection
+Let's recap what we've been talking about.
+What do you think I meant by 'random thoughts' in this note?
+(Bonus) "I have some notes with 'action items' listed, but I'm unsure of what exact actions need to be taken. Could you help?"
+What exactly does 'Q3' represent in my notes? I need some clarification.
+Can you help me find the note I took on my kid's school event?
+Did I jot down anything about my last doctor's appointment?
+Count the notes mentioning 'exercise' or 'gym'.
+query: "Help clarify a note title"
+Can you give me the number of times 'technology' appears in my notes?
+What's the count of all the notes I have and their combined word count?
+Show me every note tagged 'work'
+Summarize the main ideas in my project notes
+Have I mentioned anything in my notes about buying a new phone?
+Show me all my studying notes.
+Can you help me locate the note with the subject 'Project X'?
+Notes from two weeks ago
+notes about the landlord
+Give me everything about baking
+How do I view all my notes on books I've read?
+What's the gist of our last conversation regarding the project?
+Give me a list of all my vacation plans
+Have I saved something on the house search?
+How long is my note collection in total — in words?
+Give me all notes in the recipes folder
+I believe we discussed this before, kindly repeat.
+Show me the note on last month's doctor's appointment
+Which folder contains the note on my daughter's birthday party?
+Which note is the longest/shortest in terms of content length?
+What's the main idea of my last blog post notes?
+Show me all my cooking notes
+Number of folders and average note length, please.
+Can I find any inconsistencies between the notes I took on different interviews for the same job?
+What was the point of our last conversation?
+What are the key points I discussed in my notes about health and fitness?
+Summarize the thoughts and key points in my study notes.
+Can you display all my project notes?
+What are the key insights from my research notes?
+Have I recorded anything concerning my anniversary plans?
+Help me locate the note on my garden project.
+Show me notes from the past month.
+Can we go over what we discussed before?
+I'd like to locate the note where I jotted down the contact information for the new accountant
+What insights did I gain from my reading notes on that article?
+Can you help me understand this jumbled text?
+Have I jotted down anything regarding my child's school event?
+Every note related to my project, please
+Can you pull up the note I made about my doctor appointment next week?
+How many times does the word 'project' show up?
+Note count for the keyword 'study'
+Give me the gist of my interview preparation notes.
+Can you tell me the average length of a note?
+I need to find the note I saved under 'urgent' - where is it?
+Show me the note on my phone bill
+Tell me the main points in my health notes
+Do I have any jotted thoughts on organic gardening?
+I'd like to see all the notes I've taken on literature
+Which note do I have on the recipe for lasagna?
+Explain what I wrote about landscaping
+Can you give me an overview of my note statistics?
+My query might be unclear: 'find information from random jottings' - could you help?
+Have I made any comments about my allergies in my notes?
+🏖️ vacation
+What are the key ideas from my research notes?
+I'd like to know the total count of notes with 'presentation'.
+Show me the note I took on my last doctor appointment.
+Count the occurrences of 'project' in all my notes
+Show me all the notes related to health.
+I'm not sure what I meant by 'project ideas'. Could you clarify?
+Recap the details of my notes on this project.
+Can you help me locate the note I took during the team meeting?
+Can you explain what I mean by 'important tasks' in my notes?
+List every note about my project
+Can you show me the note regarding my project timeline?
+List all notes tagged with 'work'
+Can you help me understand this paragraph in my notes?
+Is there a note in this notebook about my wife's birthday?
+How do I view all the notes I've taken about fitness?
+Do I have a note somewhere about my old passwords?
+Tell me about the ideas I had for the brainstorming session.
+My note about 'the conversation' is unclear, please make it clearer.
+Locate the note on my last doctor's appointment.
+I'm unsure of the purpose of these jotted down words.
+Show me the note about the project deadline, please.
+I have a note labeled 'research', could you help me understand its main points?
+What's the length of the shortest and longest note in my collection?
+locate the note about my interview
+Is there a note about dentist appointments?
+How many words are in all of my notes combined?
+All my notes about personal growth
+What's the average length of a note in my account?
+Have I jotted down anything regarding my doctor appointment?
+I need to find the oldest note with the label 'budget'.
+Can you find notes from September last year?
+Something about work I think
+Can you help me understand the details in my jotting?
+Alright, we're good
+summarize my work notes and list everything tagged urgent
+Display all my art project notes
+Some of my notes contain abbreviations that I can't remember; please clarify what 'MR' stands for.
+I'd like to see every note I've taken on science.
+Give me the key points from my wellness notes
+I think I wrote something about quitting my job
+Sort out these unclear notes
+Is there a note where I tracked my weight?
+Pull up that note about the dentist appointment
+Have I made any comments on my project's timeline?
+What's the gist of my notes from last week?
+everything about interviews
+Could you summarize the main points of this chat?
+How often have I written about 'travel' in the past?
+What's the length of the longest and shortest note in my notes app?
+Can you tell me the length and quantity of my notes?
+I've forgotten the details of my query
+Have I saved any notes on car shopping?
+What's the frequency of notes on travel?
+Which notes were written in July?
+Summarize my notes on the book 'To Kill a Mockingbird'.
+Can you elaborate on what I meant by 'important projects' in these notes?
+You mentioned something interesting earlier, please repeat.
+Show me my notes about hobbies
+Give me a brief summary of my research findings
+Do I have anything on home insurance?
+Have I taken any notes on learning the piano?
+Which note has my yoga schedule?
+You said something important before, what was it?
+I'm not sure what I meant by 'project X' in this note, can you elaborate?
+Pull up my study notes
+Is there a save file on my notes about dieting?
+Show me all my health-related notes
+Have I written any notes yesterday?
+I think we were discussing a book sometime ago. Which one was it?
+Show me every note I've tagged as 'outfit ideas'.
+Can you help me find inconsistencies in my notes on language learning?
+Where's my note about the sprint deadline?
+Let me see all notes about my vacation in Bali
+how much stuff do I have saved
+What are the key points I made on project X?
+Can you paraphrase what you said before?
+Let's revisit the topic of our last exchange.
+How do my notes on history and geography differ?
+What can I learn from my notes about the sales strategy?
+what's the most useful thing in my notes?
+What's the number of occurrences of the theme 'technology' in all my notes?
+What's the main idea of my notes on project X?
+Merge my two travel notes into one
+Give me a summary of my note statistics, please.
+Have I jotted down some thoughts on project planning?
+Is there a note in my journal about the books I've read?
+Export my notes to PDF
+When did I last jot down something important?
+Where's the note I took during the team meeting about sales figures?
+Show me all my science notes
+I have a note titled 'project A' but I can't recall what it's about. Could you assist?
+Can you clarify what I meant by 'project X' in these notes?
+Remind me of our previous discussion about travel plans
+Could you clarify if 'high priority' notes are different from 'top priority' ones?
+Compare what I wrote about the two job offers
+How often do my notes mention 'healthy eating'?
+Help me locate the note about the important emails to send
+Edit my meeting notes
+Wait what did you just say?
+List all tags for my cooking notes
+Can you give me a summary of my thoughts in this note?
+Compare my notes on marketing strategies from last year to this year
+Show me all my notes on gardening
+You brought up something interesting earlier, what was it?
+What thoughts did I jot down about the literature review? Explain, please.
+Give me the main points of my last meeting notes
+When did I jot down something about my vacation?
+Give me a summary of my note statistics
+Give me the main points from my last lecture.
+Can I find the note about my doctor's appointment?
+Summarize the contents of my previous notes, please.
+Give me all my travel notes.
+What did I write during the holiday season?
+which folder is the meeting notes in?
+What do you think I meant by the term 'critical path' in this context?
+I have a jumbled mix of intents in 'this entry'. Could you untangle it?
+Help me understand the content of my previous research.
+let's retrace our steps in this discussion
+Review the points we made before agreeing on the plan
+Can you explain what I meant by 'project ideas' in this note?
+How frequently do I write about 'exercise' or 'working out' in my notes?
+What's the size of my note collection in terms of number of notes and total text?
+How do these seemingly unrelated words relate to each other in my notes?
+Give me a list of my notes with the label 'vacation'
+Give me all notes about gardening
+Can you pull up all the notes about last month's vacations?
+What are the most recent notes I've taken?
+Can you display all the notes in the 'Travel' folder?
+Contrast my old and new travel plans
+Are there more details about programming Python or Java in my notes?
+Can I see all notes written before January?
+anything insightful I captured?
+budget things
+Is there a note somewhere about my sister's birthday?
+Did I ever write about investing?
+Can you give me the main idea of my research notes?
+I need assistance in sorting out the ambiguous term 'project Status' in these notes.
+Which note should I use for my presentation on marketing and sales? I can't remember.
+What were my ideas about the project proposal?
+Can you book me a flight?
+I have some vague notes about a project, could you clarify what it's about?
+Can you explain what I mean by 'important points' in this note?
+Locate the note where I've jotted down the ideas for my novel. I'd like to revisit them.
+These notes seem to have multiple intentions, can you sort it out?
+May I have a summary of our chat so far?
+What do these scribbled words 'special task' refer to in my notes?
+Where's the note I took during the team meeting?
+You mentioned something interesting earlier, might as well know.
+What did we decide during this chat?
+I'm looking for the number of occurrences of 'work' in my entire collection of notes.
+Can you give me a summary of my thoughts on project development?
+Did I make a note on yesterday's meeting?
+Did I make a note about the doctor's appointment?
+I'm looking for the number of times I've noted down 'coffee'.
+I'm unsure if these notes are related to work or personal, could you clarify the context?
+Display every note tagged as 'Personal'
+May I have the summary of our last conversation?
+Recap the key arguments in my research notes for the thesis.
+What's the gist of my brainstorming session notes?
+Which notes did I make yesterday?
+Remind me of the main points in my notes.
+Can you help me find the note with the recipe for my sister's birthday cake?
+What notes have I made since this morning?
+Is there a note in here about learning Spanish?
+What are all the notes about technology?
+What concepts did I cover in my notes from the economics lecture?
+When did I jot down the idea for the new project?
+Can you pull up every note tagged with 'movie reviews'?
+What do these scribbled words mean in relation to my project?
+I had a note about the doctor visit, show me
+Can you bring up all the notes in my 'Meetings' folder?
+Can you help clarify the meaning of 'note' in this context?
+Can you help me remember the key points from my study notes?
+Any empty folders?
+Can you give me a breakdown of my notes by folder count?
+This note seems to be incomplete or contradictory, can you help?
+Can you explain what I meant by 'this' in my last note?
+Convert my notes to a spreadsheet
+Summarize the content of my pick-me-up quotes notebook.
+Can you help me locate the note about my doctor's appointment?
+I need to find the note about the doctor's appointment
+any good takeaways in my notes?
+Which note do I have about my daughter's birthday?
+"I'd like to know the number and size distribution of my note collection.
+Could you remind me of the last topic we covered?
+Which note was written the earliest about project X?
+How often does 'milestone' show up in my notes?
+Please display notes with the label 'vacation'
+Can we go back to our previous discussion about the weather?
+You said something interesting earlier, what was that?
+When did I jot down something about vacation?
+I'd like to know the longest and shortest notes in my collection.
+Can I see the oldest note in this notebook?
+Have I taken note of the project deadline?
+Do I recall writing about that initiative? Check for me
+How many times does 'project' appear in my notes?
+Tell me about the size of my note collection.
+Is there a mention of my daughter's birthday in my notes?
+Notes from March
+What are the key differences between my notes on marketing strategies in 2020 and 2021?
+Display all the notes on my vacation
+What was the date of the first note in this notebook?
+Is there a note in my wallet about my annual insurance renewal?
+What can I learn from my notes on the presentation?
+Can you find all notes tagged with 'this year'?
+Remind me of the main points in my last project notes
+Did I save a note on bicycle maintenance?
+I'd like to see every note I've written about 'cooking'.
+Can you remind me of who mentioned that earlier in this chat?
+Give me the notes written between July and August
+Which file has the budget breakdown?
+Could you rephrase your last statement?
+Which is more detailed: my notes on project A or project B?
+Any notes about watchlists?
+Have I saved any thoughts on studying for the Math test?
+I need to find the note I took during our last team meeting.
+Do something with my notes
+Anything from last year about vacation?
+I'm not sure what action I want to take, could you clarify?
+How many folders contain my collected notes?
+Count the occurrences of 'project deadline' in all my notes.
+What was the topic of our last exchange?
+Give me every note about project X
+What do you call this type of note with multiple intents or undefined purpose?
+Have I taken notes on studying for exams?
+By examining my study notes, which textbook chapter is more comprehensive?
+What's the intended meaning behind these unclear scribbles?
+Show me notes from two weeks ago
+How do my notes on cooking chicken and baking a cake compare?
+Locate the note containing the flight details for Paris
+Give me all my notes about work projects
+Which notes did I create yesterday?
+Do I have a note on hiking trails?
+We spoke about this earlier, right?
+Find the differences between my notes on marketing and sales
+Print my notes
+The note on my keys is missing. Could you find it for me?
+What are the essential points I made in my meeting notes?
+What thoughts and concepts did I cover in my previous writings?
+📚 reading
+Show me notes from the beginning of this year.
+Could you clarify the difference between 'notes A' and 'notes B' please?
+Any conflicts between my personal goals and work goals notes?
+Did I make a note on the subject of home improvements?
+Locate the note about my daughter's school event
+I accidentally typed something incorrect in a note. Please clarify what I meant.
+Can you pull up all my workout routine notes?
+What was my first question?
+What are the main ideas in my brainstorming session notes?
+When did I save the notes about my project?
+What are the key ideas from the lecture I attended?
+I'd like to end this conversation, thanks for your help.
+Have I written about podcast recommendations?
+What's the gist of my brainstorming session about the project?
+Can you clarify if these are my personal or work notes?
+Give me a list of my research notes
+Show me that note I took during the team meeting last week.
+What were my notes during March?
+Sum up the word count for all my notes.
+Can you say that again?
+This note is unclear to me, could you explain it please?
+I believe we were speaking about... what was that again?
+Show me the note about the meeting with the marketing team from last week.
+I've accidentally merged two notes. How can I separate them?
+Stuff
+How frequently do I jot down thoughts about my hobby?
+List all notes about travel
+How often do my notes mention the topic 'music'?
+Can you help me locate the note about my interview?
+How often do my notes mention the topic 'travel'?
+Can you give me the statistics of my entire note collection?
+What's the contrast between my meeting notes for Team A and Team B?
+Give me a summary of my entire note collection: count, average length, and longest note.
+I might have written about yoga, did I?
+Remind me of the main points in my last presentation.
+Show me every note I've made about books
+What exactly do you call a note with the label 'urgent'?
+How do the notes from my engineering team meetings differ from those of the marketing team?
+When did I jot down thoughts on studying for exam Y?
+Give me a summary of my entire note database.
+What's the frequency of my use of the term 'goals' in my notes?
+my notes on that whole situation, what do they say?
+Locate the note I made about the key points from the marketing webinar
+Which note has the grocery list?
+Give me a list of all my notes on gardening
+What was written in my notes three days ago?
+I have some notes that seem to overlap with one another – could you help sort out which ones belong together?
+Show me the average length and extremes of my notes.
+Given my notes, what were my conclusions about the research topic?
+Is there a note in here about my email password?
+Which folder is the fullest?
+Provide a recap of the important information in my notes about the upcoming presentation.
+What was it again
+Give me an overview of my notes about the marketing strategy.
+I want to see the note I jotted down about my sister's birthday present.
+Can you give me a summary of my study notes?
+List all the notes I took during my last project
+Can I see all notes from last month related to travel?
+How do the notes about work projects from last year compare to this year's notes?
+Can you display all my notes related to 'science'?
+When did I jot down my ideas about project planning?
+What have we covered in this conversation?
+what was that stuff I noted down about the situation
+anything interesting in my notes?
+Show me what I added yesterday
+Do I have any notes that reference vacation?
+Have I jotted down anything regarding gym workouts?
+Show me every academic research note
+Which of my notes on study techniques is more effective?
+Look up that thing
+What were the key points of our chat?
+Let me check what we discussed before.
+How frequently do I write about 'relaxation' in my personal journal?
+Give me a list of all my creative writing ideas
+What's the main idea of my study notes?
+Where's the note on my last doctor appointment?
+Give me all my technology notes
+What were my key takeaways from the last meeting's notes?
+I'd like you to clarify the meaning of 'project details' in my previous entry.
+Which folder contains the note with my passport details?
+How do my Q1 and Q2 goals differ?
+What do these marked notes actually mean?
+Help me recall the ideas in my brainstorming session.
+Show me every note I've taken on music
+Number of notes mentioning travel
+Can you help me recall the main points of that report?
+Set a reminder for my meeting
+Is there a note in here regarding my passwords?
+Show me all my notes on health and wellness
+Every note mentioning budgeting
+How do my old and new project notes differ in terms of progress?
+Show me the stats for my entire note collection: total, per folder if possible.
+Can I see the oldest entry in this notebook?
+Which folder contains the note I took during the marketing strategy meeting?
+Give me all the notes on my project.
+Pull up all the notes about science
+Help me decipher these vague notes
+What is the intended meaning behind this ambiguous sentence?
+What were my observations about the industry?
+How do the notes I took during meeting 1 and meeting 2 compare regarding action items?
+I meant to say "find notes tagged with 'project X'" instead of "list projects X."
+Can you tell me the key concepts from my research notes?
+travel
+List every note related to marketing
+Count occurrences of 'follow up' across my notes
+What's the length of the longest note I've written?
+What are the key differences between the notes I took on product X and product Y?
+How frequently does 'meeting' show up?
+Is there a note on my to-do list about groceries?
+What's the frequency of 'project' in all my notes?
+Compare the details in my notes about two job interviews.
+Summarize the key points in my latest brainstorming session.
+Let's revisit our earlier discussion about...
+Can I see the most ancient note in this folder?
+I've accidentally labeled some notes with the wrong tag, could you help me sort them out?
+Where's the note I took during our team meeting last week?
+Count the occurrences of 'technology' in my notes
+List my notes about parenting
+Pull up all notes tagged personal
+Where are my notes from the last Friday?
+Show me the note I took during the team meeting
+Where's the note with the recipe for chili?
+Do I have a note somewhere about my daughter's birthday?
+What are you referring to exactly?
+You suggested something interesting, what was it again?
+What's the contrast between my ideas in note 1 and note 2?
+Is there more information on project A or project B in my notes?
+What themes emerge from my notes on this particular project?
+Show me the note about my daughter's school event.
+I've jotted down some confusing instructions, could you translate?
+How many times do I jot down 'exercise'?
+what folder is my budget note in?
+Is there a significant contrast between the notes I took in meeting 1 and meeting 2?
+"What is the significance of 'these words' I jotted down?" (Longer)
+Do I have any unused tags?
+When did I jot down something about my last project?
+Which of my notes on project X and project Y contains more details?
+What insights did I record about leadership?
+I meant to write 'project deadlines' not 'product development' in my previous note.
+How many folders and notes do I currently have?
+What's the gist of my notes regarding the presentation?
+Show me the note I took during the doctor's appointment last week.
+How many folders contain my notes and what's the word count?
+Can you help me figure out what I meant by 'that note'?
+my biggest note
+Recap what I noted about the demo
+Where's the note about my dentist appointment?
+Which notes were created yesterday?
+What's the gist of my brainstorming session for the new project?
+What's the breakdown of notes per folder in my collection?
+Has anything been documented about last week's meeting?
+Can you give me a brief overview of my thoughts on the research topic?
+Do I have any comments about the project deadline?
+Can you present all my notes on project X?
+Are my early vacation notes different from the recent ones?
+Show me notes written before 2021.
+What's the frequency of references to 'travel' in my notes?
+Count how many times I referenced fitness
+Make a new folder called personal
+I've found a conflicting note. Which one should I keep?
+Let's go back to the topic we were discussing before.
+I need to find the note with the contact details.
+How many folders do I have in my notes?
+Idk
+What exactly do you call the notes from my last meeting with the team?
+I need to find notes written before last Friday.
+Which notes did I make last Monday?
+You stated something about travel earlier, remind me.
+Thanks for the help. That's all I needed to know. Goodbye.
+Give me a list of my science notes.
+Which folder contains the note on my sister's birthday?
+Show me the note about last week's meeting
+Can you recap the key points from my brainstorming session?
+Please help me sort out these ambiguous sentences.
+What's the size of my note collection in terms of number of notes and words?
+Get my cooking notes, check when I wrote them, and count mentions of salt
+How often do I jot down 'deadline' or 'priority'?
+I wrote something down that I can't recall, could you help me decipher it?
+I seem to have requested something unclear
+how many notes total
+Where's the note I wrote about my daughter's birthday?
+I believe we were talking about... what was that again?
+Can you help me locate the note on my project's status?
+You mentioned something about travel plans. What did you have in mind?
+I have a note labeled 'Important', but I'm unsure of its content. Can you help?
+Where's the note about the project deadline?
+Can you provide a summary of my note statistics?
+Give me the key insights from my research notes.
+Could you clarify what we decided regarding the project deadline?
+Every note tagged with 'project X'
+I wrote something interesting once, what was it about
+Can you display all the notes tagged 'health'
+show me all notes from trips
+In how many notes does the phrase 'healthy recipes' appear?
+Did I jot down anything regarding my daughter's birthday?
+You brought up an example earlier, could you remind me?
+Can you explain what I meant by 'back up' in this note?
+Have I jotted down anything regarding my doctor's appointment?
+How many folders are there in my notes and what's the longest note?
+What did I jot down yesterday about my goals?
+What's the frequency of occurrence of the word 'exercise' in my notes?
+Can you display all notes for my vacation plans?
+When was the note about the doctor's appointment composed?
+Give me a list of all notes labeled 'meeting'
+Locate the note where I talked about my ambitions
+Show me what I wrote in November about goals
+Notes written in the past month about health
+Show me the note where I jotted down the password for my email account.
+Find notes tagged 'this week' or 'yesterday'
+I'm confused, what was the topic before this?
+What's the total size of all my notes?
+List everything in the personal folder
+Did I take notes on my last doctor appointment?
+Can you help me understand this cryptic note?
+I need assistance with 'parsing this complex note about marketing strategy', can you help clarify?
+List every note tagged with "project X."
+I've jotted down 'random thoughts on a new idea', but can't recall the specifics. Could you help me out?
+Summarize my thoughts on the project proposal.
+I need assistance in understanding 'next actions' mentioned in my notes.
+Display all travel journal entries
+Could you clarify your previous statement?
+Is there anything in my notes about my last vacation?
+total number of notes in my collection
+I need to see all the notes in the 'personal' folder
+List notes from the past six months, please
+Which of my notes on project X and project Y has more details?
+Can you summarize the contents of my cooking notes for me?
+I believe we've concluded our chat, thank you for your help.
+Is there a note regarding my doctor's appointment?
+Can you help me understand the key insights from my research notes?
+Make ambiguous data clearer
+How do the notes on my business ideas from last year stack up against this year's?
+I need to locate the note I took during the team meeting last week.
+"Where is the note on theCampbell'ssouprecipe?" (singular, demonstrative, specific)
+When was the last time I jotted down some ideas?
+Scroll up, what did I ask before?
+Can you give me a summary of my entire note database?
+I have a vague memory of writing something important, but I can't locate it
+Count the notes with the tag 'healthy eating'.
+Sort my notes by creation date, newest first
+Which note do I have about the new project proposal?
+what's worth revisiting in my notes?
+Can you give me a summary of my thoughts in this document?
+Could you recap the key points from the interview notes?
+Show me my notes from last Tuesday.
+Give me a list of all my meeting notes.
+Show me the note with the phone number.
+Which notes have I written this year?
+What's the tally of notes that contain 'project'?
+What were my key learnings from these jotted down thoughts?
+Is there a note in here concerning language learning?
+What do you understand by 'this note'?
+Contrast what I wrote about pilates versus stretching
+which folder has my health stuff?
+Which notes from my last project differ from my current project?
+Delete my notes about recipes
+Did I jot down anything about my doctor's appointment?
+Is there a note on my phone about my sister's birthday?
+I'd like to see all my notes on gardening
+How often do my notes mention 'research'?
+I'm not sure what I meant by 'project X'. Could you clarify?
+This note's title is 'project,' but its content is unclear. What's it about?
+Have I jotted down anything regarding the grocery list?
+Display all the notes with the keyword "research". (Short: "Show research notes.")
+What's the count of notes related to 'math'
+Can you explain what I mean by 'important tasks' in these notes?
+Can you help clarify the meaning of a note with the title 'Project X'?
+Which folder contains the note about my child's kindergarten registration?
+Has there been a note on my bike maintenance?
+What exactly do you call this group of notes I've taken?
+Does my notes app contain a note about the bank account balance?
+What's the average length of a note in my notebook?
+Have I mentioned anything about rest recently?
+What do my notes say about habits?
+Can you tell me the number of notes concerning 'healthy eating'?
+What did I capture this week about work?
+Give me the average length of my notes.
+Which notes should I use for my presentation on Tuesday?
+Display notes from January about work tasks
+What were my conclusions in my interview preparation notes?
+I'd like to see the number of folders and note count.
+show me the one about taxes
+Could you please clarify the meaning behind this note?
+Can you give me an overview of my thoughts on the research topic?
+Can you give me a count of notes with the keyword 'meeting'?
+What do I mean by 'recurring themes' in these notes? Please clarify.
+You said something about that earlier, remind me.
+List the notes I wrote during last year's vacation.
+Have I ever captured thoughts about running?
+How do I separate the personal notes from the work notes?
+Do I have a note on my passwords?
+How many times did I write 'travel' last month?
+Notes from last month about gardening
+Tell me in a nutshell, what did I jot down during our team meeting?
+Can you help me find the meaning of 'EPS' in my finance notes?
+How do my notes on cooking pasta and cooking rice differ?
+Summarize everything I noted about learning Spanish
+I want to see all the notes about my project
+Remind me of the essential details in these notes.
+What was my take on the topic I wrote about in note #3?
+You said something interesting earlier, could you repeat it?
+Do I have a note about the password for my email?
+I can't find a note, did I write about my last dental appointment?
+Sort out the unclear meaning of various entries.
+Find the note I took during the presentation on AI
+Summarize the content of my interview preparation notes
+What's the word count for all my notes combined?
+Number of entries mentioning 'health'
+Do I have anything about renovation?
+What's the number of notes on my project 'New Product?'
+What's the essence of my brainstorming session notes?
+My note title is unclear, could you identify it for me?
+Cooking notes
+So yeah
+Count the occurrences of the topic 'science' in my notes.
+Which notes contain information about both physics and biology?
+What are the key differences between my notes on marketing strategy 2019 and 2020?
+Is there a note on my last doctor's appointment?
+Show notes categorized under finance
+Did I document anything concerning my monthly expenses?
+Can you explain what's meant by 'that' term in my note?
+Give me the most recent note about my project.
+List notes tagged with 'family'
+Can you help clarify the purpose of these notes?
+Find that note with the email address I saved.
+what's my shortest note?
+Go back to my previous question
+What are the notes I made last week about health?
+How does my research on Topic X compare to Topic Y?
+Can I see the notes I made before yesterday?
+Which project notes have more details: the one for app development or the one for website design?
+Can I see the contrast between the notes I took in Meeting 1 and Meeting 2?
+Find and list all notes with the 'Travel' tag
+Remind me of the key points in my research notes
+Can I see all my notes from January?
+Number of notes tagged with 'project': how frequently?
+How many folders contain notes and what's the average length?
+I'd like to access the note I took during the team meeting yesterday. Where is it?
+Show me the note about the swimming membership
+Have I jotted down anything about my car maintenance?
+What are the key points I made in my research?
+How many notes do I have in total, and which ones contain the word 'project'?
+Display all my travel journal entries, please.
+I found a confusing term in my notes, could you explain?
+Can I find the note about last month's rent?
+Have I jotted down anything about my child's school events?
+Which notes did I create last Monday?
+Can you help me locate the note about my doctor's appointment next week?
+I meant 'remind me of next steps' in this ambiguous note, can you help clarify?
+Anything about sourdough in my notes?
+I'd like to see every note in my "vacation" folder.
+Could you find the notes from last month's meeting and clarify some points?
+Can I find any discrepancies between notes on two different meetings?
+Did we cover this topic before in our chat?
+I'd like to see every note I've made on my vacation plans
+Thanks for your help. That concludes our chat.
+Is there a note in here about my project timeline?
+Have I taken a note on how to reset my password?
+I need to find the note where I jotted down my password for this account.
+What does my note about the interview process say?
+Can you give me an overview of my notes?
+Give me an overview of the arguments in my debate research notes
+Show me all the notes related to my vacation.
+You hinted at something before, what was that?
+Give me a summary of the ideas in these notes.
+Let's revisit what we discussed earlier.
+What were the key points of our latest conversation?
+ListTags: science notes
+How many times do I jot down 'exercise' in my personal notes?
+All my notes from the marketing course
+Where is the single note regarding my car insurance details?
+Have I jotted down anything related to health?
+Statistics on the length and number of notes, please.
+Have I taken notes regarding my nephew's graduation?
+What's the frequency of 'travel' in my note collection?
+Show me notes from last weekend
+Hello
+Help me find every note related to my hobbies.
+where did I file the tax documents note?
+Comparing notes: what's the main difference between my ideas on design A and design B?
+What's the gist of the ideas discussed during that team meeting?
+Give me a list of my 'work project' tagged notes
+How many notes did I create this year?
+I'm not sure what I meant by 'this' note.
+Locate the note about my daughter's birthday party.
+Yo
+Contrast the ideas in my notes about design concepts
+What's the longest note in my collection and how many words does it contain?
+You mentioned something about a new app. What was that again?
+Which note is the longest and shortest in my collection?
+What's the frequency of mentions for 'deadline' in my notes?
+Where did I put that recipe for stew?
+Share my recipe notes with my wife
+Is there more information on cooking techniques in my notes for Italian or Indian cuisine?
+Could you help me understand the meaning of these symbols in my notes?
+Could you help make sense of my vague notes about 'project X'?
+Show me every note I have on health
+Can you display all my notes on recipes?
+Can you explain the thoughts I had on my business plan?
+Let me refer back to our last conversation, what was your final take?
+Summarize my thoughts on the project proposal
+What's the length distribution of my notes? Longest and shortest.
+Have I documented anything about my project ideas?
+I have some ambiguous data in my notes, could you clarify?
+I think maybe I had something about the neighbor
+Show me the note about the important client meeting, please.
+Display all my cooking notes
+What's different between my original plan and the revised version?
+Which note was written before yesterday?
+Give me a list of my study materials
+How have my wellness notes changed over time?
+Where is the note I made about my doctor's appointment?
+List all notes in the 'project' folder
+Change the title of my shopping list
+I see multiple intents in my query, please clarify which one you'll handle: 'list' or 'delete'?
+Could you clarify the intended action for 'that one note with the star' please?
+What's the gist of my notes related to project management?
+Find notes tagged 'last week' regarding family
+Help me understand the meaning of 'task list' in this context.
+What is the total count of mentions of my project?
+What's the distribution of my notes across folders?
+Summarize what I said about contracting
+I need to find the note I took during the marketing meeting last week.
+Can you provide me with the longest and shortest notes in my collection?
+Find the note I took during the interview
+Show me notes from November
+What do I mean when I wrote 'x' in this note?
+Can you explain what I meant by 'important points' in this note?
+This note contains 'ACME Project', could you clarify the context or purpose?
+Which folder contains the note regarding my car insurance details?
+List all my journal entries
+Give me the main points from my last presentation notes.
+Give me all the gardening notes, please
+Does this notebook contain a note about my work project?
+I'm unsure what 'research on AI' entails, could you 'provide more context or details'?
+Can you help me understand these mixed-up notes?
+What have I been thinking about lately?
+Which folder is the one with the research notes?
+Is there more information about vacation 2020 and vacation 2021 in my notes?
+Can you tell me the number of notes where 'travel' is mentioned?
+What's the number of notes I've made on gardening?
+All the notes about apartment hunting
+Show me all my finance notes
+Can I please view the notes written in the last 7 days?
+Can you help me understand the main points in these notes?
+I need to locate a note about my sister's birthday.
+Can you show me all the notes I've taken about technology?
+Display most ancient note prior to this week
+Help me understand the concepts from my study notes.
+Help me understand the contents of my research notes.
+Is there a note in here about my daughter's birthday?
+Can you help me understand the thoughts I jotted down?
+I remember jotting down some ideas related to art, but I can't recall the exact note. Could you clarify?
+How many of my notes reference gardening?
+Show me the note on my phone about the important deadlines this week.
+What's the average length of a note in my collection?
+What do you understand when I ask for 'all data related to project X'?
+Let's recap, what was the last thing we discussed?
+Which note do I need for the project proposal?
+How do the notes on subject X and subject Y compare?
+Give me a list of my recent notes
+I want to see all the notes I've taken on recipes
+Show me the note about the groceries I need to buy at the store.
+I'd like to see all the notes with the topic 'learning languages'
+Is there anything in my notes about project timelines?
+Well...
+Show me the bunch about landscaping
+Did I make any notes regarding my project timeline?
+Show me all my notes related to cooking
+How many words make up my entire note collection?
+Notes from two months ago
+Did I save anything about the mortgage?
+Can you help explain what I meant in these notes?
+Show me all my travel notes.
+Could you explain the definition of a 'quick note' versus a 'detailed note'?
+Alright then, have a great day! Our conversation ends here.
+Which note is in the 'miscellaneous' folder about my car?
+Give me all my science notes
+Could you help me disentangle the mixed intentions in these notes?
+These words seem confusing, could you explain them?
+That'll do, cheers
+What's my largest note?
+Let's recap, what was our last discussion about?
+Recall what I wrote about budgeting strategies
+I'd like to know the number of notes and the breakdown of notes per folder in my notes app.
+Have I note-taken anything on studying for the exam?
+I need to locate the note where I jotted down my password for this account.
+do I have many notes on travel?
+Display all the notes I've taken on my last project
+I'm finished
+Can I see the most current note about my daily routine?
+How often do I jot down 'work deadlines'?
+Some parts of my text are unclear, can you clarify them for me?
+How many folders do I have in my note app?
+Please combine and explain these seemingly unrelated entries.
+I'd like you to clarify the distinction between 'notes A' and 'notes B'
+Can you help me summarize my thoughts on this project?
+Did I make a note about tonight's dinner plans?
+What's the frequency of mentions for 'family vacation' in my notes?
+Show me every note I've tagged as 'work'.
+Give me a summary of my note stats, please.
+Did I make a note about my daughter's birthday party?
+What's the smallest note I have?
+What do I mean by 'key takeaways' when I write them down and how should I differentiate them from 'main points'?
+which folder did I put the travel plans in?
+How many folders do I have in my note collection?
+Which is more detailed: my notes on gardening or my notes on hiking?
+List the number of notes dedicated to 'cooking'
+Have I made a note about gardening techniques?
+What's the gist of my thoughts on project X in my notes?
+Show me notes from last Thursday
+Can you help clarify what's in this note?
+Can I see all the notes on my vacation?
+Can you help me understand this section in my note?
+When did I jot down the ideas for my presentation?
+Can you clarify my intention when I wrote 'follow up on X' in this note?
+What's the frequency of mentions for 'healthy eating' in my notes?
+I'd like to compare and contrast my notes from the two sales meetings last week.
+What's the longest note in my collection and how many words does it have?
+Which folder has the most notes?
+What's the main idea behind my brainstorming session notes?
+I'm looking for notes containing discussions about both finance and economics.
+Can you help me decipher the meaning behind 'these keywords' in the text?
+List every note with the label 'family'.
+What's the topic we were covering before this?
+Can you help me understand the content of my interview prep notes?
+Can you help me locate the note with the password for the database?
+Which folder contains the note on my last interview preparation?
+What's the gist of the notes I took during the last meeting?
+Can you organize my folders?
+Where is the note I took during the team meeting about the project timeline?
+my latest journal entry
+Where is the recipe note for my favorite dish?
+"List every note with the tag 'work'.",
+Show me my notes from last month
+Show me notes from this morning
+Display all notes tagged 'work'
+Have I taken notes on the Contact Info for this new client?
+I have an unusual request: 'transpose text within my notes, not extract'.
+What did I note about baking last week?
+I think I wrote something last spring about maybe changing roles or something
+Can you display every note about recipes?
+Do I have a note regarding my daughter's birthday party?
+Can you show me every note regarding projects?
+Show me the note I saved for my holiday planning
+I had this note somewhere
+That's an interesting point, can you elaborate on it?
+Find the note with the title 'Doctor's Appointment'
+What notes did I create this month?
+When did I take notes on project X?
+Can you remind me of our previous topic?
+Can we go back to our previous topic?
+Let's recap our recent conversation, shall we?
+Number of occurrences of 'work' in my notes
+Can you display all the notes tagged as 'work'
+I'd like to see all the notes I've taken on literature and poetry.
+Give me a list of my health-related notes
+Can you give me a breakdown of notes per folder?
+"What are my notes implying about the potential solutions?" (longer, more formal)
+What was the topic of our last conversation?
+What were my conclusions from the research I did?
+Where is the note I made about the password for my old email account?
+I'd like to view all my notes on the project.
+What are my notes suggesting about the research topic?
+Do my notes include anything about the weather today?
+Show me notes from two months ago.
+Did I make a remark about my doctors appointment?
+What are the main differences in my notes about hiking trails in Colorado and California?
+I meant to say 'remind me of that important point' in my last note
+Which note is titled 'doctor appointment'?
+Help me find the note with the recipe for lasagna.
+Help me locate the note I took during last week's team meeting.
+I'd like you to clarify the meaning behind 'action items' in my last entry.
+Find the note with the recipe for lasagna.
+Give me every note tagged with 'project X'
+What's the gist of my research findings in these notes?
+What are the main differences between my notes on planning a vacation in summer and winter?
+Show me notes from two months ago
+I'm not sure where I saved this random thought
+Summarize the key ideas from my research notes.
+What's the summary of our recent chat?
+How many times did I mention 'budget'?
+Summarize the key points from this set of notes.
+Show me the note I took during the marketing meeting last week
+All notes in the vacation folder
+Where is that email conversation about the project located?
+I believe you said something about that before, could you clarify?
+the longest note I have
+Summarize the content of my notes from that workshop
+I have a section labeled 'ideas' in my notes, can you clarify if it's related to business or creative projects?
+Could you repeat our conversation from a few minutes ago?
+Find the note with my watchlist
+Which note has the most words?
+Can you explain the meaning of these random scribbles in my notes?
+Compare and contrast my notes on ancient civilizations: Rome and Greece
+Number of notes with 'recipe' keyword
+where did I save the recipe notes?
+Which note has the road trip itinerary?
+Can I see my notes from the previous month?
+How many folders contain the notes I've written?
+Help me understand the meaning behind 'reoccurring theme' in my prior notes.
+I'd like to see every note about my vacation plans.
+Summarize my research notes on ancient civilizations.
+Which note do I have on my daughter's birthday party?
+Can you help clarify which notes I need for the project?
+Can you tell me how many notes I have with more than 1000 words?
+I mean, what do you call these?
+Count my total notes and folders
+Can you rephrase your last response?
+Could you help me sort out the meaning behind 'task priorities' in this text?
+Is there something about learning guitar?
+Help me find the note where I jotted down my project deadlines.
+List every note related to fitness
+Which notes were created yesterday about projects?
+Did I note down anything regarding my son's birthday?
+This note seems to be about multiple topics - could you help sort out the intended meaning?
+What can I find out from my history research notes?
+Summarize my notes on camping
+Show me notes from the past week.
+I see multiple intents in 'this text'. Which one should I choose?
+Please provide a quick summary of my notes about the conference.
+What was the oldest note I made in this notebook?
+What conclusions did I reach about nutrition?
+Can I see the most current notes related to my daily tasks?
+Which folder contains the note about the project deadline?
+What did I write last week?
+Can you give me the count of notes that include 'deadline'?
+Repeat the list you just gave me
+Find my notes written before 2019.
+Remind me what you said about my travel notes
+any cool ideas I wrote down?
+Show me the notes I wrote during October.
+Could you help me find that ambiguous note?
+What are the major themes in my project notes?
+recall the key points from the science lecture.
+Have I made a note about the book 'To Kill a Mockingbird'?
+List every business idea note
+What's the distribution of note lengths across my folders?
+Do I have a note on tax deadlines?
+Could you help me understand what I meant by 'project X' in these notes?
+Notes from this weekend about wellness
+How do my fitness notes from last month and this month compare?
+I have a note labeled as 'ideas', but can't remember what it contains - can you clarify?
+Can you explain the concept I jotted down in note 7?
+Show me all my tags and the associated notes
+is there more about cooking or about fitness?
+Which note do I have on the subject of my kid's school project?
+Display all my notes on the topic of mathematics
+Can you display all my notes on projects?
+Show me all my notes about science experiments
+Can you help me understand this vague note?
+I think we covered this ground earlier today, correct?
+What do I think about minimalism based on my notes?
+What were my thoughts and ideas on the project proposal?
+How do my notes on project management differ for different teams?
+Which is the note about my son's school project?
+What are the main points in my cooking notes?
+" locate the note 'meeting with John on Monday' in my notebook. " (Shorter version)
+I've written something under 'Miscellaneous', but I'm unsure about its nature. Could you kindly elucidate?
+Is there a note somewhere about my doctor's appointment?
+How many words have I written altogether?
+What notes do I have about fitness?
+Which folder contains the note about my daughter's soccer games?
+List all the notes with the tag 'Education'
+Give me a summary of my notes on project X.
+Can I see every note tagged 'family'
+Can you help me combine my two notes with similar content?
+Which notes were written before January?
+Remove the work tag from this note
+Show me notes from last Monday.
+Count the notes with the keyword 'presentation' in them.
+Thank you, I'm done
+What I wrote yesterday about rest
+Can you help me recall the key points from my project meeting?
+Which note do I have about my car insurance details?
+Could you please give me an estimate of the amount of notes discussing 'technology'?
+I need to locate the note with the recipe for my sister's birthday cake.
+Recap the main topics from my research notes
+Is there more information about history topic X in note A or note B?
+Help me locate the note with the subject 'project deadline'
+What was the date of the first cooking note?
+List all the notes I've taken on cooking
+my longest journal entry
+Is there a note about hiking trails in Colorado?
+compare my two diet plans and count calories mentions
+What are the key takeaways from my notes on the marketing strategy?
+Can you display all of my cooking notes please?
+Give me all the notes tagged 'family'
+Show me the most recent note about project X.
+Did I make a note concerning home improvement projects?
+Help me make sense of my ambiguous jottings.
+Tell me what I captured about stress
+What's the size of my note collection in terms of words?
+How do my notes on cooking pizza differ from baking a cake?
+Give me all my notes on cooking
+what are the highlights from my notes?
+I think I jotted down some ideas under a confusing title, can you assist?
+I want to sort out the meaning behind 'urgent tasks' in my notes.
+"What's the gist of my notes on the marketing campaign?",
+Show me all my notes about work
+Have I taken notes on the contact information for the plumber?
+Summarize my notes on productivity
+Can you help me recall the key points from my thoughts on art?
+pull up my reading list then summarize the latest entry
+Can I get a count of notes that discuss 'cooking'?
+What was the last question you answered for me?
+What are the key distinctions between my notes on cooking Italian versus Mexican dishes?
+Any contradictions between my meeting notes from this week?
+Show me the note where I jotted down the contact info for the dog trainer.
+Which folder contains the note with the phone number of my contact?
+Is there a note in here regarding last month's project?
+Can you give me a list of everything I've tagged 'ideas'?
+Where is the note about the important phone call with my boss?
+How many notes and words in total do I have?
+Can you explain the intentions behind these confusing passages?
+Count the notes tagged with 'research'
+How many notes do I have about technology?
+Find my fitness note and tell me when I wrote it
+How many times does 'study' appear in my notes?
+Can you give me a summary of my note statistics?
+List notes with the label 'work'
+Have I noted down anything regarding my project deadline?
+Can you give me the word count across all my notes?
+Count the notes that talk about reading
+show all journal entries and also when was the last one
+What did I capture about baking techniques?
+Can you explain what I mean by 'important points' in my notes?
+I need to find the note with the address for the conference venue
+Give me the gist of my cooking recipe notes.
+Can you tell me the average length of my notes and the number of longer ones?
+Is 'online course' a referred action in these notes or a topic to be noted?
+You mentioned something interesting earlier, what was it?
+How many words are there across all my notes?
+Let's revisit our conversation about travel plans.
+Number of notes containing the keyword 'research project'.
+What did I think about that audiobook?
+Could you clarify the main points in the series of notes I took?
+Did I jot down some thoughts on learning a new language?
+How many notes are in the work folder?
+How many folders exist in my notes?
+Can I see the most current notes, please?
+I have a long note that seems to be about an event, but I can't remember which one. Could you help me narrow it down?
+What are the key takeaways from my brainstorming session?
+What are the key differences between the notes I took on lecture X and lecture Y?
+Locate the note where I wrote down the password
+List every tagged note related to science
+Explain what I noted about meal prepping
+I need to locate the note where I jotted down the phone number.
+Show me all the notes I took during the last meeting
+Is there a note about my passwords?
+What was my last question to you?
+Locate the note with the title 'Project Proposal' in my notes app.
+What's the main idea of these notes?
+I believe you mentioned something about goodbye. Were we ending our conversation?
+where is my fitness stuff saved?
+How often did I bring up anxiety in my journal?
+Can you help me understand the concepts in my jottings?
+What's the gist of my interview preparation notes?
+I'd like to know the word count for my entire note collection, please. Also, how many notes do I have?
+I'm mixing up the intents in this note, could you help clarify which action I meant?
+Unclear instruction: "Highlight the relevant text in my recent notes."
+I'd like to double-check the details in the note labeled 'to-do'
+Is there a note in here about my sister's birthday?
+Can you help me locate the note with the recipe for lasagna?
+Can you explain what I meant by 'important projects' in this note?
+What thoughts did I jot down regarding this project?
+Which note do I have on the project deadline?
+Is there more information on cooking in note A or note B?
+Give me all my job-related notes
+When did I make those notes?
+What can I learn from my notes about the science experiment?
+What were we talking about?
+Display all the notes about my hobbies
+Give me a list of my work-related notes
+My notes on yoga, all of them
+Show me my travel notes and compare them with last year's
+Can you pull up every note I've tagged as "project"?
+What's the length of my longest note?
+Which notes have the keyword 'urgent' but don't have a deadline?
+Gather all notes under the topic of finance
+Tell me the main ideas in my health notes
+How have the points in my note about meeting with John evolved compared to the one about meeting with Mary?
+Can you help me recall the main ideas in these notes?
+Help me find the notes from two weeks ago about learning Spanish.
+What's the frequency of mentions of 'exercise' in my notes?
+How many folders are there in my notes and what's the average length of a note?
+I have a note with a sketch and some vague keywords, please interpret it for me.
+Can you help me understand the content of these research notes?
+Some of my notes contain multiple topics. Could you help me identify which ones are about 'travel' and which ones are about 'work'?
+fitness notes
+Can you help me recap my ideas about creativity?
+Do I have any folders with just one note?
+Help me understand the main ideas in my nutrition notes
+What has changed in my notes about marketing strategies?
+Have I noted down anything regarding fitness?
+Where's the note with the recipe for lasagna?
+What's the main idea of my notes on project planning?
+Is there more depth in my notes about literature from the 19th century or the 20th century?
+Could you provide context for this ambiguous text?
+Could you please clarify my intentions with this entry?
+What did I mean when I wrote 'follow up' in this entry?
+Could you please explain the meaning behind 'research notes'?
+Which folder contains the note titled 'New Idea'?
+Count the occurrences of 'travel' in all my notes
+how many notes about travel?
+Summarize the main points from my last meeting notes.
+Which are the key differences between my study and work notes?
+Which notes are from December?
+Remind me of the main points in my last report.
+I meant to say 'update' instead of 'delete' in my previous query, could you clarify?
+Say that again please
+My notes seem disorganized, can you sort them out for me?
+Have I jotted anything about vacation spots?
+What was my perspective on the project in those notes?
+I'd like to see the note about the important business call from yesterday.
+Do I have a note taking about last week's meeting?
+Can you tell me how often I've noted down 'dinner recipes'?
+Summarize the thoughts in my last note.
+What are all the notes I've made about recipes?
+What did I capture about the hiring process?
+What's the main idea of my health notes?
+What are the main points of similarity and difference between my notes on Physics and Chemistry?
+I've written something confusing in my journal, please clarify it for me.
+What's the difference between my notes on work and personal life?
+How many and how long are all my notes?
+What changed in my gardening notes between this season and the last one? Are there any consistent mistakes?
+March notes and also count how many mention budget
+Show me my notes from two months ago.
+Is there any note about landscaping somewhere?
+How often do I write about investing?
+my first journal entry
+Pull up my recipe collection
+Is there a note in here about my last doctor's visit?
+notes about meditation
+Please help me understand the meaning behind 'key contacts' mentioned in my scribbled notes. Which specific people are being referred to?
+This conversation about movies - you mentioned a favorite, right?
+Have I jotted down anything regarding coffee?
+List every note about work projects
+How have my notes on project management evolved over time? (longer query)
+where's that one about the car
+I need to know the count of notes I've made on 'science topics'.
+2: "Let's discuss what we were saying before."
+Can I find any significant differences between my notes on art history versus my notes on music theory?
+Frequency of notes with 'travel'
+Which is the oldest note in this notebook?
+Did I ask you about that in this conversation?
+How have my notes on project management evolved over time?
+Give me a list of all my work-related notes
+tell me what I wrote about you know that whole thing
+anything surprising in my notes?
+What are the key points I made in my business strategy notes?
+Show me every note about my vacation
+What did I write in February about cooking?
+What's the frequency of the topic 'cooking' in my notes?
+Is there a noticeable variation in my grocery list notes from one month to the next?
+What did I reflect on about work-life balance?
+Can you help me find the note about my upcoming deadlines?
+I'd like to see all the notes I've made, not just one — 'every note' please.
+Show me the note with the interview prep questions
+Does this notebook contain anything on my next presentation topic?
+Show me all the notes I've tagged as 'money'
+What do I know about renovation?
+Can you help determine the meaning behind this cryptic note?
+what stands out in my notes?
+Can you help me understand this entry?
+Give me all the notes related to work
+Is there a note in my app about my dog?
+show me all my tax notes
+Which are the key differences between my ideas for Project A and Project B?
+Locate the memo about my interview
+Have I jotted down anything related to physics?
+How often does 'technology' come up in my personal notes?
+Can you tell me how many notes contain the word 'deadline'?
+What are the main differences between my notes on guitar skills?
+Which notes were written before New Year's?
+Bring up all the notes tagged 'work'
+Is there a significant change in the tone or content between these two sets of notes?
+Recap the key findings from my research notes.
+Have I jotted down anything regarding my interview preparation?
+Which note has more details on project X versus project Y?
+How do my notes on product A and product B differ in terms of benefits?
+Which is more detailed: my note on physics vs my note on chemistry?
+Recap the main topics discussed in my meeting notes
+I'd like to find the inconsistencies in my notes about project X and Y.
+How many notes talk about saving money?
+Give me a list of my art notes
+I need clarification on the actions required in these instructions.
+Show me the most recent note about my project.
+Every entry about running
+Compare my study notes for physics and mathematics
+show me the note from the meeting
+Which folder contains the note with the contact info for my plumber?
+What were my key takeaways from the conference?
+I've scribbled something vague in my memo, please elaborate on it.
+What's the weather like?
+Can you display all my notes relating to 'science'?
+I'm not sure which notes I want to modify—could you help me narrow it down?
+Archive my old notes
+Summarize the notes I took during the doctor's appointment.
+What's the summary of our recent conversation?
+I'd like to see all notes related to my project
+Where is the note regarding the meeting with the editor?
+Have I taken notes on the topic of climate change recently?
+What's the word count of all my notes?
+how many notes do I have and which is the longest
+I need to locate the note on my last doctor's appointment. Where is it?
+Can you give me a summary of my recent meeting notes?
+What do these scribbles mean in this section of notes?
+Can you tell me the number of mentions of 'yoga' in my entire collection of notes?
+What do these jumbled symbols mean in my note?
+Everything I wrote about gardening
+Anything I added in the past 3 days?
+Is there a mention of 'project X' in my notes?
+Tell me about the arguments in the article I saved.
+"How should 'these documents' be classified? I'm not sure." (short)
+Summarize the contents of my notes about the project.
+How many folders are there in my notes?
+My entries from Q2 about apartment hunting
+Which notes were written in the past month?
+Mentioned how many times is the word 'chocolate' in my notes?
+What were the key points of our last discussion?
+Help me find the note with the phone number of my contact.
+Give me a list of notes I've made on science and technology
+Which note do I have about my daughter's birthday party?
+Did I make a note about the password for this account?
+Sort my folders alphabetically
+Count how many notes mention coffee
+Show me all my recipes notes
+What are my opinions on the topics I jotted down in my notes about literature?
+What's the gist of the novel I've been reading in my notes?
+Could you explain what action I intended?
+Can you explain what I meant by 'research project' in this note?
+How many words are there in all my notes combined?
+Display all the notes in my 'Projects' folder
+List every note related to my project ideas
+When was the last note on this topic written?
+Can you display every note with the label 'project'
+Can I view the most ancient notes first?
+Can I see my notes from last year's vacation?
+How many notes talk about debt?
+I need to retrieve the note regarding my car insurance claim
+Summarize the notes I took during the team meeting last week
+find my fitness note and also how many times I mentioned running
+Do I have something about my gym membership?
+Give me an overview of my total note count and average length.
+Can you display all the notes with the budget tag?
+Help
+Give me the gist of the article I saved in my notes app
+Give me the most ancient note
+Remind me of the key concepts in my study notes.
+What do the vague terms in this document mean and how should I interpret them?
+Help me parse the content of this note.
+Show me all my project notes
+Can you give me the main points from my last report?
+Can you provide me with statistics about my entire note collection, like average length and total word count?
+What were my insights during last week's research?
+Have I jotted down anything regarding my passwords?
+Can you summarize the arguments in my debate notes?
+Which notebook contains the sketch of my garden design?
+In what ways do the notes about my morning routine differ from my evening routine notes?
+Could you show me the note about my daughter's school event in the 'Family' folder?
+Which folder contains the note with the passcode?
+How many notes reference my manager?
+Remind me of the key points in my research notes.
+Latest stuff about running
+Can you re-explain that last part?
+Send this note to my email
+Show me the note that starts with 'Important: Contact Info' - where is it located?
+Give me a list of all my design ideas
+Where did I put the meeting notes from Monday?
+I've written something vague in my notes, help me understand it.
+Count the instances of 'deadline' in all my notes, please.
+Where is the note I took during the team meeting?
+Move my travel note to a different folder
+I'd like to revisit the conversation we had about...
+Which is the most recent note I added?
+I'm looking for a note with an unclear content or location, can you help?
+Smallest entry I have?
+Notes from last Tuesday
+Have I taken any notes on the symptoms of the common cold?
+I'd like you to clarify the meaning of these jotted down words.
+Got any quick notes about my grocery list?
+Do I have a note regarding my doctor's appointment?
+Remind me, what were my insights about product development in my notes?
+Find the note with the title 'Doctor's Appointments'
+How many tags do I have?
+Repeat your last answer
+How often does the topic 'exercise' show up in my notes
+Find the note about my sister's birthday
+What do I mean by 'important information' in my note titled 'Project X'?
+When was the most recent note about vacation plans added?
+Give me a list of my notes about cooking.
+Can I find the note regarding my doctor's appointment?
+Let's revisit the topic we touched upon before about travel destinations.
+I'd like to know the number of occurrences of the keyword 'project' in all my notes.
+Compare my thoughts on two different movies
+Back up my notes to Google Drive
+Could you clarify the context of 'this sentence' I found in my notes?
+Count the occurrences of 'math' in all my jotted down notes.
+I need to locate the note with the phone number for the plumber.
+I've made some notes during a meeting and now I'm unsure about the context. Could you clarify please?
+Give me every note I've made about recipes
+Count the occurrences of 'project management' in all my notes.
+I'd like to know how many times the word 'motivation' appears in my notes.
+Can I see all my travel notes?
+Where is the note I saved about my daughter's doctor appointment?
+Can you bring up all the notes about books I've read?
+What's the gist of my investment notes?
+Is there a note on my phone about the project deadline?
+I need clarification: do I have notes about my vacation to Paris or to Rome?
+Can I see the discrepancies between my weekly project notes?
+Can you help me find the notes where I jotted down my ideas about art and music?
+5: "I believe we covered this ground before. Can you remind me?"
+How many notes are in my collection?
+Recall my thoughts on the project proposal from last week.
+How frequently does 'exercise' appear in my notes?
+What's the total number of notes in my collection?
+Show me all my coding notes.
+Which of my two project notes provides more details?
+Show me every travel note
+Is there significant difference in the content of my notes on team meetings A and B?
+Have I jotted down anything related to cooking techniques?
+Does the app contain a note on my gym routine?
+I need to find the one about the important project deadline.
+Can you assist me in finding the specific note I took on my gardening ideas?
+You said something about that earlier, right?
+Find my note on the tenant dispute
+How do my January and February journal entries differ?
+Show me the note with the recipe for lasagna
+Have I taken any notes related to updating my resume?
+What are the essential ideas in my study notes for the exam?
+Which folder contains the note on my son's school schedule?
+What's the general theme of my project notes?
+What were my arguments in that email thread?
+How much content do I have overall?
+1: "Can we go back to our previous topic?"
+Have the key points in my project notes changed significantly?
+Did I write about the groceries in my last notes?
+Recapitulate the key points from my study notes.
+Show me the note where I saved my grandma's recipe
+Let's see how my study notes for Math and Science compare.
+what did I have to say about all that stuff
+Can I see all my tags and the corresponding notes?
+Show me all my travel notes
+Where's the note with the contact info for the new accountant?
+Which is my biggest note?
+Which of my study notes covers more ground, Physics or Math?
+What did we discuss before this?
+Is there a note in here about my recipe for lasagna?
+How do my notes on history compare to my notes on literature?
+find which folder has my reading list
+How many times does 'deadline' appear?
+What is the total number of notes in my collection?
+What insights do I have about rest?
+Anything I wrote over the summer about reading?
+What did I write about that situation at the event
+Where is the note I made about my sister's birthday present?
+pull up the one about my insurance
+Remind me of the key points in my last meeting
+We were talking about travel plans; what did you suggest?
+Find the note about my doctor appointment
+Appreciate it, that's all I needed
+That note I made about the standup meeting
+Give me a count of the instances where I've noted down 'healthy recipes'.
+travel notes
+what's in my work folder?
+Show me all my technology notes
+Tell me about the arguments made in these notes.
+Can I see all the notes I took this year?
+Find the note on last week's meeting
+Display all my to-do list notes
+What are the key points I made in this set of notes?
+Can you pull up all my notes on home improvement?
+What are my notes about the upcoming project meeting?
+Can you give me the word count for all my notes?
+Tell me the gist of the notes I took during the last presentation.
+Can you help me understand the context of a note with the tag 'Personal'
+Which folder contains all my project notes?
+Show me all my notes related to work
+What's the word count across all my notes?
+Display notes from June 2021, please
+Did I write something about investing at some point?
+What's the gist of my notes about the product development strategy?
+Give me a summary of the key concepts in my notes.
+Show me all my tagged notes on health.
+Can you recall our previous discussion about the weekend plans?
+Show me the note I made about the doctor's appointment
+When did I jot down the idea for project X?
+Could you clarify the context please?
+Where is the note about my daughter's birthday party?
+These notes contain multiple intents, could you sort them out?
+Can you present all the notes on project X?
+What are the key distinctions between my notes on cats and dogs?
+I need help with stuff
+Has my notebook any entry about learning Spanish?
+You've mentioned that before, care to elaborate?
+Is there a note in here about the recipe for chocolate cake?
+Add a tag to my journal entries
+What's the gist of what we've been talking about?
+Give me every note related to baking
+What were my thoughts in this notebook?
+What's the total number of notes and folders in my collection?
+The one about saving money, where is it?
+What did I jot down about the book I read?
+Which has more entries, landscaping or baking?
+What's the gist of my notes on the presentation prep?
+What are the key differences between my ideas for solution X and solution Y?
+Is there more about baking or about running?
+Which note do I need to attach the receipt from the hardware store to?
+List all notes under the 'projects' folder
+Which folder contains the note on my upcoming vacation plans?
+Which notes were created today?
+You've answered that question before, remind me.
+I'd like to see all the notes related to my studies
+How have the notes on my project progressed over the last few weeks?
+Have I documented anything about my sister's birthday?
+Give me all the notes tagged with 'work'
+Did I jot down anything about my project deadline?
+Can you display every note tagged with 'project X'?
+What's the average length of my notes?
+I need to find the single note I scribbled down about the grocery list.
+Total word count across all notes
+what's the note count
+What's the summary of our latest chat about the book club?
+Can you help me understand the thoughts in this document?
+Have I documented anything on my morning routine?
+Show me the note I made about my son's school project.
+Which notes were written before 2021?
+What do these notes signify in total?
+What alternatives did I suggest for problem X in notes Y and Z?
+Summarize the notes I took during the meeting.
+Can you give me a gist of the science notes?
+Is there a note in here about my childhood memories?
+Can you tell me the size of my entire note collection in terms of notes and words?
+Which note was I working on yesterday?
+How many notes do I have and which is the longest?
+Help me understand the main ideas from my notes on the sales strategy.
+Recent notes about vacation planning
+I'd like to see every single note I have that's tagged 'research'
+Display notes with 'task' in the title and also indicate if they are completed or not.
+Give me a list of all my folded notes on recipes.
+Summarize the contents of my math notes for me
+Give me the gist of my last doctor appointment note.
+I'd like to see all the notes with the 'project' tag
+Can you help me find the note about my doctor's appointment?

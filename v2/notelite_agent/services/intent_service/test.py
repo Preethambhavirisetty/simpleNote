@@ -15,7 +15,8 @@ from collections import defaultdict
 from core.settings import init_llama_index_settings
 from services.intent_service.intent import QueryPlanner
 
-_TEST_PATH = os.path.join(os.path.dirname(__file__), "test.examples.json")
+# _TEST_PATH = os.path.join(os.path.dirname(__file__), "test.examples.json")
+_TEST_PATH = os.path.join(os.path.dirname(__file__), "test2.examples.json")
 
 # ANSI colors
 _GREEN = "\033[92m"

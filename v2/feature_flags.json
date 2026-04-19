@@ -8,8 +8,11 @@
             "history": {
                 "enabled": true
             },
-            "intent_exemplar": {
+            "intent_classifier": {
                 "enabled": true
+            },
+            "intent_exemplar": {
+                "enabled": false
             },
             "intent_llm": {
                 "enabled": true
