@@ -50,7 +50,7 @@ INTENT_ACTIONS: dict[str, str] = {
     "list_notes":        "listing",
     "keyword_count":     "keyword_count",
     "temporal":          "temporal",
-    "presence_check":    "semantic",
+    "presence_check":    "presence_check",
     "compare_notes":     "semantic",
     "corpus_stats":      "corpus_stats",
     "conversation_meta": "conversation_meta",

@@ -163,6 +163,42 @@ intent evaluation and retrain pipeline
 - for every question, check if the current user's query is denial of the previous one, reduce the previous query's intent confidence score by some percent.
 - every 2 weeks or so, I'll extract queries, intents, and confidence scores and use LLM like chatGPT API or something as a judge and relabel them and retrain the intent classifier
 
+# Each Intent Needs Different Retrieval
+
+# ──────────────── Retrieval Strategy Table ────────────────
+# Each intent below maps to a dedicated retrieval strategy.
+#
+# | Intent            | Retrieval Strategy                                 | What's Different                                         |
+# |-------------------|----------------------------------------------------|----------------------------------------------------------|
+# | semantic          | Vector search, top 5-10 chunks, pass to LLM        | Needs LLM to reason over content                         |
+# | locate_note       | Vector search, top 1-3, return note title/folder   | No LLM needed, just format the result                    |
+# | list_notes        | Metadata filter (topic/tag/folder), all matches    | May not need vector search at all—just filter            |
+# | keyword_count     | Full-text/keyword match, count results             | Not vector search—exact match                            |
+# | temporal          | Metadata filter by date range, sort by date        | Database query, not semantic search                      |
+# | presence_check    | Vector search w/ threshold, return yes/no          | Only need top 1 result + confidence                      |
+# | compare_notes     | Two retrievals, pass both to LLM                   | Multiple retrieval calls                                 |
+# | corpus_stats      | Database aggregation query                         | No note retrieval at all                                 |
+# | conversation_meta | Chat history lookup                                | No note retrieval at all                                 |
+# | clarify_intent    | Nothing                                            | No retrieval—ask user to clarify                         |
+# ─────────────────────────────────────────────────────────────────────────
+
+
+# ──────────────── Intents & Required Retrieval Methods ────────────────
+#
+# | Intent            | Vector Search        | DB Query              | LLM                    | Chat History    |
+# |-------------------|---------------------|-----------------------|------------------------|----------------|
+# | semantic          | ✅ broad             | ❌                    | ✅ synthesize          | ❌             |
+# | locate_note       | ✅ narrow            | ❌                    | ❌                     | ❌             |
+# | list_notes        | maybe                | ✅ filter             | ❌                     | ❌             |
+# | keyword_count     | ❌                   | ✅ text search        | ❌                     | ❌             |
+# | temporal          | ❌                   | ✅ date filter        | ❌                     | ❌             |
+# | presence_check    | ✅ single            | ❌                    | ❌                     | ❌             |
+# | compare_notes     | ✅ double            | ❌                    | ✅ compare             | ❌             |
+# | corpus_stats      | ❌                   | ✅ aggregate          | maybe                  | ❌             |
+# | conversation_meta | ❌                   | ❌                    | ✅                     | ✅             |
+# | clarify_intent    | ❌                   | ❌                    | ❌                     | ❌             |
+#
+# ----------------------------------------------------------------------
 
 ### Run postgres with podman:
 podman run -d \
