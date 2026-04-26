@@ -1,17 +1,15 @@
 """Intent-specific retrieval handlers.
 
-call_sql_service():
-    intents: list_notes, temporal, keyword_count, presence_check, keyword_count, corpus_stats
-    intent specific logic + execute SQL query
-        - ex: temporal: extract date/day/time/month/year
+Routes each intent to the minimal retrieval path it needs:
 
-call_vector_service():
-    intents: semantic, locate_note
+    Short-circuit (no note retrieval):
+        clarify_intent, conversation_meta
 
-if not call_sql_service and not call_vector_service:
-    intents: clarify_intent, conversation_meta
-    generate clarifying questions and pass it to LLM(for now) / pass history to inference
+    Scroll-only (full chunk scan, no vector search):
+        keyword_count, temporal, listing, presence_check, corpus_stats
 
+    Vector search (summary → chunk → soft score → rerank → LLM):
+        semantic, locate_note, compare_notes
 """
 
 from __future__ import annotations

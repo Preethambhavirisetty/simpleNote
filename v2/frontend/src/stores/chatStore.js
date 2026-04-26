@@ -34,13 +34,18 @@ export const useChatStore = create(
         set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
         try {
           const conv = await conversationsApi.get(convId)
-          const msgs = (conv.messages ?? []).map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: m.created_at,
-            sources: m.sources_used,
-          }))
+          const msgs = (conv.messages ?? []).map((m) => {
+            const raw = m.sources_used
+            const hasRichSources = Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'object'
+            return {
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              timestamp: m.created_at,
+              sources: hasRichSources ? raw.map((s) => s.note_id) : raw,
+              citations: hasRichSources ? raw : undefined,
+            }
+          })
           set({ messages: msgs, isLoadingMessages: false })
         } catch (err) {
           console.error('[chatStore] selectConversation failed:', err)
@@ -141,6 +146,7 @@ export const useChatStore = create(
                 ...last,
                 isStreaming: false,
                 sources: payload?.sources,
+                citations: payload?.citations,
                 latency_ms: payload?.latency_ms,
               }
               return { messages: msgs, isStreaming: false }

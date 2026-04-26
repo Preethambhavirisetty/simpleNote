@@ -2,8 +2,6 @@
 
 import json
 import time
-from concurrent.futures import ThreadPoolExecutor
-
 import httpx
 import structlog
 from fastapi import APIRouter, Depends
@@ -36,7 +34,8 @@ _RAG_SYSTEM = (
     "- If the context does not contain enough information, say so honestly in one sentence. "
     "Do NOT fill gaps with information from prior answers.\n"
     "- Do not invent details, steps, or facts.\n"
-    "- Never start responses with 'Based on our conversation so far' or similar preamble.\n"
+    "- Never start responses with 'Based on our conversation so far', "
+    "'Context from my notes', or similar preamble.\n"
     "- NEVER echo passwords, secrets, or API keys from the context. "
     "If the user asks about credentials, confirm they exist and where, but mask the values "
     "(e.g. 'Username: Cisco***', 'Password: ****').\n"
@@ -105,17 +104,12 @@ def chat_stream(request: ChatRequest):
         )
         conv_id = conv["id"]
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        user_msg_future = pool.submit(
-            backend_client.create_message,
-            request.user_id, conv_id, role="user", content=request.query,
-        )
-        assistant_msg_future = pool.submit(
-            backend_client.create_message,
-            request.user_id, conv_id, role="assistant", content="", status="partial",
-        )
-        user_msg = user_msg_future.result()
-        assistant_msg = assistant_msg_future.result()
+    user_msg = backend_client.create_message(
+        request.user_id, conv_id, role="user", content=request.query,
+    )
+    assistant_msg = backend_client.create_message(
+        request.user_id, conv_id, role="assistant", content="", status="partial",
+    )
 
     # ── 1b. Fetch conversation history + rewrite query ──────────────────────────────────
     history_messages: list[dict] = []
@@ -162,6 +156,7 @@ def chat_stream(request: ChatRequest):
         strategy=plan.strategy,
         intent=plan.intent,
         search_term=plan.search_term,
+        extracted_terms=result.extracted_terms or None,
         source=plan.source,
         confidence=plan.confidence,
         intent_latency_ms=intent_ms,
@@ -172,6 +167,7 @@ def chat_stream(request: ChatRequest):
 
     # ── 4. Generate response ─────────────────────────────────────────────
     error = None
+    citations = result.citations
 
     if result.answer is not None:
         answer = result.answer
@@ -248,10 +244,13 @@ def chat_stream(request: ChatRequest):
                 yield _sse("delta", {"content": token})
                 time.sleep(0.02)
 
-        yield _sse("done", {
+        done_payload: dict = {
             "latency_ms": total_latency_ms,
             "sources": list(set(source_ids)),
-        })
+        }
+        if citations:
+            done_payload["citations"] = citations
+        yield _sse("done", done_payload)
 
         log.info(
             "chat.complete",
@@ -272,7 +271,7 @@ def chat_stream(request: ChatRequest):
             "status": "error" if error else "complete",
             "latency_ms": total_latency_ms,
             "tokens_used": tokens_used,
-            "sources_used": list(set(source_ids)),
+            "sources_used": citations if citations else list(set(source_ids)),
             "error_message": error,
         })
 

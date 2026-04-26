@@ -32,6 +32,60 @@ function ChatBubbleIcon() {
 
 // ── Message bubble ───────────────────────────────────────────────────────────
 
+function NoteIcon() {
+  return (
+    <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+    </svg>
+  )
+}
+
+function FolderIcon() {
+  return (
+    <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+    </svg>
+  )
+}
+
+function Citations({ citations }) {
+  const navigate = useNavigate()
+  if (!citations || citations.length === 0) return null
+
+  const handleClick = (c) => {
+    const notePath = c.folder_id
+      ? `/folders/${c.folder_id}?note=${c.note_id}`
+      : `/notes?note=${c.note_id}`
+    navigate(notePath)
+  }
+
+  return (
+    <div className="mt-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-700/60">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500 mb-1.5">Sources</p>
+      <div className="flex flex-wrap gap-1.5">
+        {citations.map((c) => (
+          <button
+            key={c.note_id}
+            type="button"
+            onClick={() => handleClick(c)}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-zinc-200/60 dark:bg-zinc-700/50 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/40 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors cursor-pointer"
+            title={c.folder ? `${c.folder} / ${c.title}` : c.title}
+          >
+            <NoteIcon />
+            <span className="truncate max-w-[140px]">{c.title}</span>
+            {c.folder && (
+              <>
+                <FolderIcon />
+                <span className="truncate max-w-[80px] text-zinc-400 dark:text-zinc-500">{c.folder}</span>
+              </>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Message({ msg }) {
   const isUser = msg.role === 'user'
 
@@ -64,6 +118,7 @@ function Message({ msg }) {
         {msg.isStreaming && msg.content && (
           <span className="ml-0.5 animate-pulse text-indigo-300">▋</span>
         )}
+        {!isUser && !msg.isStreaming && <Citations citations={msg.citations} />}
       </div>
     </div>
   )

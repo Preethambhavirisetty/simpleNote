@@ -101,11 +101,6 @@ clarifying question
 include metadata(folder name, note name)
 clarify intent ask one clarifying question
 
-Overall:  24/50 (48.0%)    avg: 273.9ms  min: 0.0ms  max: 2483.5ms  total: 13.70s
-Overall:  24/50 (48.0%)    avg: 120.1ms  min: 0.0ms  max: 2290.6ms  total: 6.01s
-Overall:  24/50 (48.0%)    avg: 95.7ms  min: 0.0ms  max: 1541.0ms  total: 4.78s
-
-
 Scenario	Example	Why SetFit Struggles
 Completely novel phrasing	"yo check if I scribbled anything about that landlord drama"	Never seen anything remotely like this in training data
 Complex multi-signal queries	"I think maybe last month I had something about switching jobs or something"	Hedging language + temporal + presence — conflicting signals confuse the classification head
@@ -163,42 +158,40 @@ intent evaluation and retrain pipeline
 - for every question, check if the current user's query is denial of the previous one, reduce the previous query's intent confidence score by some percent.
 - every 2 weeks or so, I'll extract queries, intents, and confidence scores and use LLM like chatGPT API or something as a judge and relabel them and retrain the intent classifier
 
-# Each Intent Needs Different Retrieval
 
-# ──────────────── Retrieval Strategy Table ────────────────
-# Each intent below maps to a dedicated retrieval strategy.
-#
-# | Intent            | Retrieval Strategy                                 | What's Different                                         |
-# |-------------------|----------------------------------------------------|----------------------------------------------------------|
-# | semantic          | Vector search, top 5-10 chunks, pass to LLM        | Needs LLM to reason over content                         |
-# | locate_note       | Vector search, top 1-3, return note title/folder   | No LLM needed, just format the result                    |
-# | list_notes        | Metadata filter (topic/tag/folder), all matches    | May not need vector search at all—just filter            |
-# | keyword_count     | Full-text/keyword match, count results             | Not vector search—exact match                            |
-# | temporal          | Metadata filter by date range, sort by date        | Database query, not semantic search                      |
-# | presence_check    | Vector search w/ threshold, return yes/no          | Only need top 1 result + confidence                      |
-# | compare_notes     | Two retrievals, pass both to LLM                   | Multiple retrieval calls                                 |
-# | corpus_stats      | Database aggregation query                         | No note retrieval at all                                 |
-# | conversation_meta | Chat history lookup                                | No note retrieval at all                                 |
-# | clarify_intent    | Nothing                                            | No retrieval—ask user to clarify                         |
-# ─────────────────────────────────────────────────────────────────────────
+all_intents = [Semantic, locate_note, list_notes, keyword_count, temporal, presence_check, compare_notes, corpus_stats, conversation_meta, clarify_intent]
+
+list_notes, temporal, presence_check: Query PGSQL
+sematic, locate_note: qdrant
+keyword_count, corpus_stats: PGSQL + aggregation logic
+
+Intent	Primary Source	Logic/Handler
+list_notes	- PostgreSQL	- SQL SELECT query
+temporal	- PostgreSQL	- SQL WHERE date_range
+presence_check -	PostgreSQL -	SQL EXISTS check
+Semantic	- Qdrant	- Vector Similarity Search
+locate_note	- Qdrant/Postgres	- Hybrid Search (Vector + Metadata filter)
+compare_notes	- Both	- Fetch multiple IDs -> Send to LLM
+corpus_stats	- PostgreSQL	- COUNT(*), GROUP BY
+clarify_intent	- Inference	- LLM re-prompt logic
+
+Actions:
+- semantic_search(A)
+- compare_notes(A, B): semantic_search(A) + semantic_search(B)
+- list_notes(that has search_term)
+- 
 
 
-# ──────────────── Intents & Required Retrieval Methods ────────────────
-#
-# | Intent            | Vector Search        | DB Query              | LLM                    | Chat History    |
-# |-------------------|---------------------|-----------------------|------------------------|----------------|
-# | semantic          | ✅ broad             | ❌                    | ✅ synthesize          | ❌             |
-# | locate_note       | ✅ narrow            | ❌                    | ❌                     | ❌             |
-# | list_notes        | maybe                | ✅ filter             | ❌                     | ❌             |
-# | keyword_count     | ❌                   | ✅ text search        | ❌                     | ❌             |
-# | temporal          | ❌                   | ✅ date filter        | ❌                     | ❌             |
-# | presence_check    | ✅ single            | ❌                    | ❌                     | ❌             |
-# | compare_notes     | ✅ double            | ❌                    | ✅ compare             | ❌             |
-# | corpus_stats      | ❌                   | ✅ aggregate          | maybe                  | ❌             |
-# | conversation_meta | ❌                   | ❌                    | ✅                     | ✅             |
-# | clarify_intent    | ❌                   | ❌                    | ❌                     | ❌             |
-#
-# ----------------------------------------------------------------------
+CHAT:
+user query -> CHAT UI -> Agent -> 
+                                |
+                                1. ---> Rewrite(flag)
+                                |
+                                2. ---> intent detection(flag): trained classifier or LLM fallback
+                                      |
+                                      2.1 ---> Keyword Intent -> search for the keywords, chuck by chunk
+                                      |
+                                      2.2 ---> Locate Note Intent -> 
 
 ### Run postgres with podman:
 podman run -d \

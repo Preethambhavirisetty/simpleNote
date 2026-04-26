@@ -18,7 +18,7 @@
                 "enabled": true
             },
             "query_rewrite": {
-                "enabled": true
+                "enabled": false
             }
         }
     },

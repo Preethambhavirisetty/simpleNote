@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from llama_index.core import Document as LlamaDocument
 
-from handlers.strategies.keyword_count import KeywordExtractor
+from handlers.strategies.keyword_count import KeywordCounter, KeywordExtractor, TermCount
 from pipeline.intent import QueryPlan
 
 
@@ -21,6 +21,8 @@ class StrategyResult:
     fact: str | None = None
     source_ids: list[str] = field(default_factory=list)
     skip_context: bool = False
+    citations: list[dict] = field(default_factory=list)
+    extracted_terms: list[str] = field(default_factory=list)
 
 
 def execute(plan: QueryPlan, all_chunks: list[LlamaDocument], query: str = "") -> StrategyResult:
@@ -44,76 +46,99 @@ def _resolve_term(plan: QueryPlan, query: str) -> str | None:
 
 # ── keyword_count ─────────────────────────────────────────────────────────
 
-def _keyword_count(plan: QueryPlan, chunks: list[LlamaDocument], query: str = "") -> StrategyResult:
-    term = _resolve_term(plan, query)
-    if not term:
+def _keyword_count(
+    plan: QueryPlan,
+    chunks: list[LlamaDocument],
+    query: str = "",
+) -> StrategyResult:
+    terms = KeywordExtractor.extract_multiple(query) if query else []
+
+    if not terms:
+        term = _resolve_term(plan, query)
+        terms = [term] if term else []
+
+    if not terms:
         return StrategyResult(
             fact="I couldn't determine which word or phrase to count. "
-                 'Could you rephrase? For example: "how many notes mention **budget**?"',
+                 'Try something like: "how many notes mention **budget**?"',
             skip_context=True,
         )
 
-    try:
-        pattern = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
-    except re.error:
-        pattern = re.compile(re.escape(term), re.IGNORECASE)
+    count_type = KeywordCounter.determine_count_type(query)
+    results = KeywordCounter.count_multiple(terms, chunks)
 
-    total = 0
-    matched_notes: dict[str, dict] = {}
+    all_source_ids: list[str] = []
+    for tc in results.values():
+        all_source_ids.extend(k for k in tc.matched_notes if k not in all_source_ids)
 
-    for chunk in chunks:
-        count = len(pattern.findall(chunk.text))
-        if count > 0:
-            total += count
-            note_id = chunk.metadata.get("note_id")
-            if note_id:
-                if note_id not in matched_notes:
-                    matched_notes[note_id] = {
-                        "count": 0,
-                        "title": chunk.metadata.get("note_title", "Untitled"),
-                    }
-                matched_notes[note_id]["count"] += count
-
-    matched_note_ids = list(matched_notes.keys())
-
-    if total == 0:
-        partial = re.compile(re.escape(term), re.IGNORECASE)
-        partial_count = sum(len(partial.findall(c.text)) for c in chunks)
-
-        if partial_count > 0:
-            fact = (
-                f"The exact phrase '{term}' does not appear in your notes, "
-                f"but partial matches were found {partial_count} time(s). "
-                f"Try a shorter or different form of the word."
-            )
-        else:
-            fact = f"'{term}' does not appear in any of your notes."
-
-    elif total == 1:
-        note = list(matched_notes.values())[0]
-        fact = (
-            f"'{term}' appears 1 time in the note "
-            f"\"{note['title']}\"."
-        )
+    if len(terms) >= 2:
+        fact = _format_comparative(terms, results, count_type)
     else:
-        fact = (
-            f"'{term}' appears {total} times "
-            f"across {len(matched_notes)} note(s)."
-        )
+        fact = _format_single(terms[0], results[terms[0]], count_type)
 
-        if 1 < len(matched_notes) <= 7:
-            breakdown = sorted(
-                matched_notes.items(),
-                key=lambda x: x[1]["count"],
-                reverse=True,
+    citations = _build_citations(results)
+    return StrategyResult(
+        fact=fact, source_ids=all_source_ids,
+        skip_context=True, citations=citations,
+        extracted_terms=terms,
+    )
+
+
+def _build_citations(results: dict[str, TermCount]) -> list[dict]:
+    """Build structured citation list from count results for SSE output."""
+    seen: set[str] = set()
+    citations: list[dict] = []
+    for tc in results.values():
+        for note_id, info in tc.matched_notes.items():
+            if note_id not in seen:
+                seen.add(note_id)
+                citations.append({
+                    "note_id": note_id,
+                    "title": info.get("title", "Untitled"),
+                    "folder": info.get("folder", ""),
+                    "folder_id": info.get("folder_id", ""),
+                })
+    return citations
+
+
+
+def _format_single(term: str, tc: TermCount, count_type: str) -> str:
+    if tc.mention_count == 0:
+        return f"'{term}' does not appear in any of your notes."
+
+    if tc.mention_count == 1:
+        note = list(tc.matched_notes.values())[0]
+        folder = note.get("folder", "")
+        loc = f" in folder '{folder}'" if folder else ""
+        return f"'{term}' appears 1 time in '{note['title']}'{loc}."
+
+    if count_type == "notes":
+        return f"{tc.note_count} notes mention '{term}'."
+
+    return (
+        f"'{term}' appears {tc.mention_count} time(s) "
+        f"across {tc.note_count} note(s)."
+    )
+
+
+def _format_comparative(
+    terms: list[str],
+    results: dict[str, TermCount],
+    count_type: str,
+) -> str:
+    ranked = sorted(terms, key=lambda t: results[t].mention_count, reverse=True)
+
+    lines = []
+    for t in ranked:
+        tc = results[t]
+        if tc.mention_count == 0:
+            lines.append(f"'{t}': not found in any notes.")
+        else:
+            lines.append(
+                f"'{t}': {tc.mention_count} mention(s) across {tc.note_count} note(s)."
             )
-            lines = [
-                f"  - \"{info['title']}\": {info['count']} mention(s)"
-                for _, info in breakdown
-            ]
-            fact += "\n" + "\n".join(lines)
 
-    return StrategyResult(fact=fact, source_ids=matched_note_ids, skip_context=True)
+    return "\n".join(lines)
 
 
 # ── temporal ──────────────────────────────────────────────────────────────
@@ -189,14 +214,15 @@ def _presence_check(plan: QueryPlan, chunks: list[LlamaDocument], query: str = "
     except re.error:
         pattern = re.compile(re.escape(term.strip()), re.IGNORECASE)
 
-    matched: list[tuple[str, str, str]] = []
+    matched: list[tuple[str, str, str, str]] = []
     for chunk in chunks:
         if pattern.search(chunk.text):
             note_id = chunk.metadata.get("note_id", "")
             note_title = chunk.metadata.get("note_title", "Untitled")
             folder = chunk.metadata.get("folder_title", "")
+            folder_id = chunk.metadata.get("folder_id", "")
             if note_id and not any(m[0] == note_id for m in matched):
-                matched.append((note_id, note_title, folder))
+                matched.append((note_id, note_title, folder, folder_id))
 
     if not matched:
         return StrategyResult(
@@ -204,13 +230,18 @@ def _presence_check(plan: QueryPlan, chunks: list[LlamaDocument], query: str = "
             skip_context=True,
         )
 
+    citations = [
+        {"note_id": nid, "title": title, "folder": folder, "folder_id": fid}
+        for nid, title, folder, fid in matched
+    ]
+
     if len(matched) == 1:
-        nid, title, folder = matched[0]
+        nid, title, folder, _ = matched[0]
         location = f" (in {folder})" if folder else ""
         fact = f'Yes — found in "{title}"{location}.'
     else:
         lines = []
-        for _, title, folder in matched:
+        for _, title, folder, _fid in matched:
             loc = f" (in {folder})" if folder else ""
             lines.append(f'- "{title}"{loc}')
         fact = f'Yes — found in {len(matched)} note(s):\n' + "\n".join(lines)
@@ -219,6 +250,7 @@ def _presence_check(plan: QueryPlan, chunks: list[LlamaDocument], query: str = "
         fact=fact,
         source_ids=[m[0] for m in matched],
         skip_context=True,
+        citations=citations,
     )
 
 

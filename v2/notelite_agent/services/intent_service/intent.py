@@ -264,7 +264,7 @@ Respond with ONLY valid JSON:
 
 
 class QueryPlanner:
-    """Two-tier intent classifier: trained classifier → LLM fallback."""
+    """Two-tier intent classifier: trained classifier -> LLM fallback."""
 
     def plan(self, query: str) -> QueryPlan:
         # Layer 1: trained classifier

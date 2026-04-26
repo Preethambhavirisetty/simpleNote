@@ -1,13 +1,13 @@
-"""Regex-based keyword extraction for keyword_count and presence_check queries.
+"""Keyword extraction and counting for keyword_count and presence_check queries.
 
-Extracts the target keyword/phrase from the raw query text without an LLM.
-Used as a fallback when the classifier detects the intent but doesn't fill
-``plan.search_term`` or ``plan.slots["topic"]``.
+``KeywordExtractor``  – regex-based term extraction from raw query text.
+``KeywordCounter``    – single-pass counting of one or more terms across chunks.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 
 class KeywordExtractor:
@@ -184,8 +184,9 @@ class KeywordExtractor:
         r"(?:compare|contrast)\s+(?:mentions?|occurrences?|references?)\s+of\s+"
         r"(.+?)\s+(?:and|with|vs\.?|versus|to)\s+(.+?)[\s?.!]*$",
 
-        # "X vs Y count" / "count X and Y"
+        # "X vs Y count" / "count X and Y" / "X vs Y count"
         r"(?:count|compare)\s+(.+?)\s+(?:and|vs\.?|versus)\s+(.+?)[\s?.!]*$",
+        r"^(.+?)\s+(?:vs\.?|versus)\s+(.+?)\s+count[\s?.!]*$",
 
         # "do I write more about X or Y?"
         r"do I\s+(?:write|mention|talk)\s+more about\s+(.+?)\s+or\s+(.+?)[\s?.!]*$",
@@ -207,7 +208,7 @@ class KeywordExtractor:
         "word", "phrase", "term", "topic",
         "something", "anything", "stuff", "things",
         "just", "also", "really", "very", "quite", "pretty",
-        "most", "least",
+        "most", "least", "more", "less",
     })
 
     # Trailing noise phrases stripped after extraction (order: longest first)
@@ -308,3 +309,117 @@ class KeywordExtractor:
             return None
 
         return cleaned
+
+
+@dataclass
+class TermCount:
+    """Aggregated count for a single search term."""
+    term: str
+    mention_count: int = 0
+    note_count: int = 0
+    matched_notes: dict[str, dict] = field(default_factory=dict)
+
+
+class KeywordCounter:
+    """Single-pass counting of search terms across document chunks."""
+
+    _COUNT_TYPE_NOTES = re.compile(
+        r"how many\s+(?:notes?|entries?|journal entries?)",
+        re.IGNORECASE,
+    )
+    _COUNT_TYPE_MENTIONS = re.compile(
+        r"how many\s+times?|count\s+(?:occurrences?|instances?|mentions?|uses?)"
+        r"|how (?:often|frequently|regularly)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def determine_count_type(cls, query: str) -> str:
+        """Return 'notes', 'mentions', or 'auto' based on query phrasing."""
+        if cls._COUNT_TYPE_NOTES.search(query):
+            return "notes"
+        if cls._COUNT_TYPE_MENTIONS.search(query):
+            return "mentions"
+        return "auto"
+
+    @classmethod
+    def count_multiple(cls, terms: list[str], chunks: list) -> dict[str, TermCount]:
+        """Count all terms per note, merging overlapping chunks to avoid double-counting."""
+        compiled: list[tuple[str, re.Pattern]] = []
+        results: dict[str, TermCount] = {}
+
+        for term in terms:
+            try:
+                pat = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
+            except re.error:
+                pat = re.compile(re.escape(term), re.IGNORECASE)
+            compiled.append((term, pat))
+            results[term] = TermCount(term=term)
+
+        note_groups: dict[str, dict] = {}
+        for chunk in chunks:
+            meta = chunk.metadata
+            nid = meta.get("note_id")
+            if not nid:
+                continue
+            if nid not in note_groups:
+                note_groups[nid] = {
+                    "texts": [],
+                    "title": meta.get("note_title", "Untitled"),
+                    "folder": meta.get("folder_title", ""),
+                    "folder_id": meta.get("folder_id", ""),
+                }
+            note_groups[nid]["texts"].append(chunk.text)
+
+        for nid, group in note_groups.items():
+            merged = cls._merge_note_texts(group["texts"])
+            for term, pat in compiled:
+                hits = len(pat.findall(merged))
+                if hits:
+                    tc = results[term]
+                    tc.mention_count += hits
+                    tc.matched_notes[nid] = {
+                        "count": hits,
+                        "title": group["title"],
+                        "folder": group["folder"],
+                        "folder_id": group["folder_id"],
+                    }
+
+        for tc in results.values():
+            tc.note_count = len(tc.matched_notes)
+
+        return results
+
+    @staticmethod
+    def _merge_note_texts(texts: list[str]) -> str:
+        """Merge chunk texts for a single note, removing overlapping regions.
+
+        Chunks from the chunking pipeline have an overlap window (typically
+        ~80 chars).  We detect suffix-prefix overlaps and stitch chunks
+        together so each character of the original note appears exactly once.
+        """
+        if len(texts) <= 1:
+            return texts[0] if texts else ""
+
+        remaining = list(texts)
+        merged = remaining.pop(0)
+
+        while remaining:
+            best_idx = -1
+            best_overlap = 0
+
+            for i, candidate in enumerate(remaining):
+                max_check = min(len(merged), len(candidate), 300)
+                for ol in range(max_check, 9, -1):
+                    if merged[-ol:] == candidate[:ol]:
+                        if ol > best_overlap:
+                            best_overlap = ol
+                            best_idx = i
+                        break
+
+            if best_idx >= 0:
+                merged += remaining.pop(best_idx)[best_overlap:]
+            else:
+                merged += "\n" + remaining.pop(0)
+
+        return merged

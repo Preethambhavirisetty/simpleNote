@@ -363,10 +363,18 @@ export default function NotesPage() {
   const deleteNote = useNoteStore((s) => s.deleteNote)
   const clearActiveNote = useNoteStore((s) => s.clearActiveNote)
 
+  const noteParam = searchParams.get('note')
+
   useEffect(() => {
     clearActiveNote()
     fetchNotes(folderId ? { folder_id: folderId } : {})
   }, [folderId, fetchNotes, clearActiveNote])
+
+  useEffect(() => {
+    if (noteParam && notes.length > 0 && !isLoading) {
+      openNote(noteParam)
+    }
+  }, [noteParam, notes.length, isLoading, openNote])
 
   const handleNew = useCallback(async () => {
     await createNote({ folder_id: folderId })
