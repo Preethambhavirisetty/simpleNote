@@ -1,7 +1,9 @@
-"""Shared FastAPI dependencies for route authentication."""
+"""Shared FastAPI dependencies (API key auth, Postgres)."""
 
+from collections.abc import Generator
 import secrets
 
+import psycopg
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 
@@ -17,3 +19,17 @@ def require_api_key(key: str | None = Security(_api_key_header)) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
         )
+
+
+def get_db() -> Generator[psycopg.Connection, None, None]:
+    """Yield the shared ``psycopg`` connection for the request.
+
+    The underlying socket is process-scoped (see :mod:`core.pg`); it is not
+    closed when the request ends.
+    """
+    from core.pg import connection as pg_connection
+
+    yield pg_connection()
+
+def get_qdrant():
+    pass

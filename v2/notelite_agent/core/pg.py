@@ -41,6 +41,11 @@ def _get_conn() -> psycopg.Connection:
     return _conn
 
 
+def connection() -> psycopg.Connection:
+    """Return the process-scoped Postgres connection (HTTP workers, Celery tasks)."""
+    return _get_conn()
+
+
 def fetch_note_version(note_id: str, user_id: str) -> Optional[int]:
     """Return the `version` of the note row for the given (note_id, user_id) pair.
 
@@ -63,3 +68,5 @@ def fetch_note_version(note_id: str, user_id: str) -> Optional[int]:
             note_id, user_id, exc,
         )
         return None
+
+

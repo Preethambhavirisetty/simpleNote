@@ -7,10 +7,10 @@ import structlog
 from typing import Annotated
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from apis.deps import get_db, get_qdrant
+from apis.deps import get_db
 from apis.schema import ChatCompletionModel, ChatRequest
 from core.config import CHAT_LLM_API_BASE
 from core.contracts import AccessContext
@@ -18,12 +18,9 @@ from core.feature_flags import is_enabled, require_feature
 from pipeline.llm import llm_call
 from pipeline.intent import QueryPlanner
 from pipeline.intent_handlers import HandlerResult, handle_intent
-from pipeline.rewrite import history, rewrite_query
+from pipeline.rewrite import rewrite_query
 from services import backend_client
 from workers.tasks import persist_message
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from qdrant_client import QdrantClient
 
 log = structlog.get_logger()
 
@@ -140,7 +137,6 @@ def _build_conversation_meta_messages(query: str, history: list[dict]) -> list[d
 def _build_final_llm_messages(
     result: HandlerResult,
     raw_query: str,
-    search_query: str,
     history: list[dict],
 ) -> list[dict]:
     """One place to select the final chat prompt after retrieval."""
@@ -149,7 +145,7 @@ def _build_final_llm_messages(
     if result.response_mode == "conversation_meta":
         return _build_conversation_meta_messages(raw_query, history)
     return _build_rag_prompt(
-        result.context, result.fact, result.skip_context, search_query, history,
+        result.context, result.fact, result.skip_context, raw_query, history,
     )
 
 
@@ -157,9 +153,17 @@ def _build_final_llm_messages(
 def chat_completions(request: ChatCompletionModel):
     return llm_call(request)
 
-# ----- /chat/stream -------------------
 
-def initiate_conversation(request):
+@router.post("/chat/stream")
+def chat_stream(
+    request: ChatRequest,
+    db: Annotated[psycopg.Connection, Depends(get_db)],
+):
+    """SSE streaming chat with write-ahead persistence."""
+    _ = db  # Postgres session for this worker; use for direct SQL alongside HTTP APIs
+    start_ms = time.monotonic()
+
+    # ── 1. Conversation bookkeeping ──────────────────────────────────────
     conv_id = request.conversation_id
     if not conv_id:
         conv = backend_client.create_conversation(
@@ -174,12 +178,13 @@ def initiate_conversation(request):
     assistant_msg = backend_client.create_message(
         request.user_id, conv_id, role="assistant", content="", status="partial",
     )
-    return user_msg, assistant_msg
 
-def get_chat_history(request, user_msg, assistant_msg):
+    # ── 1b. Fetch conversation history + rewrite query ──────────────────────────────────
     history_messages: list[dict] = []
-    conv_id = request.conversation_id
-    if conv_id:
+    rewrite_ms = 0
+    search_query = request.query
+
+    if request.conversation_id:
         exclude_ids = {user_msg["id"], assistant_msg["id"]}
         raw = backend_client.get_messages(request.user_id, conv_id)
         for m in raw:
@@ -189,199 +194,167 @@ def get_chat_history(request, user_msg, assistant_msg):
                 continue
             history_messages.append({"role": m["role"], "content": m["content"]})
         history_messages = history_messages[-MAX_HISTORY_MESSAGES:]
-    return history_messages
 
-def get_llm_config_meta(response_mode):
-    # return (max_tokens, llm_timeout, llm_temperature)
-    match response_mode:
-        case "clarify":
-            return (128, 30.0, 0.3)
-        case "conversation_meta":
-            return (256, 60, None)
-        case _:
-            return (1024, 300.0, None)
+        if history_messages and is_enabled("chat.query_rewrite"):
+            search_query, rewrite_ms = rewrite_query(request.query, history_messages)
 
-def get_llm_response(llm_request_payload):
+    # ── 2. Intent detection ──────────────────────────────────────────────
+    intent_start = time.monotonic()
+    planner = QueryPlanner()
+    intent_plan = planner.plan(request.query) # intent detected with a strategy
+    intent_ms = int((time.monotonic() - intent_start) * 1000)
+
+    # ── 3. Intent-specific retrieval ─────────────────────────────────────
+    access_context = AccessContext(
+        user_id=request.user_id,
+        role=request.role,
+        tenant_id=request.tenant_id,
+    )
+    result = handle_intent(
+        intent_plan, request.query, search_query,
+        access_context, history_messages, request.k, db
+    )
+
+    log.info(
+        "chat.intent",
+        conv_id=conv_id,
+        user_id=request.user_id,
+        query=request.query,
+        search_query=search_query,
+        strategy=intent_plan.strategy,
+        intent=intent_plan.intent,
+        search_term=intent_plan.search_term,
+        extracted_terms=result.extracted_terms or None,
+        source=intent_plan.source,
+        confidence=intent_plan.confidence,
+        intent_latency_ms=intent_ms,
+        retrieval_ms=result.retrieval_ms,
+        strategy_ms=result.strategy_ms,
+        rewrite_latency_ms=rewrite_ms,
+    )
+
+    # ── 4. Final LLM (all response modes: RAG, clarify, conversation meta) ─
+    error = None
+    citations = result.citations
+    source_ids = result.source_ids
+    retrieval_ms = result.retrieval_ms
+
+    chat_messages = _build_final_llm_messages(
+        result, request.query, search_query, history_messages,
+    )
+
+    if result.response_mode == "clarify":
+        max_tokens = 128
+        llm_timeout = 30.0
+        llm_temperature = 0.3
+    elif result.response_mode == "conversation_meta":
+        max_tokens = 256
+        llm_timeout = 60.0
+        llm_temperature = None
+    else:
+        max_tokens = 1024
+        llm_timeout = 300.0
+        llm_temperature = None
+
     answer = ""
     tokens_used = 0
     prompt_tokens = 0
     completion_tokens = 0
-
-    payload: dict = {
-        "model": "llama3.1",
-        "messages": llm_request_payload["chat_messages"],
-        "max_tokens": llm_request_payload["max_tokens"]
-    }
+    inference_start = time.monotonic()
 
     try:
-        if llm_request_payload["llm_temperature"] is not None:
-            payload["temperature"] = llm_request_payload["llm_temperature"]
-
-        body = llm_call(payload, timeout=llm_request_payload["llm_timeout"])
-        
-        answer = body["choices"][0]["message"]["content"].strip()
-
+        payload: dict = {
+            "model": "llama3.1",
+            "messages": chat_messages,
+            "max_tokens": max_tokens,
+        }
+        if llm_temperature is not None:
+            payload["temperature"] = llm_temperature
+        body = llm_call(payload, timeout=llm_timeout)
+        answer = body["choices"][0]["message"]["content"]
+        if result.response_mode == "clarify":
+            answer = answer.strip()
         usage = body.get("usage", {})
-        tokens_used = usage.get("total_tokens", 0)
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
-
+        tokens_used = usage.get("total_tokens", 0)
     except httpx.ConnectError:
         log.error("chat.inference_unreachable", target=CHAT_LLM_API_BASE)
         error = (
             f"Inference service unreachable at {CHAT_LLM_API_BASE}. "
             "Start the chat inference container (port 8082)."
         )
-        if llm_request_payload["strategy_result"].response_mode == "clarify":
+        if result.response_mode == "clarify":
             answer = _CLARIFY_FALLBACK
     except Exception:
         log.error("chat.inference_error", exc_info=True)
         error = "Inference service error"
-        if llm_request_payload["strategy_result"].response_mode == "clarify":
+        if result.response_mode == "clarify":
             answer = _CLARIFY_FALLBACK
-        elif llm_request_payload["strategy_result"].response_mode == "conversation_meta":
+        elif result.response_mode == "conversation_meta":
             answer = "Sorry, I couldn't process that. Could you try again?"
 
-    return {
-        "answer": answer,
-        "tokens_used": tokens_used,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_latency": "", # add time.monotonic
-        "error": error
-    }
-
-def event_stream(
-    user_id,
-    conversation_id,
-    message_id,
-    user_message_id,
-    status,
-    answer,
-    tokens_used,
-    total_latency_ms,
-    source_ids,
-    citations,
-    error_message
-):
-
-    yield _sse("meta", {
-        "conversation_id": conversation_id,
-        "message_id": message_id,
-        "user_message_id": user_message_id,
-    })
-
-    if error_message:
-        yield _sse("error", {"message": error_message})
-    else:
-        words = answer.split(" ")
-        for i, word in enumerate(words):
-            token = word if i == 0 else " " + word
-            yield _sse("delta", {"content": token})
-            time.sleep(0.02)
-
-    done_payload: dict = {
-        "latency_ms": total_latency_ms,
-        "sources": list(set(source_ids)),
-    }
-    if citations:
-        done_payload["citations"] = citations
-    yield _sse("done", done_payload)
+    inference_ms = int((time.monotonic() - inference_start) * 1000)
 
     log.info(
-        "chat.complete",
-        conv_id=conversation_id,
-        user_id=user_id,
-        latency_ms=total_latency_ms,
-        # retrieval_ms=retrieval_ms,
-        # inference_ms=inference_ms,
-        total_tokens=tokens_used,
-        has_error=error_message is not None,
-    )
-
-    persist_message.delay({
-        "user_id": user_id,
-        "conversation_id": conversation_id,
-        "message_id": message_id,
-        "content": answer,
-        "status": status,
-        "latency_ms": total_latency_ms,
-        "tokens_used": tokens_used,
-        "sources_used": citations if citations else list(set(source_ids)),
-        "error_message": error_message,
-    })
-
-
-@router.post("/chat/stream")
-def chat_stream(
-    request: ChatRequest,
-    db: AsyncSession = Depends(get_db),
-    qdrant: QdrantClient = Depends(get_qdrant)
-):
-    """SSE streaming chat with write-ahead persistence."""
-    query = request.query.strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty!")
-    
-    access_context = AccessContext(
+        "chat.inference",
+        conv_id=conv_id,
         user_id=request.user_id,
-        role=request.role,
-        tenant_id=request.tenant_id,
+        latency_ms=inference_ms,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=tokens_used,
+        error=error,
     )
 
-    # Conversation bookkeeping
-    user_msg, assistant_msg = initiate_conversation(request)
+    total_latency_ms = int((time.monotonic() - start_ms) * 1000)
 
-    # get history messages for the last 16 turns
-    history = get_chat_history(request, user_msg, assistant_msg)
+    # ── 5. Stream response as SSE ────────────────────────────────────────
+    def event_stream():
+        yield _sse("meta", {
+            "conversation_id": conv_id,
+            "message_id": assistant_msg["id"],
+            "user_message_id": user_msg["id"],
+        })
 
-    # get intent and confidence
-    planner = QueryPlanner()
-    intent_plan = planner.plan(query)
-    intent, confidence = intent_plan.intent, intent_plan.confidence
+        if error:
+            yield _sse("error", {"message": error})
+        else:
+            words = answer.split(" ")
+            for i, word in enumerate(words):
+                token = word if i == 0 else " " + word
+                yield _sse("delta", {"content": token})
+                time.sleep(0.02)
 
-    # execute intent specific strategy
-    strategy_result = handle_intent(
-        intent, query, access_context, history, db, qdrant
-    )
+        done_payload: dict = {
+            "latency_ms": total_latency_ms,
+            "sources": list(set(source_ids)),
+        }
+        if citations:
+            done_payload["citations"] = citations
+        yield _sse("done", done_payload)
 
-    # Prepare result for subsequent steps
-    chat_messages = _build_final_llm_messages(strategy_result, query, history)
+        log.info(
+            "chat.complete",
+            conv_id=conv_id,
+            user_id=request.user_id,
+            latency_ms=total_latency_ms,
+            retrieval_ms=retrieval_ms,
+            inference_ms=inference_ms,
+            total_tokens=tokens_used,
+            has_error=error is not None,
+        )
 
-    max_tokens, llm_timeout, llm_temperature = get_llm_config_meta(strategy_result.response_mode)
+        persist_message.delay({
+            "user_id": request.user_id,
+            "conversation_id": conv_id,
+            "message_id": assistant_msg["id"],
+            "content": answer,
+            "status": "error" if error else "complete",
+            "latency_ms": total_latency_ms,
+            "tokens_used": tokens_used,
+            "sources_used": citations if citations else list(set(source_ids)),
+            "error_message": error,
+        })
 
-    llm_request_payload = {
-        "strategy_result": strategy_result,
-        "chat_messages": chat_messages,
-        "max_tokens": max_tokens,
-        "llm_timeout": llm_timeout,
-        "llm_temperature": llm_temperature,
-    }
-
-    llm_response = get_llm_response(llm_request_payload)
-
-    stream_payload = {
-        "user_id": request.user_id,
-        "conversation_id": request.conversation_id,
-        "message_id": assistant_msg["id"],
-        "user_message_id": user_msg["id"],
-        "answer": llm_response["answer"],
-        "status": "error" if llm_response["error"] else "complete",
-        "tokens_used": llm_response["tokens_used"],
-        "total_latency_ms": llm_response["total_latency_ms"],
-        "sources_ids": strategy_result.source_ids,
-        "citations": strategy_result.citations,
-        "error_message": llm_response["error"],
-    }
-
-    return StreamingResponse(event_stream(stream_payload), media_type="text/event-stream")
-
-
-
-
-
-
-
-
-
-
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
