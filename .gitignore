@@ -6,3 +6,5 @@ _others
 docs/
 decisions/
 .DS_STORE
+# notelite_inference - decoupled
+notelite_inference_bck/
