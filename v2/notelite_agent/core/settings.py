@@ -19,6 +19,34 @@ from core.config import (
 _SETTINGS_INITIALIZED = False
 
 
+def _materialize_host_ca_bundle_for_openssl() -> None:
+    """Copy host-mounted CA file into /tmp before HF/httpx runs.
+
+    Podman bind-mounts of macOS cert bundles can make ssl.load_verify_locations
+    raise PermissionError; reading the same path in Python and rewriting to /tmp
+    avoids that.
+    """
+    src = (os.environ.get("SSL_CERT_FILE") or "").strip()
+    if not src or not os.path.isfile(src):
+        return
+    dest = "/tmp/notelite-host-ca-bundle.pem"
+    if os.path.abspath(src) == os.path.abspath(dest):
+        return
+    try:
+        with open(src, "rb") as f:
+            data = f.read()
+        if not data.strip():
+            return
+        with open(dest, "wb") as f:
+            f.write(data)
+        os.chmod(dest, 0o644)
+    except OSError:
+        return
+    os.environ["SSL_CERT_FILE"] = dest
+    os.environ["REQUESTS_CA_BUNDLE"] = dest
+    os.environ["CURL_CA_BUNDLE"] = dest
+
+
 def _configure_runtime_logging():
     """Silence verbose HF/transformers progress and warning logs."""
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -52,6 +80,7 @@ def init_llama_index_settings():
     if _SETTINGS_INITIALIZED:
         return
 
+    _materialize_host_ca_bundle_for_openssl()
     _configure_runtime_logging()
 
     Settings.llm = OpenAILike(

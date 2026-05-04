@@ -53,6 +53,65 @@ BACKEND_API_URL = _require_env("BACKEND_API_URL")
 CHAT_LLM_API_BASE = os.getenv("CHAT_LLM_API_BASE", LLM_API_BASE)
 INTENT_LLM_MAX_TOKENS = int(os.getenv("INTENT_LLM_MAX_TOKENS", "128"))
 
+# RunPod — OpenAI-compatible chat (8001 = Mistral, 8002 = Llama on each host).
+RUNPOD_MISTRAL_PRIMARY = os.getenv(
+    "RUNPOD_MISTRAL_PRIMARY",
+    "https://den4sz9720zm6g-8001.proxy.runpod.net",
+)
+RUNPOD_MISTRAL_SECONDARY = os.getenv(
+    "RUNPOD_MISTRAL_SECONDARY",
+    "https://bhsp25ijied2uu-8001.proxy.runpod.net",
+)
+RUNPOD_LLAMA_PRIMARY = os.getenv(
+    "RUNPOD_LLAMA_PRIMARY",
+    "https://den4sz9720zm6g-8002.proxy.runpod.net",
+)
+RUNPOD_LLAMA_SECONDARY = os.getenv(
+    "RUNPOD_LLAMA_SECONDARY",
+    "https://bhsp25ijied2uu-8002.proxy.runpod.net",
+)
+# Path on the host (vLLM / OpenAI servers often use ``/v1/chat/completions``).
+CHAT_COMPLETIONS_PATH = os.getenv("CHAT_COMPLETIONS_PATH", "/v1/chat/completions")
+CHAT_STREAM_MODEL_LLAMA = os.getenv("CHAT_STREAM_MODEL_LLAMA", "llama3.1")
+CHAT_STREAM_MODEL_MISTRAL = os.getenv("CHAT_STREAM_MODEL_MISTRAL", "mistral")
+
+# ``runpod``: sync ``llm_call`` → Mistral RunPod (primary→secondary); stream chat → Llama RunPod only.
+# ``legacy``: ``llm_call`` uses ``CHAT_LLM_API_BASE`` only (local dev). Streaming still uses RunPod Llama.
+LLM_ENDPOINT_MODE = os.getenv("LLM_ENDPOINT_MODE", "runpod").strip().lower()
+
+
+def get_sync_llm_bases() -> list[str]:
+    """Non-streaming ``llm_call`` targets — Mistral ports (8001), primary then fallback."""
+    return [RUNPOD_MISTRAL_PRIMARY, RUNPOD_MISTRAL_SECONDARY]
+
+
+def get_stream_chat_bases() -> list[str]:
+    """Streaming chat only — Llama ports (8002), primary then fallback."""
+    return [RUNPOD_LLAMA_PRIMARY, RUNPOD_LLAMA_SECONDARY]
+
+
+def get_chat_completions_path() -> str:
+    return CHAT_COMPLETIONS_PATH
+
+
+def inference_completion_url(base: str) -> str:
+    """Full chat-completions URL for a RunPod/OpenAI host root (no trailing path)."""
+    b = base.rstrip("/")
+    path = CHAT_COMPLETIONS_PATH.strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"{b}{path}"
+
+
+def get_sync_llm_model_name() -> str:
+    """Default model id for Mistral (non-stream) when callers omit ``model`` in payload."""
+    return CHAT_STREAM_MODEL_MISTRAL
+
+
+def get_llama_stream_model_name() -> str:
+    """Model id for streaming chat on Llama RunPod."""
+    return CHAT_STREAM_MODEL_LLAMA
+
 # Used only for version guard checks — read-only, one query per upsert task.
 # Accepts the same URL format as the backend (postgresql+psycopg://... is normalised automatically).
 POSTGRES_DB_URL = _require_env("POSTGRES_DB_URL")
