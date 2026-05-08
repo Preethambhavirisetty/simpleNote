@@ -71,20 +71,23 @@ services:
   # ── Backend (FastAPI) ────────────────────────────────────────────────────────
 
   backend:
+    env_file:
+      - ./backend/.env
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: notelite-backend
     restart: unless-stopped
     environment:
-      SECRET_KEY:             ${SECRET_KEY}
-      AGENT_API_KEY:          ${AGENT_API_KEY}
+      # SECRET_KEY:             ${SECRET_KEY}
+      # AGENT_API_KEY:          ${AGENT_API_KEY}
+      # INGESTION_TASK_STRING:  tasks.process_ingestion
+      # INGESTION_QUEUE:        ingestion
+      # NOTE_SIZE_QUEUE:        note_size
+      # HF_TOKEN:               ${HF_TOKEN}
       POSTGRES_DB_URL:        *pg-url
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
-      INGESTION_TASK_STRING:  tasks.process_ingestion
-      INGESTION_QUEUE:        ingestion
-      NOTE_SIZE_QUEUE:        note_size
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://host.containers.internal:3100
     volumes:
@@ -96,6 +99,8 @@ services:
 
   # Backend Celery worker — note_size queue
   backend-celery:
+    env_file:
+      - ./backend/.env
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -105,19 +110,21 @@ services:
               "--loglevel=info", "-Q", "note_size", "-c", "2", "-n", "backend-celery@%h",
               "--include", "app.tasks.notes"]
     environment:
-      SECRET_KEY:             ${SECRET_KEY}
+      # SECRET_KEY:             ${SECRET_KEY}
+      # INGESTION_TASK_STRING:  tasks.process_ingestion
+      # INGESTION_QUEUE:        ingestion
+      # NOTE_SIZE_QUEUE:        note_size
       POSTGRES_DB_URL:        *pg-url
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
-      INGESTION_TASK_STRING:  tasks.process_ingestion
-      INGESTION_QUEUE:        ingestion
-      NOTE_SIZE_QUEUE:        note_size
     networks:
       - notelite-net
 
   # ── Agent (FastAPI RAG service) ──────────────────────────────────────────────
 
   agent:
+    env_file:
+      - ./notelite_agent/.env
     build:
       context: ./notelite_agent
       dockerfile: Dockerfile
@@ -126,10 +133,13 @@ services:
     environment:
       LLAMA_INDEX_CACHE_DIR:  /tmp/llama_index
       HF_HOME:                /tmp/hf_cache
-      AGENT_API_KEY:          ${AGENT_API_KEY}
-      SECRET_KEY:             ${SECRET_KEY}
+      # AGENT_API_KEY:          ${AGENT_API_KEY}
+      # SECRET_KEY:             ${SECRET_KEY}
+      # LLM_API_KEY:            ${AGENT_API_KEY}
+      # INGESTION_TASK_STRING:  tasks.process_ingestion
+      # INGESTION_QUEUE:        ingestion
+      # HF_TOKEN:               ${HF_TOKEN}
       LLM_API_BASE:           http://host.containers.internal:8081/v1
-      LLM_API_KEY:            ${AGENT_API_KEY}
       LLM_MODEL:              gpt-3.5-turbo
       LLM_CONTEXT_WINDOW:     "4096"
       CHAT_LLM_API_BASE:      http://host.containers.internal:8082/v1
@@ -147,8 +157,6 @@ services:
       SUPPORTED_EXTENSIONS:   ".md,.txt"
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
-      INGESTION_TASK_STRING:  tasks.process_ingestion
-      INGESTION_QUEUE:        ingestion
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://host.containers.internal:3100
@@ -161,6 +169,8 @@ services:
 
   # Agent Celery worker — ingestion + conversation queues
   agent-celery:
+    env_file:
+      - ./notelite_agent/.env
     build:
       context: ./notelite_agent
       dockerfile: Dockerfile
@@ -169,12 +179,15 @@ services:
     command: ["python", "-m", "celery", "-A", "workers.app", "worker",
               "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h"]
     environment:
+      # AGENT_API_KEY:          ${AGENT_API_KEY}
+      # SECRET_KEY:             ${SECRET_KEY}
+      # LLM_API_KEY:            ${AGENT_API_KEY}
+      # INGESTION_TASK_STRING:  tasks.process_ingestion
+      # INGESTION_QUEUE:        ingestion
+      # HF_TOKEN:               ${HF_TOKEN}
       LLAMA_INDEX_CACHE_DIR:  /tmp/llama_index
       HF_HOME:                /tmp/hf_cache
-      AGENT_API_KEY:          ${AGENT_API_KEY}
-      SECRET_KEY:             ${SECRET_KEY}
       LLM_API_BASE:           http://host.containers.internal:8081/v1
-      LLM_API_KEY:            ${AGENT_API_KEY}
       LLM_MODEL:              gpt-3.5-turbo
       LLM_CONTEXT_WINDOW:     "4096"
       CHAT_LLM_API_BASE:      http://host.containers.internal:8082/v1
@@ -192,8 +205,6 @@ services:
       SUPPORTED_EXTENSIONS:   ".md,.txt"
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
-      INGESTION_TASK_STRING:  tasks.process_ingestion
-      INGESTION_QUEUE:        ingestion
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://host.containers.internal:3100

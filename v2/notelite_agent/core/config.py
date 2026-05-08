@@ -3,9 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-def _require_env(key: str) -> str:
-    value = os.getenv(key)
-    if not value:
+def _require_env(name: str, default:str=None) -> str:
+    value = os.getenv(name, default)
+    if value is None:
         raise RuntimeError(f"Missing required environment variable: {key}")
     return value
 
@@ -115,4 +115,3 @@ def get_llama_stream_model_name() -> str:
 # Used only for version guard checks — read-only, one query per upsert task.
 # Accepts the same URL format as the backend (postgresql+psycopg://... is normalised automatically).
 POSTGRES_DB_URL = _require_env("POSTGRES_DB_URL")
-
