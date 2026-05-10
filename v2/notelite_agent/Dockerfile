@@ -20,17 +20,15 @@ WORKDIR /app
 
 COPY --from=builder /deps /usr/local
 
-COPY . .
-
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HF_HOME="/app/.cache/huggingface" \
+    FASTEMBED_CACHE_PATH="/app/.cache/huggingface" \
+    SENTENCE_TRANSFORMERS_HOME="/app/.cache/sentence-transformers" \
     LLAMA_INDEX_CACHE_DIR="/app/.cache/llama_index" \
     TRANSFORMERS_CACHE="/app/.cache/huggingface"
 
-# Pre-download the intent classifier's sentence-transformer model so
-# the container doesn't need HuggingFace access at runtime.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-mpnet-base-v2')"
+COPY . .
 
 EXPOSE 8000
 

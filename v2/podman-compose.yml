@@ -27,14 +27,32 @@ networks:
 volumes:
   postgres-data:
   qdrant-data:
+  agent-model-cache:
 
 services:
+
+  # ── Frontend (React + nginx) ────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: notelite-frontend
+    restart: unless-stopped
+    volumes:
+      - ./certs/notelite.org/fullchain.pem:/etc/nginx/certs/fullchain.pem:ro
+      - ./certs/notelite.org/privkey.pem:/etc/nginx/certs/privkey.pem:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - notelite-net
 
   # ── Infrastructure ───────────────────────────────────────────────────────────
 
   redis:
-    image: redis:7-alpine
-    container_name: myredis
+    image: docker.io/library/redis:7-alpine
+    container_name: notelite-redis
     restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
     ports:
@@ -43,8 +61,8 @@ services:
       - notelite-net
 
   postgres:
-    image: postgres:16
-    container_name: mypostgres
+    image: docker.io/library/postgres:16
+    container_name: notelite-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -58,8 +76,8 @@ services:
       - notelite-net
 
   qdrant:
-    image: qdrant/qdrant:latest
-    container_name: nl-qdrant
+    image: docker.io/qdrant/qdrant:latest
+    container_name: notelite-qdrant
     restart: unless-stopped
     volumes:
       - qdrant-data:/qdrant/storage
@@ -131,8 +149,10 @@ services:
     container_name: notelite-agent
     restart: unless-stopped
     environment:
-      LLAMA_INDEX_CACHE_DIR:  /tmp/llama_index
-      HF_HOME:                /tmp/hf_cache
+      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
+      HF_HOME:                /app/.cache/huggingface
+      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       # AGENT_API_KEY:          ${AGENT_API_KEY}
       # SECRET_KEY:             ${SECRET_KEY}
       # LLM_API_KEY:            ${AGENT_API_KEY}
@@ -161,6 +181,7 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://host.containers.internal:3100
     volumes:
+      - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
       - "3002:8000"
@@ -185,8 +206,10 @@ services:
       # INGESTION_TASK_STRING:  tasks.process_ingestion
       # INGESTION_QUEUE:        ingestion
       # HF_TOKEN:               ${HF_TOKEN}
-      LLAMA_INDEX_CACHE_DIR:  /tmp/llama_index
-      HF_HOME:                /tmp/hf_cache
+      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
+      HF_HOME:                /app/.cache/huggingface
+      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       LLM_API_BASE:           http://host.containers.internal:8081/v1
       LLM_MODEL:              gpt-3.5-turbo
       LLM_CONTEXT_WINDOW:     "4096"
@@ -209,6 +232,7 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://host.containers.internal:3100
     volumes:
+      - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
     networks:
       - notelite-net

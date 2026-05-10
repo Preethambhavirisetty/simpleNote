@@ -2,6 +2,7 @@ celery==5.6.2
 psycopg[binary]
 fastapi==0.135.1
 fastembed==0.8.0
+--extra-index-url https://download.pytorch.org/whl/cpu
 llama-index-core
 llama-index-embeddings-huggingface==0.6.1
 llama-index-llms-openai>=0.7.3
@@ -19,5 +20,5 @@ redis==7.3.0
 scikit-learn>=1.6
 sentence-transformers==5.2.3
 structlog
-torch==2.10.0
+torch==2.10.0+cpu
 uvicorn==0.41.0

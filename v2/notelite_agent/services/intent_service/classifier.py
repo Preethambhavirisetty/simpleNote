@@ -18,6 +18,7 @@ Usage — inference (imported by QueryPlanner):
 from __future__ import annotations
 
 import json
+import os
 import pickle
 import time
 from collections import Counter
@@ -29,8 +30,6 @@ from sentence_transformers import SentenceTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
-
-from services.intent_service.intent import INTENT_COLLECTION, VALID_INTENTS
 
 log = structlog.get_logger()
 
@@ -58,6 +57,9 @@ BASE_MODEL = "all-mpnet-base-v2"
 
 CONFIDENCE_THRESHOLD = 0.45
 
+VALID_INTENTS = frozenset(LABEL2ID.keys())
+INTENT_COLLECTION = f"{os.getenv('QDRANT_COLLECTION', 'knowledge')}_intents"
+
 # ── Data collection ──────────────────────────────────────────────────────
 
 
@@ -76,37 +78,45 @@ def _load_seed_examples() -> list[dict]:
 
 def _load_qdrant_exemplars() -> list[dict]:
     """Pull all exemplars from the Qdrant intents collection."""
-    from core.config import QDRANT_URL
-    from qdrant_client import QdrantClient
-
-    client = QdrantClient(url=QDRANT_URL)
-    if not client.collection_exists(INTENT_COLLECTION):
-        log.warning("classifier.no_qdrant_collection", collection=INTENT_COLLECTION)
-        client.close()
+    qdrant_url = os.getenv("QDRANT_URL")
+    if not qdrant_url:
+        log.info("classifier.qdrant_skipped", reason="missing_qdrant_url")
         return []
 
-    rows = []
-    offset = None
-    while True:
-        result, offset = client.scroll(
-            collection_name=INTENT_COLLECTION,
-            limit=256,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for point in result:
-            intent = point.payload.get("intent", "")
-            text = point.payload.get("text", "")
-            source = point.payload.get("source", "qdrant")
-            if intent in VALID_INTENTS and text.strip():
-                rows.append({"text": text, "label": intent, "source": source})
-        if offset is None:
-            break
+    try:
+        from qdrant_client import QdrantClient
 
-    client.close()
-    log.info("classifier.qdrant_loaded", count=len(rows))
-    return rows
+        client = QdrantClient(url=qdrant_url)
+        if not client.collection_exists(INTENT_COLLECTION):
+            log.warning("classifier.no_qdrant_collection", collection=INTENT_COLLECTION)
+            client.close()
+            return []
+
+        rows = []
+        offset = None
+        while True:
+            result, offset = client.scroll(
+                collection_name=INTENT_COLLECTION,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in result:
+                intent = point.payload.get("intent", "")
+                text = point.payload.get("text", "")
+                source = point.payload.get("source", "qdrant")
+                if intent in VALID_INTENTS and text.strip():
+                    rows.append({"text": text, "label": intent, "source": source})
+            if offset is None:
+                break
+
+        client.close()
+        log.info("classifier.qdrant_loaded", count=len(rows))
+        return rows
+    except Exception:
+        log.warning("classifier.qdrant_unavailable", exc_info=True)
+        return []
 
 
 def _load_low_confidence_corrections() -> list[dict]:
