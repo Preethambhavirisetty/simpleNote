@@ -19,8 +19,8 @@ response structure:
 """
 
 
-from pipeline.llm import llm_call
-from core.config import LLM_API_BASE
+from v2.notelite_agent._backup.pipeline.llm import llm_call
+from v2.notelite_agent._backup.core.config import LLM_API_BASE
 
 
 skills = []

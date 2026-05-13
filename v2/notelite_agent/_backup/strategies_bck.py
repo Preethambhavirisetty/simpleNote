@@ -12,8 +12,8 @@ from datetime import datetime, timedelta, timezone
 
 from llama_index.core import Document as LlamaDocument
 
-from handlers.strategies.keyword_count import KeywordCounter, KeywordExtractor, TermCount
-from pipeline.intent import QueryPlan
+from v2.notelite_agent._backup.handlers.strategies.keyword_count import KeywordCounter, KeywordExtractor, TermCount
+from v2.notelite_agent._backup.pipeline.intent import QueryPlan
 
 
 @dataclass

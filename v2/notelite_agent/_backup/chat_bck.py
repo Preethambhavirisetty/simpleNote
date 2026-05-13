@@ -10,17 +10,17 @@ import psycopg
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from apis.deps import get_db
-from apis.schema import ChatCompletionModel, ChatRequest
-from core.config import CHAT_LLM_API_BASE
-from core.contracts import AccessContext
-from core.feature_flags import is_enabled, require_feature
-from pipeline.llm import llm_call
-from pipeline.intent import QueryPlanner
-from pipeline.intent_handlers import HandlerResult, handle_intent
+from v2.notelite_agent._backup.apis.deps import get_db
+from v2.notelite_agent._backup.apis.schema import ChatCompletionModel, ChatRequest
+from v2.notelite_agent._backup.core.config import CHAT_LLM_API_BASE
+from v2.notelite_agent._backup.core.contracts import AccessContext
+from v2.notelite_agent._backup.core.feature_flags import is_enabled, require_feature
+from v2.notelite_agent._backup.pipeline.llm import llm_call
+from v2.notelite_agent._backup.pipeline.intent import QueryPlanner
+from v2.notelite_agent._backup.pipeline.intent_handlers import HandlerResult, handle_intent
 from pipeline.rewrite import rewrite_query
-from services import backend_client
-from workers.tasks import persist_message
+from v2.notelite_agent._backup.services import backend_client
+from v2.notelite_agent._backup.workers.tasks import persist_message
 
 log = structlog.get_logger()
 

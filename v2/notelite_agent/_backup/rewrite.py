@@ -85,7 +85,7 @@ Sample response:
 from __future__ import annotations
 import time
 import structlog
-from pipeline.llm import llm_call
+from v2.notelite_agent._backup.pipeline.llm import llm_call
 
 
 log = structlog.get_logger()

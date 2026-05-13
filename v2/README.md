@@ -193,6 +193,16 @@ user query -> CHAT UI -> Agent ->
                                       |
                                       2.2 ---> Locate Note Intent -> 
 
+user query -> CHAT UI -> Agent ->
+                                       |
+                                       2.2 ---> Locate Note Intent -> ?
+
+### Install HF models
+pip install -U "huggingface_hub[cli]"
+huggingface-cli login
+huggingface-cli download <REPO_ID_1> --local-dir ./model_1
+huggingface-cli download <REPO_ID_2> --local-dir ./model_2
+
 ### Run postgres with podman:
 podman run -d \
   --name notelite-postgres \
@@ -1336,3 +1346,482 @@ Current Attempt: Success. extracts actual business and technical concepts while 
 
 
 {"text":"th","metadata":{"doc_id":"6946c8a4-c0ec-4462-a3dd-d3ed2b0f2b72-306d7544-f16d-4d1e-952f-fdf46ca4cdd6-78f61915-ce78-433d-a4c3-369749a6f15e","user_id":"6946c8a4-c0ec-4462-a3dd-d3ed2b0f2b72","tenant_id":"6946c8a4-c0ec-4462-a3dd-d3ed2b0f2b72","folder_id":"306d7544-f16d-4d1e-952f-fdf46ca4cdd6","note_id":"78f61915-ce78-433d-a4c3-369749a6f15e","folder_title":"Chapters","note_title":"Chapter 1: the super robot assistant","description":"","tags":"","chunk_id":1,"summary":"The text is missing. Please provide the text for summarization."}}
+
+### Existing File Structure:
+
+- apis
+  - routes
+    - chat
+      - /chat/completions
+      - /chat/stream
+    - ingest
+      - /status/{task_id}
+      - /ingest
+    - intent
+      - /intent/exemplars
+    - retrieve
+      - /get-context -> move to chat
+      - /chat -> move to chat + rename the endpoint
+  - deps
+    - require_api_key
+    - get_db
+    - get_qdrant -> needs implementation
+  - schema
+    - IngestionRequest
+    - RetrieveRequest
+    - ChatRequest
+    - ChatMessage
+    - ChatCompletionModel
+- core
+  - config
+    - _require_env
+    - other over-complicated methods for llm bases -> simplify to use only one llm base
+  - contracts
+    - AccessContext -> is it needed here? any other ways to manage context?
+      - USE middleware folder with auth and request_context
+  - feature_flags
+    - load_flags
+    - is_enabled
+    - toggle_flag
+    - require_feature
+  - pg
+    - _get_conn
+    - connection -> rename it to pg specific
+    - fetch_note_version
+    - ??? add get_db from deps to this folder ???
+  - schema
+    - IngestionTaskPayload ??? move it to apis or move them to this core folder ???
+  - settings
+    - _materialize_host_ca_bundle_for_openssl
+    - _configure_runtime_logging
+    - init_llama_index_settings
+    - is_llama_index_settings_initialized
+  
+
+- handlers
+  - strategies
+    - tests
+      - test_keyword_count
+    - keyword_count
+      - KeywordExtractor
+      - TermCount
+      - KeywordCounter
+  - base
+    - DBHandler -> is it required?
+  - qdrant
+    - QdrantHandler -> is it required like this?
+- pipeline
+  - builder
+    - _shared_metadata
+    - get_document_objects
+  - chunking
+    - _split_by_headings
+    - _inject_numbered_line_breaks
+    - _semantic_split
+    - _window_split
+    - _split_large_text
+    - validate_chunk
+    - _is_heading_like
+    - _is_list_chunk
+    - _has_parent_context
+    - _is_table_like
+    - _is_table_rowish_chunk
+    - _is_address_like_chunk
+    - _merge_table_and_address_chunks
+    - _normalize_chunk_text
+    - _postprocess_chunks
+    - _handle_small_paragraph
+    - _flush_pending_chunk
+    - _process_heading_parts
+    - split_into_sections
+  - enrichment
+    - _is_useless_summary
+    - summarize_chunk
+    - merge_for_summarization
+    - recursive_summarize
+    - deduplicate_keywords_llm
+    - generate_questions
+  - intent_handlers
+    - handle_intent
+  - intent
+    - __all__ -> exposes all methods -> refactor it later, push it to the backlog for now
+  - keywords
+    - _get_spacy_nlp
+    - _get_yake_extractor
+    - _build_pos_sets
+    - _has_noun
+    - _refine_with_pos
+    - _clean_term
+    - _stem
+    - _split_tokens
+    - _is_subphrase
+    - extract_entities
+    - prune_keywords
+    - _extract_hybrid
+    - _extract_yake_fallback
+    - extract_keywords
+  - llm
+    - llm_call
+  - strategies -> Out of scope
+    - handle_list_notes_intent
+    - handle_temporal_intent
+    - handle_presence_check_intent
+    - handle_keyword_count_intent
+    - handle_corpus_stats_intent
+    - handle_semantic_intent
+    - handle_locate_note_intent
+    - handle_compare_notes_intent
+    - handle_conversation_meta_intent
+    - handle_clarify_intent
+- services
+  - intent_service/ -> Out of scope
+  - backend_client
+    - _headers
+    - _url
+    - get_messages
+    - create_conversation
+    - create_message
+    - update_message
+  - inference_stream
+    - stream_chat_completions
+    - _stream_single_base
+    - _parse_sse_data_line
+    - _events_from_chunk
+  - ingestion
+    - _run_ingestion
+    - _run_delete
+    - _normalize_payload
+    - _is_stale
+    - run_ingestion_task
+  - retrieval
+    - _tokenize_phrases
+    - _jaccard
+    - _entity_recall
+    - _soft_score
+    - _get_reranker
+    - VectorStore
+      - embedder
+      - _load_handler
+      - _resolve_scope_filter
+      - _is_backend_reachable
+      - _ensure_connected
+      - connect
+      - get_all_document_for_user 
+      - retrieve_documents
+      - upsert
+      - delete_documents
+      - document_count
+      - scroll_all_chunks
+- workers
+  - app
+    - _on_celery_setup_logging
+    - _on_worker_process_init
+    - conf.update
+    - autodiscover_tasks
+  - tasks
+    - ingest_in_background
+    - persist_message
+  
+
+
+
+
+### Improved file structure for MVP
+what do i need?
+- user creates folders and notes
+- user writes notes
+- user asks question on their notes
+
+backend:
+  - user creates folders and notes: pgsql DB already inplace --- DONE
+  - user writes notes: tiptap editor is already setup + stored as json and text --- DONE
+notelite-agent
+  - user asks questions on their notes
+    - ingestion request comes from backend every debounced write to a redis queue
+      - takes request from the queue
+      - processes ingestion task
+        - checks if the text version matches the version on DB, if not, its outdated so disregard it
+        - chunks
+        - extract keywords from each chunk
+        - get summaries for each chunk ? is this required? may be increase each chunk size, for less iterations
+          - if each chunk size < defined chunk size: disregard it
+        - store chunks and summary in 2 different collections on qdrant
+          - if summary length < chunk size; disregard it
+    - chat
+      - preprocess chat request
+        - intent classification -> make it light-weight with few intents
+          - clarify
+          - metadata
+            - list_notes
+            - temporal
+          - aggregation
+            - keyword_count
+            - temporal
+        - execute intent handler function
+        - get conversation: last 16 turns
+        - build prompt: handler's response + instructions + conversation
+      - non-stream
+        - get final prompt from preprocess chat request
+        - LLM call(non stream)
+      - stream
+        - get final prompt from preprocess chat request
+        - LLM call(stream)
+
+
+
+
+- core
+  - config.py
+  - settings.py
+  - dependencies.py
+- db
+  - qdrant.py
+  - postgresql.py
+  - redis.py -> _Out of scope_
+- services/
+  - ingestion/
+    - orchestrator.py
+    - constants.py
+    - routes.py
+      - /ingest
+      - /ingest/{job_id}
+    - schemas.py
+      - IngestDocumentRequest
+      - IngestionResponse
+      - IngestionStatusResponse
+      - VectorSearchResult
+    - pipeline/
+      - document_pipeline.py
+      - reindex_pipeline.py -> imp, but _Out of scope_
+    - processors/
+      - chunk_processor.py
+      - keyword_processor.py
+      - summary_processor.py
+      - embedding_processor.py
+    - storage/
+      - vector_store.py
+      - pg_store.py
+    - workers
+      - celery_app.py
+      - ingestion_tasks.py
+    - validators
+      - request_version_validator
+  - chat/
+    - constants.py
+    - streaming.py
+    - routes.py
+      - /chat/stream
+    - schemas.py
+      - ChatRequest
+      - ChatResponse
+      - StreamChunk
+      - RetrievedChunk
+      - LLMMessage
+      - LLMCompletionRequest
+    - pipelines/
+      - rag_pipeline.py
+      - retrieval_pipeline.py
+      - conversation_pipeline.py
+    - processors/
+      - reranker.py
+      - prompt_builder.py
+      - context_builder.py
+      - citation_builder.py
+    - -- --- ---- -------
+    - memory/ -> _Out of scope_
+      - redis_memory.py
+      - session_store.py
+    - providers/ -> _Out of scope_
+      - llm_provider.py
+      - llama_provider.py
+    - -- --- ---- -------
+  - shared/
+    - utils.py
+      - generate_job_id
+      - utc_now
+      - estimate_tokens
+      - normalize_text
+      - sha256_text
+      - sse_event
+      - llm_output_validator
+    - schemas
+      - HealthResponse
+      - ErrorResponse
+
+
+
+
+
+
+
+
+- apis
+  - routes
+    - chat
+      - /chat/completions
+      - /chat/stream
+    - ingest
+      - /status/{task_id}
+      - /ingest
+    - intent
+      - /intent/exemplars
+    - retrieve
+      - /get-context -> move to chat
+      - /chat -> move to chat + rename the endpoint
+  - deps
+    - require_api_key
+    - get_db
+    - get_qdrant -> needs implementation
+  - schema
+    - IngestionRequest
+    - RetrieveRequest
+    - ChatRequest
+    - ChatMessage
+    - ChatCompletionModel
+- core
+  - config
+    - _require_env
+    - other over-complicated methods for llm bases -> simplify to use only one llm base
+  - contracts
+    - AccessContext -> is it needed here? any other ways to manage context?
+      - USE middleware folder with auth and request_context
+  - feature_flags
+    - load_flags
+    - is_enabled
+    - toggle_flag
+    - require_feature
+  - pg
+    - _get_conn
+    - connection -> rename it to pg specific
+    - fetch_note_version
+    - ??? add get_db from deps to this folder ???
+  - schema
+    - IngestionTaskPayload ??? move it to apis or move them to this core folder ???
+  - settings
+    - _materialize_host_ca_bundle_for_openssl
+    - _configure_runtime_logging
+    - init_llama_index_settings
+    - is_llama_index_settings_initialized
+- handlers
+  - strategies
+    - tests
+      - test_keyword_count
+    - keyword_count
+      - KeywordExtractor
+      - TermCount
+      - KeywordCounter
+  - base
+    - DBHandler -> is it required?
+  - qdrant
+    - QdrantHandler -> is it required like this?
+- pipeline
+  - builder
+    - _shared_metadata
+    - get_document_objects
+  - chunking
+    - _split_by_headings
+    - _inject_numbered_line_breaks
+    - _semantic_split
+    - _window_split
+    - _split_large_text
+    - validate_chunk
+    - _is_heading_like
+    - _is_list_chunk
+    - _has_parent_context
+    - _is_table_like
+    - _is_table_rowish_chunk
+    - _is_address_like_chunk
+    - _merge_table_and_address_chunks
+    - _normalize_chunk_text
+    - _postprocess_chunks
+    - _handle_small_paragraph
+    - _flush_pending_chunk
+    - _process_heading_parts
+    - split_into_sections
+  - enrichment
+    - _is_useless_summary
+    - summarize_chunk
+    - merge_for_summarization
+    - recursive_summarize
+    - deduplicate_keywords_llm
+    - generate_questions
+  - intent_handlers
+    - handle_intent
+  - intent
+    - __all__ -> exposes all methods -> refactor it later, push it to the backlog for now
+  - keywords
+    - _get_spacy_nlp
+    - _get_yake_extractor
+    - _build_pos_sets
+    - _has_noun
+    - _refine_with_pos
+    - _clean_term
+    - _stem
+    - _split_tokens
+    - _is_subphrase
+    - extract_entities
+    - prune_keywords
+    - _extract_hybrid
+    - _extract_yake_fallback
+    - extract_keywords
+  - llm
+    - llm_call
+  - strategies -> Out of scope
+    - handle_list_notes_intent
+    - handle_temporal_intent
+    - handle_presence_check_intent
+    - handle_keyword_count_intent
+    - handle_corpus_stats_intent
+    - handle_semantic_intent
+    - handle_locate_note_intent
+    - handle_compare_notes_intent
+    - handle_conversation_meta_intent
+    - handle_clarify_intent
+- services
+  - intent_service/ -> Out of scope
+  - backend_client
+    - _headers
+    - _url
+    - get_messages
+    - create_conversation
+    - create_message
+    - update_message
+  - inference_stream
+    - stream_chat_completions
+    - _stream_single_base
+    - _parse_sse_data_line
+    - _events_from_chunk
+  - ingestion
+    - _run_ingestion
+    - _run_delete
+    - _normalize_payload
+    - _is_stale
+    - run_ingestion_task
+  - retrieval
+    - _tokenize_phrases
+    - _jaccard
+    - _entity_recall
+    - _soft_score
+    - _get_reranker
+    - VectorStore
+      - embedder
+      - _load_handler
+      - _resolve_scope_filter
+      - _is_backend_reachable
+      - _ensure_connected
+      - connect
+      - get_all_document_for_user 
+      - retrieve_documents
+      - upsert
+      - delete_documents
+      - document_count
+      - scroll_all_chunks
+- workers
+  - app
+    - _on_celery_setup_logging
+    - _on_worker_process_init
+    - conf.update
+    - autodiscover_tasks
+  - tasks
+    - ingest_in_background
+    - persist_message

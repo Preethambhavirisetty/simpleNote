@@ -19,11 +19,11 @@ from dataclasses import dataclass, field
 
 import structlog
 
-from core.contracts import AccessContext
-from pipeline.intent import QueryPlan
-from pipeline.llm import llm_call
-from pipeline.strategies import execute as execute_strategy
-from services.retrieval import VectorStore
+from v2.notelite_agent._backup.core.contracts import AccessContext
+from v2.notelite_agent._backup.pipeline.intent import QueryPlan
+from v2.notelite_agent._backup.pipeline.llm import llm_call
+from v2.notelite_agent._backup.pipeline.strategies import execute as execute_strategy
+from v2.notelite_agent._backup.services.retrieval import VectorStore
 
 log = structlog.get_logger()
 

@@ -6,9 +6,9 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from fastapi import FastAPI, Request
 
-from apis.routes import router as api_router
-from core.settings import init_llama_index_settings
-from logger import setup_logging
+from v2.notelite_agent._backup.apis.routes import router as api_router
+from v2.notelite_agent._backup.core.settings import init_llama_index_settings
+from v2.notelite_agent._backup.logger import setup_logging
 
 setup_logging()
 log = structlog.get_logger()
