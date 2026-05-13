@@ -18,6 +18,8 @@ from services.retrieval import VectorStore
 log = structlog.get_logger()
 
 
+# --- Ingestion Helpers ------------------------------
+
 def _run_ingestion(data: dict) -> None:
     init_llama_index_settings()
     log.info("ingestion.start", user_id=data["user_id"], note_id=data["note_id"], action="upsert")
@@ -98,6 +100,7 @@ def _is_stale(note_id: str, user_id: str, payload_version) -> bool:
     return False
 
 # --- Main Ingestion Task ------------------------------
+
 def run_ingestion_task(data: dict | None = None, **kwargs) -> dict:
     """Entry point for the Celery ingestion task."""
     payload = _normalize_payload(data, **kwargs)

@@ -1,4 +1,4 @@
-f"""
+"""
 Fundamental Ideas:
 no RAG + no LLM
 no RAG + LLM: keyword count

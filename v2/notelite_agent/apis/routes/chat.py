@@ -17,7 +17,6 @@ from core.settings import init_llama_index_settings
 from pipeline.llm import llm_call
 from pipeline.intent import QueryPlanner
 from pipeline.intent_handlers import HandlerResult, handle_intent
-from pipeline.rewrite import rewrite_query
 from services import backend_client
 from services.inference_stream import stream_chat_completions
 from workers.tasks import persist_message
@@ -202,7 +201,9 @@ def _load_history(
 
 @router.post("/chat/completions")
 def chat_completions(request: ChatCompletionModel):
-    return llm_call(request)
+    # return llm_call(request)
+    print(request)
+    return {"message": "data"}
 
 
 @router.post("/chat/stream")
@@ -219,9 +220,6 @@ def chat_stream(request: ChatRequest):
     history_messages = _load_history(request.user_id, conv_id, user_msg, assistant_msg)
 
     search_query = request.query
-    rewrite_ms = 0
-    if request.conversation_id and history_messages and is_enabled("chat.query_rewrite"):
-        search_query, rewrite_ms = rewrite_query(request.query, history_messages)
 
     intent_start = time.monotonic()
     planner = QueryPlanner()
@@ -249,7 +247,6 @@ def chat_stream(request: ChatRequest):
         confidence=plan.confidence,
         intent_latency_ms=intent_ms,
         retrieval_ms=retrieval_ms,
-        rewrite_latency_ms=rewrite_ms,
     )
 
     chat_messages = _build_final_llm_messages(
@@ -357,3 +354,24 @@ def chat_stream(request: ChatRequest):
         })
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# curl --location 'http://localhost:3002/api/chat/completions' \
+# --header 'x-api-key: 029cdc955484f1e96171fc5aa723e1979a5f3f4209627b49db976eb6578874a0' \
+# --header 'Content-Type: application/json' \
+# --data '{
+#     "model": "mistral-7b",
+#     "messages": [
+#       {
+#         "role": "system",
+#         "content": "You are a story telling assistant."
+#       },
+#       {
+#         "role": "user",
+#         "content": "who are you?"
+#       }
+#     ],
+#     "temperature": 0.2,
+#     "max_tokens": 256,
+#     "stream": false
+#   }'
