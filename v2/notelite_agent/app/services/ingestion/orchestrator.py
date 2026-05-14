@@ -1,13 +1,14 @@
 from typing import Optional
 
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
+from app.services.ingestion.processors.keywords import KeywordProcessor
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
-from app.services.ingestion.validators.request_version_validator import is_stale_ingestion
 
 
 class IngestionOrchestrator:
     def __init__(self, vector_store: Optional[QdrantVectorStore] = None):
         self.chunk_processor = ChunkProcessor()
+        self.keyword_processor = KeywordProcessor()
         self._vector_store = vector_store
 
     def run(self, data: Optional[dict] = None, **kwargs) -> dict:
@@ -17,22 +18,27 @@ class IngestionOrchestrator:
         if action == "delete":
             return self.delete_action(payload)
 
-        if is_stale_ingestion(payload):
-            
-
         text = payload.get("text") or ""
-        if text:
-            chunks = self.chunk_processor.process(text)
+        chunks = self.chunk_processor.process(text)
+        keyword_result = self.keyword_processor.process(chunks)
 
         return {
             "action": action,
-            "status": "chunked",
+            "status": "keywords_extracted",
             "note_id": payload.get("note_id"),
             "chunk_count": len(chunks),
             "chunks": [
-                {"chunk_id": chunk.chunk_id, "content": chunk.content}
-                for chunk in chunks
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "content": chunk.content,
+                    "keywords": keyword_result.chunk_results[index].keywords,
+                    "entities": keyword_result.chunk_results[index].entities,
+                }
+                for index, chunk in enumerate(chunks)
             ],
+            "top_keywords": keyword_result.top_keywords,
+            "entities": keyword_result.entities,
+            "flattened_keywords": keyword_result.flattened_keywords,
         }
 
     def delete_action(self, payload: dict) -> dict:
