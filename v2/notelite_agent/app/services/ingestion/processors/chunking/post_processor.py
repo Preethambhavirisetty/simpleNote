@@ -20,6 +20,9 @@ from app.services.ingestion.processors.chunking.validators import (
 from app.services.ingestion.processors.chunking.window_chunker import WindowChunker
 
 
+MIN_CHUNK_SIZE = 100
+
+
 class ChunkPostProcessor:
     """Final cleanup and merge heuristics for chunk quality."""
 
@@ -36,8 +39,9 @@ class ChunkPostProcessor:
         merged_chunks = self._merge_orphan_headings(cleaned_chunks)
         linked_chunks = self._link_list_chunks(merged_chunks)
         bounded_chunks = self._enforce_size(linked_chunks)
+        sized_chunks = self._merge_short_chunks(bounded_chunks)
 
-        return self._merge_table_and_address_chunks(bounded_chunks)
+        return self._merge_table_and_address_chunks(sized_chunks)
 
     def _normalize(self, chunk: str) -> str:
         clean = DIVIDER_LINE_PATTERN.sub("", chunk)
@@ -96,6 +100,19 @@ class ChunkPostProcessor:
             else:
                 final_chunks.extend(self._window_chunker.split(chunk))
         return final_chunks
+
+    @staticmethod
+    def _merge_short_chunks(chunks: list[str]) -> list[str]:
+        merged = []
+        for chunk in chunks:
+            if len(chunk) < MIN_CHUNK_SIZE and merged:
+                candidate = f"{merged[-1]}\n{chunk}".strip()
+                if len(candidate) <= MAX_CHUNK_SIZE:
+                    merged[-1] = candidate
+                    continue
+            merged.append(chunk)
+
+        return merged
 
     @staticmethod
     def _merge_table_and_address_chunks(chunks: list[str]) -> list[str]:
