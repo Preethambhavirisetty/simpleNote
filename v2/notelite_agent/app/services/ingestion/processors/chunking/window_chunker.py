@@ -30,9 +30,30 @@ class WindowChunker:
             if end >= len(clean):
                 break
 
-            next_start = end - overlap
+            next_start = self._align_start_to_word_boundary(clean, end - overlap)
             if next_start <= start:
-                next_start = start + step
+                next_start = self._align_start_to_word_boundary(clean, start + step)
             start = next_start
 
         return parts
+
+    @staticmethod
+    def _align_start_to_word_boundary(text: str, start: int) -> int:
+        """Move a window start out of the middle of a word."""
+        start = max(0, min(start, len(text)))
+        if start == 0 or start >= len(text):
+            return start
+
+        if text[start].isspace():
+            while start < len(text) and text[start].isspace():
+                start += 1
+            return start
+
+        if text[start - 1].isspace():
+            return start
+
+        next_space = text.find(" ", start)
+        if next_space == -1:
+            return start
+
+        return next_space + 1
