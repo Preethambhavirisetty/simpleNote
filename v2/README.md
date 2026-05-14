@@ -1591,7 +1591,7 @@ notelite-agent
       - IngestionStatusResponse
       - VectorSearchResult
     - pipeline/
-      - document_pipeline.py
+      - document_pipeline.py -> _Out of scope_
       - reindex_pipeline.py -> imp, but _Out of scope_
     - processors/
       - chunk_processor.py

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import time
 import uuid
@@ -144,6 +146,9 @@ class QdrantVectorStore:
         selector = models.FilterSelector(filter=point_filter)
 
         for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION):
+            if not self._collection_exists(collection_name):
+                log.info("Skipping Qdrant delete; collection does not exist: %s", collection_name)
+                continue
             self.client.delete(
                 collection_name=collection_name,
                 points_selector=selector,
