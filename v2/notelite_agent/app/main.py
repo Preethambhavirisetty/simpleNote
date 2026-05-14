@@ -6,23 +6,24 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from fastapi import FastAPI, Request
 
-from v2.notelite_agent._backup.apis.routes import router as api_router
-from v2.notelite_agent._backup.core.settings import init_llama_index_settings
-from v2.notelite_agent._backup.logger import setup_logging
+from app.services.ingestion.routes import router as ingestion_router
+from app.services.chat.routes import router as chat_router
+from app.core.settings import is_llama_index_settings_initialized, init_llama_index_settings
 
-setup_logging()
+
 log = structlog.get_logger()
 
 app = FastAPI(
-    title="RAG Service",
-    version="0.1.0",
-    description="Ingestion and retrieval API for the RAG pipeline.",
+    title="Notelite AI Service",
+    version="0.1.0"
 )
 
 
 @app.on_event("startup")
 def on_startup():
-    init_llama_index_settings()
+    if not is_llama_index_settings_initialized():
+        print("Llama settings haven't been initialized, initializing now!")
+        init_llama_index_settings()
 
 
 @app.middleware("http")
@@ -68,4 +69,5 @@ def health():
     return {"status": "ok"}
 
 
-app.include_router(api_router)
+app.include_router(ingestion_router)
+app.include_router(chat_router)
