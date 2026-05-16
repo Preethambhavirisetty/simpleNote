@@ -24,7 +24,6 @@ MIN_CHUNK_SIZE = 100
 
 
 class ChunkPostProcessor:
-    """Final cleanup and merge heuristics for chunk quality."""
 
     def __init__(self, window_chunker: WindowChunker | None = None):
         self._window_chunker = window_chunker or WindowChunker()
@@ -40,8 +39,8 @@ class ChunkPostProcessor:
         linked_chunks = self._link_list_chunks(merged_chunks)
         bounded_chunks = self._enforce_size(linked_chunks)
         sized_chunks = self._merge_short_chunks(bounded_chunks)
-
-        return self._merge_table_and_address_chunks(sized_chunks)
+        processed_chunks = self._merge_table_and_address_chunks(sized_chunks)
+        return processed_chunks
 
     def _normalize(self, chunk: str) -> str:
         clean = DIVIDER_LINE_PATTERN.sub("", chunk)

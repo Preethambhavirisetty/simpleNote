@@ -65,9 +65,9 @@ def clean_term(term: str) -> str | None:
         return None
 
     words = term.split()
-    while len(words) > 1 and words[0] in LEAD_STRIP:
+    while len(words) > 1 and words[0].lower() in LEAD_STRIP:
         words.pop(0)
-    while len(words) > 1 and words[-1] in TRAIL_STRIP:
+    while len(words) > 1 and words[-1].lower() in TRAIL_STRIP:
         words.pop()
 
     if len(words) > 4:
@@ -76,13 +76,15 @@ def clean_term(term: str) -> str | None:
     term = " ".join(words)
     if not term or len(term) < 3:
         return None
-    if len(words) == 1 and (term in NOISE_NOUNS or term in LEAD_STRIP):
+    lowered = term.lower()
+    if len(words) == 1 and (lowered in NOISE_NOUNS or lowered in LEAD_STRIP):
         return None
 
     return term
 
 
 def stem(word: str) -> str:
+    word = word.lower()
     if word.endswith("ies") and len(word) > 4:
         return word[:-3] + "y"
     if len(word) > 4:

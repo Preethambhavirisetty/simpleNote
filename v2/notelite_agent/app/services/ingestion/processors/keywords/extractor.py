@@ -104,9 +104,10 @@ def build_pos_sets(doc) -> tuple[set[str], set[str]]:
 
 def has_noun(term: str, noun_set: set[str]) -> bool:
     for word in term.split():
-        if word in noun_set:
+        lowered = word.lower()
+        if lowered in noun_set:
             return True
-        if "-" in word and any(part in noun_set for part in word.split("-") if part):
+        if "-" in lowered and any(part in noun_set for part in lowered.split("-") if part):
             return True
     return False
 
@@ -116,9 +117,9 @@ def refine_with_pos(term: str, noun_set: set[str], verb_set: set[str]) -> str | 
     if len(words) <= 1:
         return term
 
-    while len(words) > 1 and words[-1] not in noun_set:
+    while len(words) > 1 and words[-1].lower() not in noun_set:
         words.pop()
-    while len(words) > 1 and words[0] not in noun_set:
+    while len(words) > 1 and words[0].lower() not in noun_set:
         words.pop(0)
 
     if len(words) >= 3:
@@ -127,14 +128,14 @@ def refine_with_pos(term: str, noun_set: set[str], verb_set: set[str]) -> str | 
             for index, word in enumerate(words)
             if index == 0
             or index == len(words) - 1
-            or word not in verb_set
-            or word in noun_set
+            or word.lower() not in verb_set
+            or word.lower() in noun_set
         ]
 
     term = " ".join(words)
     if not term or len(term) < 3:
         return None
-    if len(words) == 1 and term in NOISE_NOUNS:
+    if len(words) == 1 and term.lower() in NOISE_NOUNS:
         return None
     return term
 
