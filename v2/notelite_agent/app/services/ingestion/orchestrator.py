@@ -1,7 +1,9 @@
+import time
 from typing import Optional
 
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
 from app.services.ingestion.processors.keywords import KeywordProcessor
+from app.services.ingestion.processors.summary_processor import chunk_summarizer
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 
 
@@ -18,27 +20,40 @@ class IngestionOrchestrator:
         if action == "delete":
             return self.delete_action(payload)
 
+        events = ["ingestion started"]
+        start = time.perf_counter()
         text = payload.get("text") or ""
         chunks = self.chunk_processor.process(text)
-        keyword_result = self.keyword_processor.process(chunks)
+        chunking_end = time.perf_counter()
+        events.append(f"chunking completed: {len(chunks)} chunks")
+
+        chunks_with_kw_ent, top_kw, top_ent = self.keyword_processor.process(chunks)
+        keywords_end = time.perf_counter()
+        events.extend(self.keyword_processor.events)
+
+        summary_result = chunk_summarizer(chunks)
+        summary_end = time.perf_counter()
+        events.extend(summary_result.events)
+        events.append("ingestion completed")
 
         return {
             "action": action,
-            "status": "keywords_extracted",
+            "status": "processed",
             "note_id": payload.get("note_id"),
             "chunk_count": len(chunks),
-            "chunks": [
-                {
-                    "chunk_id": chunk.chunk_id,
-                    "content": chunk.content,
-                    "keywords": keyword_result.chunk_results[index].keywords,
-                    "entities": keyword_result.chunk_results[index].entities,
-                }
-                for index, chunk in enumerate(chunks)
-            ],
-            "top_keywords": keyword_result.top_keywords,
-            "entities": keyword_result.entities,
-            "flattened_keywords": keyword_result.flattened_keywords,
+            "summary": summary_result.summary,
+            "api_calls": {
+                "keyword_dedup": self.keyword_processor.api_calls,
+                "summary": summary_result.api_calls,
+                "total": self.keyword_processor.api_calls + summary_result.api_calls,
+            },
+            "events": events,
+            "stages_ms": {
+                "chunking": round((chunking_end - start) * 1000, 2),
+                "keyword_extraction": round((keywords_end - chunking_end) * 1000, 2),
+                "summary": round((summary_end - keywords_end) * 1000, 2),
+                "total": round((summary_end - start) * 1000, 2),
+            },
         }
 
     def delete_action(self, payload: dict) -> dict:
