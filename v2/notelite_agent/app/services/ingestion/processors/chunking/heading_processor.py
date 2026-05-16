@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.core.config import MAX_CHUNK_SIZE
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
+from app.services.ingestion.processors.chunking.token_budget import within_chunk_budget
 from app.services.ingestion.processors.chunking.validators import validate_chunk
 
 
@@ -22,14 +22,14 @@ class HeadingProcessor:
         for part in heading_parts:
             candidate = f"{pending_chunk}\n{part}".strip() if pending_chunk else part
 
-            if len(candidate) <= MAX_CHUNK_SIZE:
+            if within_chunk_budget(candidate):
                 pending_chunk = self._handle_candidate(candidate, chunks)
                 continue
 
             if pending_chunk and validate_chunk(pending_chunk) == "VALID":
                 chunks.append(pending_chunk)
 
-            if len(part) <= MAX_CHUNK_SIZE:
+            if within_chunk_budget(part):
                 pending_chunk = self._handle_candidate(part, chunks)
             else:
                 chunks.extend(self.semantic_chunker.split(part))

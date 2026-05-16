@@ -28,6 +28,7 @@ AGENT_API_KEY = require_env("AGENT_API_KEY")
 
 # Knowledge ingestion
 SUPPORTED_EXTENSIONS = set(require_env("SUPPORTED_EXTENSIONS").split(","))
+# Backward-compatible env name: this value is interpreted as tokens, not characters.
 MAX_CHUNK_SIZE = int(require_env("MAX_CHUNK_SIZE"))
 CHUNK_OVERLAP = int(require_env("CHUNK_OVERLAP"))
 BREAKPOINT_PERCENTILE = int(require_env("BREAKPOINT_PERCENTILE"))

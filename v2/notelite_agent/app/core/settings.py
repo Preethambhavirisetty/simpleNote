@@ -78,7 +78,7 @@ def init_llama_index_settings():
         model=LLM_MODEL,
         context_window=LLM_CONTEXT_WINDOW,
         is_chat_model=True,
-        temperature=0.4,
+        temperature=0.1,
         max_tokens=512,
         is_function_calling_model=False,
         timeout=300.0,

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import re
 
-from app.core.config import MAX_CHUNK_SIZE
 from app.services.ingestion.processors.chunking.patterns import (
     DIVIDER_LINE_PATTERN,
     EMPTY_LIST_ITEM_PATTERN,
     SENTINEL_LINE_PATTERN,
+)
+from app.services.ingestion.processors.chunking.token_budget import (
+    token_count,
+    within_chunk_budget,
 )
 from app.services.ingestion.processors.chunking.validators import (
     has_parent_context,
@@ -20,7 +23,7 @@ from app.services.ingestion.processors.chunking.validators import (
 from app.services.ingestion.processors.chunking.window_chunker import WindowChunker
 
 
-MIN_CHUNK_SIZE = 100
+MIN_CHUNK_TOKENS = 25
 
 
 class ChunkPostProcessor:
@@ -68,7 +71,7 @@ class ChunkPostProcessor:
                     or validate_chunk(current) == "NEEDS_MERGE"
                 )
                 candidate = f"{current}\n{nxt}".strip()
-                if should_merge and len(candidate) <= MAX_CHUNK_SIZE:
+                if should_merge and within_chunk_budget(candidate):
                     merged.append(candidate)
                     index += 2
                     continue
@@ -84,7 +87,7 @@ class ChunkPostProcessor:
         for chunk in chunks:
             if linked and is_list_chunk(chunk) and has_parent_context(linked[-1]):
                 candidate = f"{linked[-1]}\n{chunk}".strip()
-                if len(candidate) <= MAX_CHUNK_SIZE:
+                if within_chunk_budget(candidate):
                     linked[-1] = candidate
                     continue
             linked.append(chunk)
@@ -94,7 +97,7 @@ class ChunkPostProcessor:
     def _enforce_size(self, chunks: list[str]) -> list[str]:
         final_chunks = []
         for chunk in chunks:
-            if len(chunk) <= MAX_CHUNK_SIZE:
+            if within_chunk_budget(chunk):
                 final_chunks.append(chunk)
             else:
                 final_chunks.extend(self._window_chunker.split(chunk))
@@ -104,9 +107,9 @@ class ChunkPostProcessor:
     def _merge_short_chunks(chunks: list[str]) -> list[str]:
         merged = []
         for chunk in chunks:
-            if len(chunk) < MIN_CHUNK_SIZE and merged:
+            if token_count(chunk) < MIN_CHUNK_TOKENS and merged:
                 candidate = f"{merged[-1]}\n{chunk}".strip()
-                if len(candidate) <= MAX_CHUNK_SIZE:
+                if within_chunk_budget(candidate):
                     merged[-1] = candidate
                     continue
             merged.append(chunk)
@@ -128,7 +131,7 @@ class ChunkPostProcessor:
                     or ("contact" in prev.lower() and is_address_like_chunk(chunk))
                 )
                 candidate = f"{prev}\n{chunk}".strip()
-                if (table_merge or address_merge) and len(candidate) <= MAX_CHUNK_SIZE:
+                if (table_merge or address_merge) and within_chunk_budget(candidate):
                     merged[-1] = candidate
                     continue
             merged.append(chunk)

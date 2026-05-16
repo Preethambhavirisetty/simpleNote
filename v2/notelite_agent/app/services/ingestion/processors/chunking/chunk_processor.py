@@ -3,11 +3,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.core.config import MAX_CHUNK_SIZE
 from app.services.ingestion.processors.chunking.heading_chunker import HeadingChunker
 from app.services.ingestion.processors.chunking.heading_processor import HeadingProcessor
 from app.services.ingestion.processors.chunking.post_processor import ChunkPostProcessor
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
+from app.services.ingestion.processors.chunking.token_budget import (
+    token_count,
+    within_chunk_budget,
+)
 from app.services.ingestion.processors.chunking.validators import validate_chunk
 
 
@@ -42,7 +45,7 @@ class ChunkProcessor:
             current = f"{pending_paragraph}\n{paragraph}".strip() if pending_paragraph else paragraph
             pending_paragraph = ""
 
-            if len(current) <= MAX_CHUNK_SIZE:
+            if within_chunk_budget(current):
                 pending_paragraph = self._handle_small_paragraph(current, chunks)
                 continue
 
@@ -61,10 +64,10 @@ class ChunkProcessor:
 
         final_chunks = self.post_processor.process(chunks)
         log.info(
-            "Generated %d chunks (original=%d chars, chunked=%d chars)",
+            "Generated %d chunks (original=%d tokens, chunked=%d tokens)",
             len(final_chunks),
-            len(prepared_text),
-            sum(len(chunk) for chunk in final_chunks),
+            token_count(prepared_text),
+            sum(token_count(chunk) for chunk in final_chunks),
         )
         return final_chunks
 

@@ -6,7 +6,8 @@ from llama_index.core import Document as LlamaDocument
 from llama_index.core import Settings
 from llama_index.core.node_parser import SemanticSplitterNodeParser
 
-from app.core.config import BREAKPOINT_PERCENTILE, MAX_CHUNK_SIZE
+from app.core.config import BREAKPOINT_PERCENTILE
+from app.services.ingestion.processors.chunking.token_budget import within_chunk_budget
 from app.services.ingestion.processors.chunking.window_chunker import WindowChunker
 
 
@@ -24,7 +25,7 @@ class SemanticChunker:
         clean = text.strip()
         if not clean:
             return []
-        if len(clean) <= MAX_CHUNK_SIZE:
+        if within_chunk_budget(clean):
             return [clean]
 
         semantic_parts = self._semantic_split(clean)

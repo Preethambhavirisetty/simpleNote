@@ -51,8 +51,12 @@ class KeywordProcessor:
         self.max_global_candidates = max_global_candidates
         self.max_top_keywords = max_top_keywords
         self.use_llm_dedup = use_llm_dedup
+        self.api_calls = 0
+        self.events: list[str] = []
 
-    def process(self, chunks: Sequence[TextChunk | str]) -> KeywordProcessingResult:
+    def process(self, chunks: Sequence[TextChunk | str]) -> tuple[list[ChunkKeywordResult], list[str], list[str]]:
+        self.api_calls = 0
+        self.events = [f"keywords started: {len(chunks)} chunks"]
         chunk_results = []
 
         for index, chunk in enumerate(chunks):
@@ -72,9 +76,11 @@ class KeywordProcessor:
         flattened_keywords = [keyword for keywords in chunk_keywords for keyword in keywords]
         cleaned_keywords = self.split_conjunctions(flattened_keywords)
         top_keywords = self.deduplicate_keywords(cleaned_keywords)
-        entities=self._dedupe_entities(chunk_entities)
+        entities = self._dedupe_entities(chunk_entities)
 
-        # [LATER] log stats json here
+        self.events.append(
+            f"keywords completed: {len(top_keywords)} top keywords, {len(entities)} entities"
+        )
         return chunk_results, top_keywords, entities
 
     def _rank_keyword_candidates(self, keywords: list[str]) -> list[str]:
@@ -153,6 +159,7 @@ class KeywordProcessor:
     def deduplicate_keywords(self, keywords: list[str]) -> list[str]:
         local_keywords = self._rank_keyword_candidates(keywords)
         if not self.use_llm_dedup:
+            self.events.append("keyword dedup completed: local")
             return local_keywords[: self.max_top_keywords]
         return self.deduplicate_keywords_llm(local_keywords)
 
@@ -163,6 +170,8 @@ class KeywordProcessor:
         allowed_keywords = {keyword.lower(): keyword for keyword in keywords}
         keyword_text = ", ".join(keywords)
         try:
+            self.events.append("keyword dedup api call")
+            self.api_calls += 1
             messages = [
                 {
                     "role": "system",
@@ -172,9 +181,11 @@ class KeywordProcessor:
             ]
             result = llm_call_general(messages)
             parsed_keywords = self._parse_llm_keyword_lines(result, allowed_keywords)
+            self.events.append("keyword dedup completed: llm")
             return self._fill_keywords(parsed_keywords, keywords)
         except Exception:
             log.warning("Keyword LLM dedup failed; using local dedup.", exc_info=True)
+            self.events.append("keyword dedup failed: using local fallback")
 
         return keywords[: self.max_top_keywords]
 
