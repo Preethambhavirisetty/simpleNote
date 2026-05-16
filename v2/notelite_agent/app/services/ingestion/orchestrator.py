@@ -3,7 +3,8 @@ from typing import Optional
 
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
 from app.services.ingestion.processors.keywords import KeywordProcessor
-from app.services.ingestion.processors.summary_processor import chunk_summarizer
+from app.services.ingestion.processors.summary.questions_generator import QuestionsGenerator
+from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 
 
@@ -11,6 +12,8 @@ class IngestionOrchestrator:
     def __init__(self, vector_store: Optional[QdrantVectorStore] = None):
         self.chunk_processor = ChunkProcessor()
         self.keyword_processor = KeywordProcessor()
+        self.summary_processor = SummaryProcessor()
+        self.questions_generator = QuestionsGenerator()
         self._vector_store = vector_store
 
     def run(self, data: Optional[dict] = None, **kwargs) -> dict:
@@ -23,17 +26,27 @@ class IngestionOrchestrator:
         events = ["ingestion started"]
         start = time.perf_counter()
         text = payload.get("text") or ""
+
+        # Step 1: Process chunks
         chunks = self.chunk_processor.process(text)
         chunking_end = time.perf_counter()
         events.append(f"chunking completed: {len(chunks)} chunks")
 
+        # Step 2: Extract keywords, entities from chunks
         chunks_with_kw_ent, top_kw, top_ent = self.keyword_processor.process(chunks)
         keywords_end = time.perf_counter()
         events.extend(self.keyword_processor.events)
 
-        summary_result = chunk_summarizer(chunks)
+        # Step 3: Get summary for all the chunks
+        summary_result = self.summary_processor.process(chunks)
         summary_end = time.perf_counter()
         events.extend(summary_result.events)
+
+        # Step 4: Generate 5 questions based on the final chunk summary
+        questions = self.questions_generator.process(summary_result.summary)
+        generate_questions_end = time.perf_counter()
+        events.extend(self.questions_generator.events)
+
         events.append("ingestion completed")
 
         return {
@@ -41,18 +54,27 @@ class IngestionOrchestrator:
             "status": "processed",
             "note_id": payload.get("note_id"),
             "chunk_count": len(chunks),
+            "top_keywords": top_kw,
+            "entities": top_ent,
             "summary": summary_result.summary,
+            "questions": questions,
             "api_calls": {
                 "keyword_dedup": self.keyword_processor.api_calls,
                 "summary": summary_result.api_calls,
-                "total": self.keyword_processor.api_calls + summary_result.api_calls,
+                "questions": self.questions_generator.api_calls,
+                "total": (
+                    self.keyword_processor.api_calls
+                    + summary_result.api_calls
+                    + self.questions_generator.api_calls
+                ),
             },
             "events": events,
             "stages_ms": {
                 "chunking": round((chunking_end - start) * 1000, 2),
                 "keyword_extraction": round((keywords_end - chunking_end) * 1000, 2),
                 "summary": round((summary_end - keywords_end) * 1000, 2),
-                "total": round((summary_end - start) * 1000, 2),
+                "questions": round((generate_questions_end - summary_end) * 1000, 2),
+                "total": round((generate_questions_end - start) * 1000, 2),
             },
         }
 
