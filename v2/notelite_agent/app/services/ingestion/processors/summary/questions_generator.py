@@ -28,6 +28,10 @@ GENERATE_QUESTIONS_SYSTEM_PROMPT = (
     "  - Start your response directly with the first question"
 )
 
+BINARY_QUESTION_PATTERNS = re.compile(
+    r"^(is|are|was|were|did|do|does|has|have|can|could|would|should)\s",
+    re.IGNORECASE
+)
 
 class QuestionsGenerator:
 
@@ -85,6 +89,8 @@ class QuestionsGenerator:
             # ensure ends with question mark
             if not clean.endswith("?"):
                 clean = clean.rstrip(".") + "?"
+            if BINARY_QUESTION_PATTERNS.match(clean):
+                continue
             questions.append(clean)
 
         return questions[:QUESTION_COUNT]

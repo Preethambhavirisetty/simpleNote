@@ -5,6 +5,7 @@ from app.services.ingestion.processors.chunking.chunk_processor import ChunkProc
 from app.services.ingestion.processors.keywords import KeywordProcessor
 from app.services.ingestion.processors.summary.questions_generator import QuestionsGenerator
 from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
+from app.services.ingestion.processors.ingest.document_builder import DocumentBuilder
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 
 
@@ -14,6 +15,7 @@ class IngestionOrchestrator:
         self.keyword_processor = KeywordProcessor()
         self.summary_processor = SummaryProcessor()
         self.questions_generator = QuestionsGenerator()
+        self.document_builder = DocumentBuilder()
         self._vector_store = vector_store
 
     def run(self, data: Optional[dict] = None, **kwargs) -> dict:
@@ -26,6 +28,12 @@ class IngestionOrchestrator:
         events = ["ingestion started"]
         start = time.perf_counter()
         text = payload.get("text") or ""
+        try:
+            doc_id = f"{payload['user_id']}-{payload['folder_id']}-{payload['note_id']}"
+            events.append(f"Document id has been created!")
+        except Exception as e:
+            events.append(f"Error occurred while creating document id: {str(e)}")
+            raise
 
         # Step 1: Process chunks
         chunks = self.chunk_processor.process(text)
@@ -38,14 +46,36 @@ class IngestionOrchestrator:
         events.extend(self.keyword_processor.events)
 
         # Step 3: Get summary for all the chunks
-        summary_result = self.summary_processor.process(chunks)
+        note_summary_obj = self.summary_processor.process(chunks)
         summary_end = time.perf_counter()
-        events.extend(summary_result.events)
+        events.extend(note_summary_obj.events)
 
         # Step 4: Generate 5 questions based on the final chunk summary
-        questions = self.questions_generator.process(summary_result.summary)
+        questions = self.questions_generator.process(note_summary_obj.summary)
         generate_questions_end = time.perf_counter()
         events.extend(self.questions_generator.events)
+
+        # Step 5: build chunk and summary documents
+        summary_document, chunk_documents = self.document_builder.build(
+            data=payload,
+            doc_id=doc_id,
+            chunk_objects=chunks_with_kw_ent,
+            top_kw=top_kw,
+            top_ent=top_ent,
+            questions=questions,
+            note_summary=note_summary_obj.summary
+        )
+        document_build_end = time.perf_counter()
+        events.extend(self.document_builder.events)
+
+        # Step 6: ingest chunk and summary documents
+        self.vector_store.replace_document(
+            doc_id,
+            summary=summary_document,
+            chunks=chunk_documents,
+        )
+        doc_ingestion_end = time.perf_counter()
+        events.extend(self.vector_store.events)
 
         events.append("ingestion completed")
 
@@ -56,15 +86,17 @@ class IngestionOrchestrator:
             "chunk_count": len(chunks),
             "top_keywords": top_kw,
             "entities": top_ent,
-            "summary": summary_result.summary,
+            "summary": note_summary_obj.summary,
             "questions": questions,
             "api_calls": {
                 "keyword_dedup": self.keyword_processor.api_calls,
-                "summary": summary_result.api_calls,
+                "summary": note_summary_obj.api_calls,
                 "questions": self.questions_generator.api_calls,
+                "document_build": 0,
+                "document_ingestion": 0,
                 "total": (
                     self.keyword_processor.api_calls
-                    + summary_result.api_calls
+                    + note_summary_obj.api_calls
                     + self.questions_generator.api_calls
                 ),
             },
@@ -74,7 +106,9 @@ class IngestionOrchestrator:
                 "keyword_extraction": round((keywords_end - chunking_end) * 1000, 2),
                 "summary": round((summary_end - keywords_end) * 1000, 2),
                 "questions": round((generate_questions_end - summary_end) * 1000, 2),
-                "total": round((generate_questions_end - start) * 1000, 2),
+                "document_build": round((document_build_end - generate_questions_end) * 1000, 2),
+                "document_ingestion": round((doc_ingestion_end - document_build_end) * 1000, 2),
+                "total": round((doc_ingestion_end - start) * 1000, 2),
             },
         }
 
@@ -103,11 +137,6 @@ class IngestionOrchestrator:
 
         return payload
 
-    @staticmethod
-    def _doc_id(payload: dict) -> str:
-        doc_id = payload.get("doc_id")
-        if doc_id:
-            return str(doc_id)
 
         required_fields = ("user_id", "folder_id", "note_id")
         missing_fields = [field for field in required_fields if not payload.get(field)]

@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 CHUNK_COLLECTION = QDRANT_COLLECTION
 SUMMARY_COLLECTION = f"{QDRANT_COLLECTION}_summaries"
 
+EXPECTED_VECTOR_SIZE = 384
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "sparse"
 QUESTIONS_VECTOR = "questions"
@@ -34,6 +35,7 @@ class QdrantVectorStore:
 
     def __init__(self):
         self.client = QdrantClientManager.get_client()
+        self.events = []
 
     def ensure_collections(self) -> None:
         for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION):
@@ -53,16 +55,22 @@ class QdrantVectorStore:
         return len(Settings.embed_model.get_text_embedding("dimension check"))
 
     def _create_collection(self, collection_name: str) -> None:
-        vector_size = self._embedding_dimension()
+        curr_vector_size = self._embedding_dimension()
+        if curr_vector_size != EXPECTED_VECTOR_SIZE:
+            raise ValueError(
+                f"Collection '{collection_name}' has dimension {curr_vector_size} "
+                f"but embedding model produces {EXPECTED_VECTOR_SIZE}. "
+                f"Delete and recreate the collection."
+            )
         vectors_config = {
             DENSE_VECTOR: models.VectorParams(
-                size=vector_size,
+                size=curr_vector_size,
                 distance=models.Distance.COSINE,
             )
         }
         if collection_name == SUMMARY_COLLECTION:
             vectors_config[QUESTIONS_VECTOR] = models.VectorParams(
-                size=vector_size,
+                size=curr_vector_size,
                 distance=models.Distance.COSINE,
             )
 
@@ -73,7 +81,8 @@ class QdrantVectorStore:
                 SPARSE_VECTOR: models.SparseVectorParams(modifier=models.Modifier.IDF),
             },
         )
-        log.info("Created Qdrant collection %s with vector size %d", collection_name, vector_size)
+        self.events.append(f"Created Qdrant collection {collection_name} with vector size {curr_vector_size}")
+        log.info("Created Qdrant collection %s with vector size %d", collection_name, curr_vector_size)
 
     def _ensure_payload_indexes(self, collection_name: str) -> None:
         for field_name, schema_type in PAYLOAD_INDEXES:
@@ -84,7 +93,9 @@ class QdrantVectorStore:
                     field_schema=schema_type,
                 )
             except Exception:
+                self.events.append(f"Payload index already exists or could not be created: {field_name}")
                 log.debug("Payload index already exists or could not be created: %s", field_name)
+        self.events.append(f"Payload index created: {PAYLOAD_INDEXES}")
 
     @staticmethod
     def point_id(raw_id: Any) -> str:
@@ -153,6 +164,7 @@ class QdrantVectorStore:
                 collection_name=collection_name,
                 points_selector=selector,
             )
+        self.events.append(f"document vectors deleted: {doc_id}")
 
     def upsert_summary(self, summary: LlamaDocument) -> None:
         metadata = dict(summary.metadata or {})
@@ -185,9 +197,11 @@ class QdrantVectorStore:
                 )
             ],
         )
+        self.events.append("summary vector upserted")
 
     def upsert_chunks(self, chunks: Sequence[LlamaDocument]) -> None:
         if not chunks:
+            self.events.append("chunk vector upsert skipped: no chunks")
             return
 
         points = []
@@ -217,6 +231,7 @@ class QdrantVectorStore:
             )
 
         self.client.upsert(collection_name=CHUNK_COLLECTION, points=points)
+        self.events.append(f"chunk vectors upserted: {len(points)}")
 
     def replace_document(
         self,
@@ -225,10 +240,13 @@ class QdrantVectorStore:
         summary: LlamaDocument | None = None,
         chunks: Sequence[LlamaDocument] | None = None,
     ) -> None:
+        self.events = ["vector ingestion started"]
+        self.ensure_collections()
         self.delete_document(doc_id)
         if summary is not None:
             self.upsert_summary(summary)
         self.upsert_chunks(chunks or [])
+        self.events.append("vector ingestion completed")
 
     def search_chunks(
         self,
