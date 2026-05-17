@@ -249,11 +249,8 @@ class KeywordProcessor:
             label = self._kind_label(kind)
             self.events.append(f"{label} dedup api call")
             self.api_calls += 1
-            if kind == "kw":
-                messages = build_llm_messages(KEYWORD_DEDUP_SYSTEM_PROMPT, keyword_text)
-            else:
-                messages = build_llm_messages(KEYWORD_DEDUP_SYSTEM_PROMPT, keyword_text)
-            result = llm_call_general(messages)
+            prompt = KEYWORD_DEDUP_SYSTEM_PROMPT if kind == "kw" else ENTITY_DEDUP_SYSTEM_PROMPT
+            result = llm_call_general(build_llm_messages(prompt, keyword_text))
             parsed_keywords = self._parse_llm_keyword_lines(result, allowed_keywords)
             self.events.append(f"{label} dedup completed: llm")
             return self._fill_keywords(parsed_keywords, keywords)

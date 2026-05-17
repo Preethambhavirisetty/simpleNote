@@ -31,7 +31,7 @@ def llm_call_general(
 ) -> str:
     body = {
         "model": model,
-        "messages": [_message_to_dict(message) for message in messages],
+        "messages": [_message_to_dict(m) for m in messages],
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": False,
@@ -46,6 +46,18 @@ def llm_call_general(
     response.raise_for_status()
 
     data = response.json()
+
+    usage = data.get("usage") or {}
+    if usage:
+        log.debug(
+            "llm_usage",
+            extra={
+                "prompt_tokens": usage.get("prompt_tokens"),
+                "completion_tokens": usage.get("completion_tokens"),
+                "total_tokens": usage.get("total_tokens"),
+            },
+        )
+
     content = _extract_message_content(data)
     if not content:
         log.warning("LLM returned empty content", extra={"response": data})

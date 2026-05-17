@@ -7,6 +7,7 @@ from app.services.ingestion.processors.summary.questions_generator import Questi
 from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
 from app.services.ingestion.processors.ingest.document_builder import DocumentBuilder
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
+from app.shared.utils import count_tokens
 
 
 class IngestionOrchestrator:
@@ -28,34 +29,35 @@ class IngestionOrchestrator:
         events = ["ingestion started"]
         start = time.perf_counter()
         text = payload.get("text") or ""
+        text_tokens = count_tokens(text)
         try:
-            doc_id = f"{payload['user_id']}-{payload['folder_id']}-{payload['note_id']}"
-            events.append(f"Document id has been created!")
+            doc_id = self._doc_id(payload)
+            events.append("document id created")
         except Exception as e:
-            events.append(f"Error occurred while creating document id: {str(e)}")
+            events.append(f"error creating document id: {str(e)[:20]}")
             raise
 
-        # Step 1: Process chunks
+        # Step 1: Chunk the text
         chunks = self.chunk_processor.process(text)
         chunking_end = time.perf_counter()
         events.append(f"chunking completed: {len(chunks)} chunks")
 
-        # Step 2: Extract keywords, entities from chunks
+        # Step 2: Extract keywords and entities from chunks
         chunks_with_kw_ent, top_kw, top_ent = self.keyword_processor.process(chunks)
         keywords_end = time.perf_counter()
         events.extend(self.keyword_processor.events)
 
-        # Step 3: Get summary for all the chunks
+        # Step 3: Summarize all chunks
         note_summary_obj = self.summary_processor.process(chunks)
         summary_end = time.perf_counter()
         events.extend(note_summary_obj.events)
 
-        # Step 4: Generate 5 questions based on the final chunk summary
+        # Step 4: Generate questions from the summary
         questions = self.questions_generator.process(note_summary_obj.summary)
         generate_questions_end = time.perf_counter()
         events.extend(self.questions_generator.events)
 
-        # Step 5: build chunk and summary documents
+        # Step 5: Build summary and chunk documents
         summary_document, chunk_documents = self.document_builder.build(
             data=payload,
             doc_id=doc_id,
@@ -63,12 +65,12 @@ class IngestionOrchestrator:
             top_kw=top_kw,
             top_ent=top_ent,
             questions=questions,
-            note_summary=note_summary_obj.summary
+            note_summary=note_summary_obj.summary,
         )
         document_build_end = time.perf_counter()
         events.extend(self.document_builder.events)
 
-        # Step 6: ingest chunk and summary documents
+        # Step 6: Upsert into vector store
         self.vector_store.replace_document(
             doc_id,
             summary=summary_document,
@@ -83,6 +85,7 @@ class IngestionOrchestrator:
             "action": action,
             "status": "processed",
             "note_id": payload.get("note_id"),
+            "text_tokens": text_tokens,
             "chunk_count": len(chunks),
             "top_keywords": top_kw,
             "entities": top_ent,
@@ -92,8 +95,6 @@ class IngestionOrchestrator:
                 "keyword_dedup": self.keyword_processor.api_calls,
                 "summary": note_summary_obj.api_calls,
                 "questions": self.questions_generator.api_calls,
-                "document_build": 0,
-                "document_ingestion": 0,
                 "total": (
                     self.keyword_processor.api_calls
                     + note_summary_obj.api_calls
@@ -115,7 +116,6 @@ class IngestionOrchestrator:
     def delete_action(self, payload: dict) -> dict:
         doc_id = self._doc_id(payload)
         self.vector_store.delete_document(doc_id)
-
         return {
             "action": "delete",
             "status": "deleted",
@@ -125,24 +125,18 @@ class IngestionOrchestrator:
 
     @staticmethod
     def _payload(data: Optional[dict], **kwargs) -> dict:
-        if isinstance(data, str):
-            payload = {"text": data}
-        else:
-            payload = dict(data or {})
-
+        payload = {"text": data} if isinstance(data, str) else dict(data or {})
         payload.update(kwargs)
-
         if "user_id" not in payload and "userid" in payload:
             payload["user_id"] = payload["userid"]
-
         return payload
 
-
+    @staticmethod
+    def _doc_id(payload: dict) -> str:
         required_fields = ("user_id", "folder_id", "note_id")
-        missing_fields = [field for field in required_fields if not payload.get(field)]
-        if missing_fields:
-            raise ValueError(f"Missing required delete payload fields: {', '.join(missing_fields)}")
-
+        missing = [f for f in required_fields if not payload.get(f)]
+        if missing:
+            raise ValueError(f"Missing required fields: {', '.join(missing)}")
         return f"{payload['user_id']}-{payload['folder_id']}-{payload['note_id']}"
 
     @property

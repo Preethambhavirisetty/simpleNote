@@ -9,7 +9,19 @@ from app.core.embeddings.remote import RemoteEmbeddingService
 
 
 class RemoteOpenAIEmbedding(BaseEmbedding):
-    """LlamaIndex-compatible dense embedding adapter for semantic splitting."""
+    """LlamaIndex BaseEmbedding adapter that routes to the remote RunPod endpoint.
+
+    Why this adapter exists:
+        SemanticSplitterNodeParser requires a BaseEmbedding subclass assigned to
+        Settings.embed_model. The adapter is a thin bridge — it adds no overhead
+        beyond the HTTP round-trip to RunPod, which is unavoidable regardless.
+
+    Batching behaviour (optimal):
+        SemanticSplitterNodeParser calls get_text_embedding_batch(sentences) which
+        resolves to _get_text_embeddings (plural). That method sends all sentences
+        in a single HTTP POST to /v1/embeddings, so a document with N sentences
+        triggers exactly one network call during semantic splitting.
+    """
 
     _service: RemoteEmbeddingService = PrivateAttr()
 
