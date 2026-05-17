@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/chat")
 
 
 @router.post("/completions", response_model=ApiResponse[dict])
-async def chat_completion(
+def chat_completion(
     payload: dict[str, Any] = Body(...),
 ):
     """Non-streaming chat completion (retrieval pipeline not yet wired)."""

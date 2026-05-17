@@ -1825,3 +1825,8 @@ notelite-agent
   - tasks
     - ingest_in_background
     - persist_message
+
+
+IMPROVEMENTS:
+- One future improvement: add timestamps per event (e.g. {"event": "summary api call", "t_ms": 45.2}). That would let you see which specific LLM call was slow without needing the stages_ms aggregates.
+- 

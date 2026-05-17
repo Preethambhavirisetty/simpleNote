@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/ingest")
 
 
 @router.get("/health", response_model=ApiResponse[dict])
-async def ingestion_health(
+def ingestion_health(
     db: Session = Depends(get_postgres_db),
     vector_store: QdrantVectorStore = Depends(get_qdrant_store),
 ):
@@ -42,7 +42,7 @@ async def ingestion_health(
 
 
 @router.post("/", response_model=ApiResponse[dict])
-async def ingest_note(
+def ingest_note(
     payload: dict[str, Any] = Body(...),
     vector_store: QdrantVectorStore = Depends(get_qdrant_store),
 ):
@@ -62,7 +62,7 @@ async def ingest_note(
 
 
 @router.get("/status/{job_id}", response_model=ApiResponse[dict])
-async def ingestion_job_status(job_id: str):
+def ingestion_job_status(job_id: str):
     """Poll the status of a background ingestion task."""
     result = celery_app.AsyncResult(job_id)
     return ApiResponse.ok({
