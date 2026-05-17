@@ -1829,4 +1829,6 @@ notelite-agent
 
 IMPROVEMENTS:
 - One future improvement: add timestamps per event (e.g. {"event": "summary api call", "t_ms": 45.2}). That would let you see which specific LLM call was slow without needing the stages_ms aggregates.
+- does text_template and metadata_template work as expected for both summary and chunks?
+- Implement delete + insert new chunks, with insert with new ids first and then delete old ids -> no window
 - 

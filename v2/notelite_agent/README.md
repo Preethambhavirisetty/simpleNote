@@ -92,22 +92,38 @@ Checks PostgreSQL and Qdrant connectivity.
 
 ### `POST /api/ingest/`
 
-Ingest or delete a note. All fields except `action` are required for upserts.
+Queue a note for background ingestion. Required fields are validated before the
+job enters the Celery queue; bad payloads are rejected with 400 immediately.
+Poll `GET /api/ingest/status/{job_id}` for the result.
 
 **Request body**
 ```jsonc
 {
-  "user_id":      "uuid",
-  "folder_id":    "uuid",
-  "note_id":      "uuid",
+  "user_id":      "uuid",          // required
+  "folder_id":    "uuid",          // required
+  "note_id":      "uuid",          // required
   "note_title":   "string",
   "folder_title": "string",
   "description":  "string",        // optional
   "tags":         ["string"],      // optional
-  "text":         "full note text",
+  "text":         "full note text", // required for upsert
   "action":       "upsert"         // or "delete" — defaults to "upsert"
 }
 ```
+
+**Response `data`**
+```json
+{ "job_id": "celery-task-uuid", "status": "queued" }
+```
+
+---
+
+### `POST /api/ingest/direct`
+
+Run the full ingestion pipeline synchronously and return the complete result.
+**Development / debugging only** — blocks the thread for 2-5s.
+
+**Request body** — same as `POST /api/ingest/`
 
 **Response `data` — upsert**
 ```jsonc
@@ -351,14 +367,62 @@ per-request cost tracking.
 
 ## Known issues
 
-- `replace_document` is not atomic: delete + insert has a brief window where
-  the note has no vectors. Acceptable for now; use a transaction-aware upsert
-  pattern when you need zero-downtime updates.
-- No API key enforcement yet (`AGENT_API_KEY` is validated but auth is opt-in
-  — set it to a non-empty value in `.env` to enforce it).
-- The Celery `ingest_in_background` task is defined but the route currently
-  runs synchronously in the request handler. Wire the task when you move to
-  async ingestion.
+### `replace_document` is not atomic
+
+```python
+def replace_document(self, doc_id, *, summary, chunks):
+    self.delete_document(doc_id)    # ← all vectors gone
+    self.upsert_summary(summary)    # ← vectors return ~200-500ms later
+    self.upsert_chunks(chunks)
+```
+
+Between `delete_document` and the first upsert there is a window (roughly the
+time to batch-embed all chunks + one Qdrant write) during which the note has
+no vectors. Any chat query that hits during that window will return zero
+results for this note.
+
+**Why the delete is still necessary:** chunk IDs are deterministic
+(`sha256(doc_id + chunk_id)`). If you edit a 20-chunk note down to 10 chunks,
+a pure upsert would leave 10 orphaned stale chunks in the index forever — they
+would appear in search results even though that content no longer exists in the
+note.
+
+**Acceptable for a personal notes app** where the window is ~300ms and
+concurrent queries during a specific note's re-ingestion are rare.
+
+**The zero-downtime fix when you need it:** upsert new vectors first, then
+delete only the point IDs that were _not_ part of this ingestion run.
+
+```python
+# Pseudocode
+new_ids = upsert_summary(summary) | upsert_chunks(chunks)   # collect new point IDs
+old_ids = scroll all points where metadata.doc_id == doc_id
+stale_ids = old_ids - new_ids
+delete(stale_ids)   # only removes orphaned chunks; no gap
+```
+
+Qdrant's `scroll` API makes `old_ids` cheap to retrieve. This pattern gives
+you continuous availability at the cost of a brief co-existence of old and new
+vectors (a few hundred ms), which is harmless for retrieval quality.
+
+---
+
+### Celery task flow
+
+`POST /api/ingest/` fires `ingest_in_background.delay(payload)` and returns
+a `job_id` immediately. The worker picks up the job, runs the full orchestrator,
+and the result is retrievable via `GET /api/ingest/status/{job_id}`.
+
+Use `POST /api/ingest/direct` to run the pipeline synchronously and see the
+full result inline — useful during development.
+
+---
+
+### No API key enforcement yet
+
+`AGENT_API_KEY` is read and the `require_api_key` dependency is implemented,
+but it is not attached to any route. Set `AGENT_API_KEY` to a non-empty value
+in `.env` and add `Depends(require_api_key)` to protected routes to enforce it.
 
 ---
 
