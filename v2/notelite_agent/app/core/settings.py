@@ -10,6 +10,7 @@ from app.core.config import (
     CHUNK_OVERLAP,
     EMBEDDING_DEVICE,
     EMBEDDING_MODEL,
+    EMBEDDING_MODEL_BASE,
     LLM_API_BASE,
     LLM_API_KEY,
     LLM_CONTEXT_WINDOW,
@@ -17,6 +18,9 @@ from app.core.config import (
     MAX_CHUNK_SIZE,
     SPARSE_EMBEDDING_MODEL,
 )
+from app.core.embeddings import RemoteEmbeddingService, RemoteOpenAIEmbedding
+from app.core.embeddings.client import REMOTE_EMBEDDINGS_FLAG
+from app.core.feature_flags import is_enabled
 
 
 log = logging.getLogger(__name__)
@@ -70,7 +74,10 @@ def init_llama_index_settings():
         return
 
     _configure_runtime_logging()
-    _configure_model_cache()
+    remote_embeddings_enabled = EMBEDDING_MODEL_BASE and is_enabled(REMOTE_EMBEDDINGS_FLAG)
+
+    if not remote_embeddings_enabled:
+        _configure_model_cache()
 
     Settings.llm = OpenAILike(
         api_base=LLM_API_BASE,
@@ -84,13 +91,20 @@ def init_llama_index_settings():
         timeout=300.0,
     )
 
-    Settings.embed_model = HuggingFaceEmbedding(
-        model_name=_embedding_model_identifier(),
-        device=EMBEDDING_DEVICE,
-        query_instruction="Represent this sentence for searching relevant passages: ",
-        cache_folder=MODEL_CACHE_DIR,
-    )
-    Settings.sparse_model = FastEmbedSparseEmbedding(model_name=SPARSE_EMBEDDING_MODEL)
+    if remote_embeddings_enabled:
+        log.info("Using remote embedding endpoint: %s", EMBEDDING_MODEL_BASE)
+        Settings.embed_model = RemoteOpenAIEmbedding(
+            service=RemoteEmbeddingService(),
+        )
+    else:
+        Settings.embed_model = HuggingFaceEmbedding(
+            model_name=_embedding_model_identifier(),
+            device=EMBEDDING_DEVICE,
+            query_instruction="Represent this sentence for searching relevant passages: ",
+            cache_folder=MODEL_CACHE_DIR,
+        )
+        Settings.sparse_model = FastEmbedSparseEmbedding(model_name=SPARSE_EMBEDDING_MODEL)
+
     Settings.chunk_size = MAX_CHUNK_SIZE
     Settings.chunk_overlap = CHUNK_OVERLAP
 

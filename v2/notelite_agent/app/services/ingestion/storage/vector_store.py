@@ -12,6 +12,10 @@ from qdrant_client import models
 
 from app.core.config import QDRANT_COLLECTION
 from app.db.qdrant import QdrantClientManager
+from app.core.embeddings import (
+    EmbeddingBatch,
+    SharedEmbeddingClient,
+)
 
 
 log = logging.getLogger(__name__)
@@ -19,7 +23,6 @@ log = logging.getLogger(__name__)
 CHUNK_COLLECTION = QDRANT_COLLECTION
 SUMMARY_COLLECTION = f"{QDRANT_COLLECTION}_summaries"
 
-EXPECTED_VECTOR_SIZE = 384
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "sparse"
 QUESTIONS_VECTOR = "questions"
@@ -35,6 +38,7 @@ class QdrantVectorStore:
 
     def __init__(self):
         self.client = QdrantClientManager.get_client()
+        self.embedding_client = SharedEmbeddingClient()
         self.events = []
 
     def ensure_collections(self) -> None:
@@ -50,18 +54,14 @@ class QdrantVectorStore:
         return bool(self.client and self.client.collection_exists(collection_name))
 
     def _embedding_dimension(self) -> int:
-        if not getattr(Settings, "embed_model", None):
+        if not self.embedding_client.use_remote and not getattr(Settings, "embed_model", None):
             raise RuntimeError("LlamaIndex settings must be initialized before Qdrant setup.")
-        return len(Settings.embed_model.get_text_embedding("dimension check"))
+        dimension = self.embedding_client.dimension()
+        self._drain_embedding_events()
+        return dimension
 
     def _create_collection(self, collection_name: str) -> None:
         curr_vector_size = self._embedding_dimension()
-        if curr_vector_size != EXPECTED_VECTOR_SIZE:
-            raise ValueError(
-                f"Collection '{collection_name}' has dimension {curr_vector_size} "
-                f"but embedding model produces {EXPECTED_VECTOR_SIZE}. "
-                f"Delete and recreate the collection."
-            )
         vectors_config = {
             DENSE_VECTOR: models.VectorParams(
                 size=curr_vector_size,
@@ -93,8 +93,8 @@ class QdrantVectorStore:
                     field_schema=schema_type,
                 )
             except Exception:
-                self.events.append(f"Payload index already exists or could not be created: {field_name}")
                 log.debug("Payload index already exists or could not be created: %s", field_name)
+                self.events.append(f"Payload index already exists or could not be created: {field_name}")
         self.events.append(f"Payload index created: {PAYLOAD_INDEXES}")
 
     @staticmethod
@@ -172,13 +172,17 @@ class QdrantVectorStore:
         entities = list(metadata.pop("entities", []))
         questions = list(metadata.pop("questions", []))
         questions_text = " ".join(questions).strip()
+        embedding_texts = [summary.text]
+        if questions_text:
+            embedding_texts.append(questions_text)
+        embeddings = self.embed_texts(embedding_texts)
 
         vectors = {
-            DENSE_VECTOR: Settings.embed_model.get_text_embedding(summary.text),
-            SPARSE_VECTOR: self.sparse_vector(Settings.sparse_model.get_text_embedding(summary.text)),
+            DENSE_VECTOR: embeddings.dense[0],
+            SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[0]),
         }
         if questions_text:
-            vectors[QUESTIONS_VECTOR] = Settings.embed_model.get_text_embedding(questions_text)
+            vectors[QUESTIONS_VECTOR] = embeddings.dense[1]
 
         self.client.upsert(
             collection_name=SUMMARY_COLLECTION,
@@ -205,6 +209,7 @@ class QdrantVectorStore:
             return
 
         points = []
+        embeddings = self.embed_texts([chunk.text for chunk in chunks])
         for index, chunk in enumerate(chunks):
             metadata = dict(chunk.metadata or {})
             keywords = list(metadata.pop("keywords", []))
@@ -215,10 +220,8 @@ class QdrantVectorStore:
                 models.PointStruct(
                     id=self.point_id(point_id),
                     vector={
-                        DENSE_VECTOR: Settings.embed_model.get_text_embedding(chunk.text),
-                        SPARSE_VECTOR: self.sparse_vector(
-                            Settings.sparse_model.get_text_embedding(chunk.text)
-                        ),
+                        DENSE_VECTOR: embeddings.dense[index],
+                        SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[index]),
                     },
                     payload={
                         "text": chunk.text,
@@ -256,8 +259,9 @@ class QdrantVectorStore:
         metadata_filter: Mapping[str, Any] | None = None,
         doc_ids: Sequence[str] | None = None,
     ) -> list[tuple[LlamaDocument, float]]:
-        dense_vector = Settings.embed_model.get_query_embedding(query)
-        sparse_vector = self.sparse_vector(Settings.sparse_model.get_query_embedding(query))
+        embeddings = self.embed_query_texts([query])
+        dense_vector = embeddings.dense[0]
+        sparse_vector = self.sparse_vector(embeddings.sparse[0])
 
         results = self.client.query_points(
             collection_name=CHUNK_COLLECTION,
@@ -279,15 +283,40 @@ class QdrantVectorStore:
         limit: int = 10,
         metadata_filter: Mapping[str, Any] | None = None,
     ) -> list[tuple[LlamaDocument, float]]:
+        query_vector = self.embed_dense_queries([query])[0]
         results = self.client.query_points(
             collection_name=SUMMARY_COLLECTION,
-            query=Settings.embed_model.get_query_embedding(query),
+            query=query_vector,
             using=DENSE_VECTOR,
             limit=limit,
             query_filter=self.build_filter(metadata_filter),
         ).points
 
         return [self._point_to_document(point) for point in results]
+
+    def embed_texts(self, texts: Sequence[str]) -> EmbeddingBatch:
+        embeddings = self.embedding_client.embed_documents(texts)
+        self._drain_embedding_events()
+        return embeddings
+
+    def embed_dense_texts(self, texts: Sequence[str]) -> list[list[float]]:
+        embeddings = self.embedding_client.embed_dense_documents(texts)
+        self._drain_embedding_events()
+        return embeddings
+
+    def embed_query_texts(self, texts: Sequence[str]) -> EmbeddingBatch:
+        embeddings = self.embedding_client.embed_queries(texts)
+        self._drain_embedding_events()
+        return embeddings
+
+    def embed_dense_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        embeddings = self.embedding_client.embed_dense_queries(texts)
+        self._drain_embedding_events()
+        return embeddings
+
+    def _drain_embedding_events(self) -> None:
+        self.events.extend(self.embedding_client.events)
+        self.embedding_client.events = []
 
     @staticmethod
     def _point_to_document(point: Any) -> tuple[LlamaDocument, float]:

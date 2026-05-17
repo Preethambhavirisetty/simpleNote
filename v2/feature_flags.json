@@ -30,6 +30,9 @@
             },
             "sparse_index": {
                 "enabled": true
+            },
+            "remote_embeddings": {
+                "enabled": true
             }
         }
     }
