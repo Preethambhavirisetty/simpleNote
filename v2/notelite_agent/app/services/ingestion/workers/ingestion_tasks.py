@@ -39,6 +39,7 @@ def persist_message(self, data: dict):
         message_id=data["message_id"],
         content=data.get("content", ""),
         status=data.get("status", "complete"),
+        model_used=data.get("model_used"),
         latency_ms=data.get("latency_ms"),
         tokens_used=data.get("tokens_used"),
         sources_used=data.get("sources_used"),

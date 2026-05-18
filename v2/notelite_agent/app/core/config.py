@@ -14,9 +14,8 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 # Core application
 SECRET_KEY = require_env("SECRET_KEY")
 BACKEND_API_URL = require_env("BACKEND_API_URL")
-# Shared secret for agent HTTP endpoints. Set the same value in the backend's .env
-# and send it as the X-API-Key header on every ingest/retrieve request.
-AGENT_API_KEY = require_env("AGENT_API_KEY", "")
+BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
+AGENT_API_KEY = require_env("AGENT_API_KEY")
 
 
 # Knowledge ingestion

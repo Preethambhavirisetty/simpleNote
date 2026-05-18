@@ -95,7 +95,7 @@ class QdrantVectorStore:
             except Exception:
                 log.debug("Payload index already exists or could not be created: %s", field_name)
                 self.events.append(f"Payload index already exists or could not be created: {field_name}")
-        self.events.append(f"Payload index created: {PAYLOAD_INDEXES}")
+        self.events.append(f"{len(PAYLOAD_INDEXES)} payload index/s created")
 
     @staticmethod
     def point_id(raw_id: Any) -> str:
