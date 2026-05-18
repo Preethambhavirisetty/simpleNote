@@ -1827,8 +1827,20 @@ notelite-agent
     - persist_message
 
 
+**REFERENCE:**
+app/services/chat/
+├── reranker.py      cross-encoder reranking (Cohere-compatible API, RRF fallback)
+├── retriever.py     two-stage RAG: summaries → doc_ids → hybrid chunk search → rerank
+├── prompt.py        system prompt, context injection, token estimation (pure functions)
+├── llm_client.py    HTTP SSE streaming to remote LLM (pure I/O, no state)
+├── conversation.py  init_conversation, load_history, persist_assistant_message
+└── streaming.py     StreamingService — thin orchestrator, wires all modules together
+
+
+
 IMPROVEMENTS:
 - One future improvement: add timestamps per event (e.g. {"event": "summary api call", "t_ms": 45.2}). That would let you see which specific LLM call was slow without needing the stages_ms aggregates.
 - does text_template and metadata_template work as expected for both summary and chunks?
 - Implement delete + insert new chunks, with insert with new ids first and then delete old ids -> no window
-- 
+- lets say in the future, if i need to add image, vid, document support. will this current pipeline can be adaped easily?
+

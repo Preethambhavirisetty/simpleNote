@@ -31,9 +31,10 @@ def ingest_in_background(self, data=None, **kwargs):
 )
 def persist_message(self, data: dict):
     """Update the assistant message in the backend after streaming completes."""
-    from app.services.ingestion.storage import pg_store
+    from app.shared.backend_conversation_client import BackendConversationClient
+    client = BackendConversationClient()
 
-    pg_store.update_message(
+    client.update_message(
         user_id=data["user_id"],
         conversation_id=data["conversation_id"],
         message_id=data["message_id"],

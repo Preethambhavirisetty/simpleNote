@@ -75,7 +75,7 @@ class BackendConversationClient:
         return self._require_data(resp, "update message")
 
     def drain_events(self) -> list[str]:
-        events = self.api_client.events
+        events = list(self.api_client.events)
         self.api_client.events.clear()
         return events
 

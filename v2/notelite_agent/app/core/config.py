@@ -13,7 +13,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # Core application
 SECRET_KEY = require_env("SECRET_KEY")
-BACKEND_API_URL = require_env("BACKEND_API_URL")
 BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
 
@@ -53,3 +52,9 @@ CONVERSATION_QUEUE = require_env("CONVERSATION_QUEUE", "conversation")
 
 # Database — read-only version guard checks, one query per upsert task
 POSTGRES_DB_URL = require_env("POSTGRES_DB_URL")
+
+
+# Reranker — optional remote cross-encoder (Cohere-compatible API).
+# Leave empty to skip reranking and rely on RRF scores from Qdrant.
+RERANKER_API_BASE = os.getenv("RERANKER_API_BASE", "").rstrip("/")
+RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
