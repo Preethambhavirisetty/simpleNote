@@ -97,17 +97,10 @@ services:
     container_name: notelite-backend
     restart: unless-stopped
     environment:
-      # SECRET_KEY:             ${SECRET_KEY}
-      # AGENT_API_KEY:          ${AGENT_API_KEY}
-      # INGESTION_TASK_STRING:  tasks.process_ingestion
-      # INGESTION_QUEUE:        ingestion
-      # NOTE_SIZE_QUEUE:        note_size
-      # HF_TOKEN:               ${HF_TOKEN}
       POSTGRES_DB_URL:        *pg-url
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://host.containers.internal:3100
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
@@ -128,10 +121,6 @@ services:
               "--loglevel=info", "-Q", "note_size", "-c", "2", "-n", "backend-celery@%h",
               "--include", "app.tasks.notes"]
     environment:
-      # SECRET_KEY:             ${SECRET_KEY}
-      # INGESTION_TASK_STRING:  tasks.process_ingestion
-      # INGESTION_QUEUE:        ingestion
-      # NOTE_SIZE_QUEUE:        note_size
       POSTGRES_DB_URL:        *pg-url
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
@@ -153,28 +142,9 @@ services:
       HF_HOME:                /app/.cache/huggingface
       FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
-      # AGENT_API_KEY:          ${AGENT_API_KEY}
-      # SECRET_KEY:             ${SECRET_KEY}
-      # LLM_API_KEY:            ${AGENT_API_KEY}
-      # INGESTION_TASK_STRING:  tasks.process_ingestion
-      # INGESTION_QUEUE:        ingestion
-      # HF_TOKEN:               ${HF_TOKEN}
-      LLM_API_BASE:           http://host.containers.internal:8081/v1
-      LLM_MODEL:              gpt-3.5-turbo
-      LLM_CONTEXT_WINDOW:     "4096"
-      CHAT_LLM_API_BASE:      http://host.containers.internal:8082/v1
       QDRANT_URL:             http://qdrant:6333
       BACKEND_API_URL:        http://backend:8000
-      QDRANT_COLLECTION:      knowledge
-      VECTOR_DB:              qdrant
-      EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
-      SPARSE_EMBEDDING_MODEL: Qdrant/bm42-all-minilm-l6-v2-attentions
-      EMBEDDING_DEVICE:       cpu
-      RERANKER_MODEL:         cross-encoder/ms-marco-MiniLM-L-6-v2
-      MAX_CHUNK_SIZE:         "450"
-      CHUNK_OVERLAP:          "80"
-      BREAKPOINT_PERCENTILE:  "85"
-      SUPPORTED_EXTENSIONS:   ".md,.txt"
+      BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
@@ -197,35 +167,16 @@ services:
       dockerfile: Dockerfile
     container_name: notelite-agent-celery
     restart: unless-stopped
-    command: ["python", "-m", "celery", "-A", "workers.app", "worker",
+    command: ["python", "-m", "celery", "-A", "app.services.ingestion.workers.celery_app:celery_app", "worker",
               "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h"]
     environment:
-      # AGENT_API_KEY:          ${AGENT_API_KEY}
-      # SECRET_KEY:             ${SECRET_KEY}
-      # LLM_API_KEY:            ${AGENT_API_KEY}
-      # INGESTION_TASK_STRING:  tasks.process_ingestion
-      # INGESTION_QUEUE:        ingestion
-      # HF_TOKEN:               ${HF_TOKEN}
       LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
       HF_HOME:                /app/.cache/huggingface
       FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
-      LLM_API_BASE:           http://host.containers.internal:8081/v1
-      LLM_MODEL:              gpt-3.5-turbo
-      LLM_CONTEXT_WINDOW:     "4096"
-      CHAT_LLM_API_BASE:      http://host.containers.internal:8082/v1
       QDRANT_URL:             http://qdrant:6333
       BACKEND_API_URL:        http://backend:8000
-      QDRANT_COLLECTION:      knowledge
-      VECTOR_DB:              qdrant
-      EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
-      SPARSE_EMBEDDING_MODEL: Qdrant/bm42-all-minilm-l6-v2-attentions
-      EMBEDDING_DEVICE:       cpu
-      RERANKER_MODEL:         cross-encoder/ms-marco-MiniLM-L-6-v2
-      MAX_CHUNK_SIZE:         "450"
-      CHUNK_OVERLAP:          "80"
-      BREAKPOINT_PERCENTILE:  "85"
-      SUPPORTED_EXTENSIONS:   ".md,.txt"
+      BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
