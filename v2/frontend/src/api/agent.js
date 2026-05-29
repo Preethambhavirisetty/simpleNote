@@ -5,10 +5,10 @@ import agentClient, { AGENT_BASE_URL, AGENT_PATH_PREFIX, AGENT_API_KEY } from '.
 const p = (path) => `${AGENT_PATH_PREFIX}${path}`
 
 export const agentApi = {
-  getStatus: (taskId) => agentClient.get(p(`/api/status/${taskId}`)),
+  getStatus: (taskId) => agentClient.get(p(`/api/ingest/status/${taskId}`)),
   ingest: (data) => agentClient.post(p('/api/ingest'), data),
-  getContext: (data) => agentClient.post(p('/api/get-context'), data),
-  chat: (data) => agentClient.post(p('/api/chat'), data),
+  getContext: (data) => agentClient.post(p('/api/chat/stream'), data),
+  chat: (data) => agentClient.post(p('/api/chat/completions'), data),
 }
 
 /**

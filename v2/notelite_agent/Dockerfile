@@ -9,8 +9,6 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir --prefix=/deps -r requirements.txt
 
-RUN PYTHONPATH=/deps/lib/python3.12/site-packages \
-    python -m spacy download en_core_web_sm --target /deps/lib/python3.12/site-packages
 
 
 # ── Stage 2: runtime image ────────────────────────────────────────────────────
