@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from llama_index.core.llms import ChatMessage
 
-from app.core.config import LLM_API_BASE, LLM_API_KEY, LLM_MODEL
+from app.core.config import LLM_API_BASE, LLM_API_KEY, LLM_SUMMARIZER_MODEL
 
 
 log = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ def llm_call_direct(prompt: str) -> str:
 def llm_call_general(
     messages: Sequence[ChatMessage | dict[str, Any]],
     *,
-    model: str = LLM_MODEL,
+    model: str = LLM_SUMMARIZER_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: float = DEFAULT_TIMEOUT,

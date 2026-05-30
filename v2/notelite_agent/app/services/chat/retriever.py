@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
-from app.core.config import LLM_CONTEXT_WINDOW
+from app.core.config import LLM_CONTEXT_WINDOW, RERANKER_API_BASE
 from app.services.chat.reranker import rerank
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.utils import count_tokens
@@ -13,7 +14,7 @@ log = logging.getLogger(__name__)
 _SUMMARY_TOP_K = 5  # notes to surface from summary-level search
 
 # Token budget for injected excerpts — leave room for output, system prompt, and history.
-_CONTEXT_BUDGET = min(LLM_CONTEXT_WINDOW // 4, 2048)
+_CONTEXT_BUDGET = min(LLM_CONTEXT_WINDOW // 4, 8196)
 
 
 def retrieve_context(
@@ -43,6 +44,20 @@ def retrieve_context(
 
     Returns (context_texts, source_ids) respecting the token budget.
     """
+    context_texts, source_ids, _ = retrieve_context_diagnostics(
+        vector_store, query, user_id, k, role,
+    )
+    return context_texts, source_ids
+
+
+def retrieve_context_diagnostics(
+    vector_store: QdrantVectorStore,
+    query: str,
+    user_id: str,
+    k: int,
+    role: str,
+) -> tuple[list[str], list[str], dict[str, Any]]:
+    """Run retrieval and return its inspectable intermediate outputs."""
     metadata_filter = None if role == "admin" else {"user_id": user_id}
 
     # Stage 1: find the most relevant notes via summary-level dense search
@@ -89,4 +104,27 @@ def retrieve_context(
         source_ids.append(str(doc.id_))
         token_budget -= chunk_tokens
 
-    return context_texts, source_ids
+    diagnostics = {
+        "query": query,
+        "metadata_filter": metadata_filter,
+        "summary_hits": [_hit_payload(doc, score) for doc, score in summary_hits],
+        "summary_doc_ids": doc_ids,
+        "chunk_search_scope": "summary_doc_ids" if doc_ids else "all_user_chunks",
+        "chunk_hits": [_hit_payload(doc, score) for doc, score in chunk_hits],
+        "reranker_enabled": bool(RERANKER_API_BASE),
+        "reranked_hits": [_hit_payload(doc, score) for doc, score in ranked],
+        "selected_context": context_texts,
+        "source_ids": source_ids,
+        "context_budget_tokens": _CONTEXT_BUDGET,
+        "remaining_context_budget_tokens": token_budget,
+    }
+    return context_texts, source_ids, diagnostics
+
+
+def _hit_payload(doc: Any, score: float) -> dict[str, Any]:
+    return {
+        "id": str(doc.id_),
+        "doc_id": doc.metadata.get("doc_id"),
+        "score": score,
+        "text": doc.text,
+    }

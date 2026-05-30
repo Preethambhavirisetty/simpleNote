@@ -8,7 +8,7 @@ from app.core.config import (
     LLM_API_BASE,
     LLM_API_KEY,
     LLM_CONTEXT_WINDOW,
-    LLM_MODEL,
+    LLM_SUMMARIZER_MODEL,
     MAX_CHUNK_SIZE,
 )
 from app.core.embeddings import RemoteEmbeddingService, RemoteOpenAIEmbedding
@@ -31,7 +31,7 @@ def init_llama_index_settings() -> None:
     Settings.llm = OpenAILike(
         api_base=LLM_API_BASE,
         api_key=LLM_API_KEY,
-        model=LLM_MODEL,
+        model=LLM_SUMMARIZER_MODEL,
         context_window=LLM_CONTEXT_WINDOW,
         is_chat_model=True,
         temperature=0.1,

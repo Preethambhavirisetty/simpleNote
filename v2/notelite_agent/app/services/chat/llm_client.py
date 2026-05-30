@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from app.core.config import LLM_API_BASE, LLM_API_KEY, LLM_MODEL
+from app.core.config import LLM_API_BASE, LLM_API_KEY, LLM_REASONER_MODEL
 
 
 log = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ DEFAULT_TIMEOUT = 300.0
 def stream_llm(
     messages: Sequence[dict[str, str]],
     *,
-    model: str = LLM_MODEL,
+    model: str = LLM_REASONER_MODEL,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: float = DEFAULT_TIMEOUT,

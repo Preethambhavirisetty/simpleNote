@@ -10,7 +10,7 @@ import httpx
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.core.config import LLM_MODEL
+from app.core.config import LLM_REASONER_MODEL
 from app.services.chat import conversation, llm_client, prompt, retriever
 from app.services.chat.schema import ChatRequest
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
@@ -43,7 +43,7 @@ class StreamingService:
         self,
         conversation_client: BackendConversationClient | None = None,
         *,
-        model: str = LLM_MODEL,
+        model: str = LLM_REASONER_MODEL,
     ):
         self.conversation_client = conversation_client or BackendConversationClient()
         self.model = model

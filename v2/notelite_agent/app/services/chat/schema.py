@@ -1,5 +1,11 @@
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
+
+
+class ChatHistoryMessage(BaseModel):
+    role: Literal["user", "assistant", "system"]
+    content: str = Field(..., min_length=1)
+
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
@@ -25,3 +31,18 @@ class ChatRequest(BaseModel):
         if role != "admin" and not v:
             raise ValueError("tenant_id is required for non-admin requests.")
         return v
+
+
+class ChatStageRequest(BaseModel):
+    """Side-effect-free inputs for inspecting the chat pipeline stages."""
+
+    query: str = Field(..., min_length=1, max_length=10_000)
+    k: int = Field(5, ge=1, le=50)
+    user_id: str
+    role: Literal["user", "admin"] = "user"
+    history: list[ChatHistoryMessage] = Field(default_factory=list)
+
+
+class ConversationHistoryRequest(BaseModel):
+    user_id: str
+    conversation_id: str

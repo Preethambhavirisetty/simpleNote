@@ -38,7 +38,9 @@ QDRANT_COLLECTION = require_env("QDRANT_COLLECTION")
 # LLM — served remotely from RunPod
 LLM_API_BASE = require_env("LLM_API_BASE")
 LLM_API_KEY = require_env("LLM_API_KEY")
-LLM_MODEL = require_env("LLM_MODEL")
+LLM_MODEL = os.getenv("LLM_MODEL")  # Legacy fallback for existing deployments.
+LLM_REASONER_MODEL = require_env("LLM_REASONER_MODEL", LLM_MODEL)
+LLM_SUMMARIZER_MODEL = require_env("LLM_SUMMARIZER_MODEL", LLM_MODEL)
 LLM_CONTEXT_WINDOW = int(require_env("LLM_CONTEXT_WINDOW"))
 
 
