@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Sequence
 
+from app.shared.prompts.prompt import get_final_summary_system_prompt, get_group_summary_system_prompt
 from app.services.ingestion.processors.chunking import TextChunk
 from app.services.ingestion.processors.summary.summary_helpers import (
     DIRECT_SUMMARY_THRESHOLD,
@@ -20,32 +21,6 @@ from app.shared.utils import count_tokens, build_llm_messages
 
 
 log = logging.getLogger(__name__)
-
-GROUP_SUMMARY_SYSTEM_PROMPT = (
-    "You are a summarization assistant optimizing for semantic search retrieval. "
-    "Summarize the provided text following these rules:\n\n"
-    "- Preserve all named technologies, tools, products, and proper nouns exactly as written\n"
-    "- Preserve specific technical decisions, tradeoffs, and open problems\n"
-    "- Preserve named people only if relevant to a technical decision\n"
-    "- Omit personal or lifestyle content unless it provides technical context\n"
-    "- Write in 3-5 sentences maximum\n"
-    "- Write in present tense, declarative style\n"
-    "- Output only the summary, nothing else"
-)
-
-FINAL_SUMMARY_SYSTEM_PROMPT = (
-    "You are a summarization assistant optimizing for semantic search retrieval. "
-    "Synthesize the provided intermediate summaries into one compact final summary.\n\n"
-    "Rules:\n"
-    "- Write one paragraph only\n"
-    "- Write 3-5 complete sentences maximum\n"
-    "- Do not use bullets, numbering, headings, labels, or section-by-section lists\n"
-    "- Prefer broad themes over item-by-item recap\n"
-    "- Preserve the most important named technologies, tools, products, and proper nouns exactly as written\n"
-    "- Preserve major technical decisions, tradeoffs, and open problems\n"
-    "- Omit minor details and personal/lifestyle content unless it supports the document's main themes\n"
-    "- Output only the final summary paragraph"
-)
 
 @dataclass(frozen=True)
 class SummaryResult:
@@ -74,7 +49,7 @@ class SummaryProcessor:
             try:
                 events.append("summary api call: direct")
                 summary = llm_call_general(
-                    build_llm_messages(FINAL_SUMMARY_SYSTEM_PROMPT, text),
+                    build_llm_messages(get_final_summary_system_prompt(), text),
                     max_tokens=FINAL_SUMMARY_MAX_TOKENS,
                 )
             except Exception:
@@ -109,7 +84,7 @@ class SummaryProcessor:
             try:
                 events.append(f"summary api call: group {index}")
                 summary = llm_call_general(
-                    build_llm_messages(GROUP_SUMMARY_SYSTEM_PROMPT, text),
+                    build_llm_messages(get_group_summary_system_prompt(), text),
                     max_tokens=GROUP_SUMMARY_MAX_TOKENS,
                 )
                 api_calls += 1
@@ -135,7 +110,7 @@ class SummaryProcessor:
             events.append("summary api call: final merge")
             llm_text = "\n\n".join(summaries)
             final_summary = llm_call_general(
-                build_llm_messages(FINAL_SUMMARY_SYSTEM_PROMPT, llm_text),
+                build_llm_messages(get_final_summary_system_prompt(), llm_text),
                 max_tokens=FINAL_SUMMARY_MAX_TOKENS,
             )
             api_calls += 1
@@ -167,7 +142,7 @@ class SummaryProcessor:
         try:
             events.append("summary api call: chunk")
             summary = llm_call_general(
-                build_llm_messages(GROUP_SUMMARY_SYSTEM_PROMPT, stripped),
+                build_llm_messages(get_group_summary_system_prompt(), stripped),
                 max_tokens=GROUP_SUMMARY_MAX_TOKENS,
             )
         except Exception:

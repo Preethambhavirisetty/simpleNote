@@ -9,12 +9,13 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import LLM_REASONER_MODEL
 from app.core.dependencies import get_qdrant_store
-from app.services.chat import prompt, retriever
+from app.services.chat import retriever
 from app.services.chat.schema import ChatRequest, ChatStageRequest, ConversationHistoryRequest
 from app.services.chat.streaming import StreamingService
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.backend_conversation_client import BackendConversationClient
 from app.shared.llm import llm_call_general
+from app.shared.prompts import prompt
 from app.shared.schema import ApiResponse
 
 

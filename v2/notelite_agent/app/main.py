@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from app.services.ingestion.routes import router as ingestion_router
 from app.services.chat.routes import router as chat_router
 from app.core.settings import init_llama_index_settings
+from app.shared.routes import router as shared_router
 from app.shared.schema import ApiResponse
 
 
@@ -110,3 +111,4 @@ def health():
 
 app.include_router(ingestion_router)
 app.include_router(chat_router)
+app.include_router(shared_router)

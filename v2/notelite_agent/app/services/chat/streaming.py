@@ -11,7 +11,8 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.config import LLM_REASONER_MODEL
-from app.services.chat import conversation, llm_client, prompt, retriever
+from app.services.chat import conversation, llm_client, retriever
+from app.shared.prompts import prompt
 from app.services.chat.schema import ChatRequest
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.backend_conversation_client import BackendConversationClient

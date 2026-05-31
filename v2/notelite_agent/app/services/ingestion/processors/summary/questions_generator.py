@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 
+from app.shared.prompts.prompt import get_generate_questions_system_prompt
 from app.shared.llm import llm_call_general
 from app.shared.utils import build_llm_messages
 
@@ -15,24 +16,6 @@ _KEEP_COUNT = 5
 
 # 8 questions × ~45 tokens each, with some headroom
 QUESTIONS_MAX_TOKENS = 380
-
-GENERATE_QUESTIONS_SYSTEM_PROMPT = (
-    "You are a question generation assistant. "
-    f"Given a summary, generate exactly {_GENERATE_COUNT} questions a user might naturally ask "
-    "when searching their personal notes.\n\n"
-    "Include:\n"
-    "  - 2 factual questions about specific details\n"
-    "  - 1 conceptual question (what, why, or how)\n"
-    "  - 1 broad recall question (overall or general)\n"
-    "  - 1 short keyword-style search query phrased as a question\n"
-    "  - 1 follow-up question that assumes prior context\n"
-    "  - 2 open-ended questions about decisions, tradeoffs, or next steps\n\n"
-    "Rules:\n"
-    "  - Return only the questions, one per line\n"
-    "  - No numbering, no bullets, no explanations\n"
-    "  - Every line must end with a question mark\n"
-    "  - Start your response directly with the first question"
-)
 
 BINARY_QUESTION_PATTERNS = re.compile(
     r"^(is|are|was|were|did|do|does|has|have|can|could|would|should)\s",
@@ -59,7 +42,7 @@ class QuestionsGenerator:
             self.events.append("questions api call")
             self.api_calls += 1
             raw = llm_call_general(
-                build_llm_messages(GENERATE_QUESTIONS_SYSTEM_PROMPT, overall_summary),
+                build_llm_messages(get_generate_questions_system_prompt(_GENERATE_COUNT), overall_summary),
                 max_tokens=QUESTIONS_MAX_TOKENS,
                 temperature=0.3,
             )

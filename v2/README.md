@@ -250,6 +250,7 @@ podman exec -it mypostgres psql -U postgres -c "\l+" -> gives the size of db
 ### PODMAN COMMANDS
 podman system prune -a --volumes
 podman-compose up -d --build
+podman stats --no-stream
 
 podman-compose build --no-cache backend
 podman-compose up -d --force-recreate backend backend-celery

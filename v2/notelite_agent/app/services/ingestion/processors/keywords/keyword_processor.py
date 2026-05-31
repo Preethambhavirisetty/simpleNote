@@ -6,6 +6,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal, Sequence
 
+from app.shared.prompts.prompt import get_entity_dedup_system_prompt, get_keyword_dedup_system_prompt
 from app.services.ingestion.processors.chunking import TextChunk
 from app.services.ingestion.processors.keywords.extractor import extract_keywords
 from app.services.ingestion.processors.keywords.terms import prune_keywords
@@ -17,61 +18,6 @@ TOP_N_KEYWORDS_PER_CHUNK = 15
 MAX_GLOBAL_KEYWORD_CANDIDATES = 40
 MAX_TOP_KEYWORDS = 15
 TermKind = Literal["kw", "ent"]
-
-KEYWORD_DEDUP_SYSTEM_PROMPT = (
-    "You are a keyword deduplication assistant. "
-    "Given a list of keywords and phrases extracted from a document, "
-    "return the most meaningful and unique terms.\n\n"
-    "Rules:\n"
-    "- Preserve multi-word phrases exactly as given\n"
-    "- Do not split phrases into individual words\n"
-    "- Do not add any terms not present in the input list\n"
-    "- Remove exact duplicates and near-duplicates, keeping the most specific form\n"
-    "- Remove generic single words that carry no standalone retrieval value "
-    "(examples: app, set, user, results, chain, cost, tool, type, value, item, thing)\n"
-    "- Remove time expressions and calendar references "
-    "(examples: Monday, this week, afternoon meeting, yesterday, last month)\n"
-    "- Remove sentence fragments and prepositional phrases without a clear subject "
-    "(examples: instance for auth, risk of context, based on results)\n"
-    "- Prefer specific named concepts, activities, decisions, and domain terms "
-    "over generic objects or vague descriptors\n"
-    "- Return up to 15 terms, one per line\n"
-    "- No numbering, no bullets, no explanations, no preamble\n"
-    "- Start directly with the first term"
-    "- Do not extract physical household objects with no conceptual value"
-    "(examples: cardboard boxes, coffee crystals, car seats, bedroom window)"
-    "- Do not extract time expressions or calendar references"
-    "(examples: Saturday afternoon, this week, afternoon meeting)"
-    "- Prefer named activities, life events, decisions, relationships, "
-    "and domain-specific concepts"
-)
-
-ENTITY_DEDUP_SYSTEM_PROMPT = (
-    "You are a named entity validation and deduplication assistant. "
-    "Given a list of candidate named entities extracted from a document, "
-    "return only the valid named entities.\n\n"
-    "A valid named entity is one of:\n"
-    "- Person name (real individual, first or full name)\n"
-    "- Product, tool, technology, or software name\n"
-    "- Organization or company name\n"
-    "- Specific named location, place, or geographic feature\n"
-    "- Named framework, library, protocol, or standard\n"
-    "- Named algorithm, method, or well-known concept\n"
-    "- Named creative work (book, film, article title)\n\n"
-    "Rules:\n"
-    "- Remove adjectives and demonyms mistakenly tagged as entities "
-    "(examples: Italian, Romanian, Northern, Ancient)\n"
-    "- Remove common nouns, generic words, and document structure artifacts "
-    "(examples: node, thread, entry, journal, note, section, chapter)\n"
-    "- Remove conjunctions of multiple entities — split them into separate entries "
-    "(example: 'X and Y' becomes two entries: X, Y)\n"
-    "- Remove duplicates, keeping the most complete form "
-    "(example: prefer the full name over a partial one)\n"
-    "- Do not add entities not present in the input list\n"
-    "- Return up to 15 valid entities, one per line\n"
-    "- No numbering, no bullets, no explanations, no preamble\n"
-    "- Start directly with the first entity"
-)
 
 log = logging.getLogger(__name__)
 
@@ -249,7 +195,7 @@ class KeywordProcessor:
             label = self._kind_label(kind)
             self.events.append(f"{label} dedup api call")
             self.api_calls += 1
-            prompt = KEYWORD_DEDUP_SYSTEM_PROMPT if kind == "kw" else ENTITY_DEDUP_SYSTEM_PROMPT
+            prompt = get_keyword_dedup_system_prompt() if kind == "kw" else get_entity_dedup_system_prompt()
             result = llm_call_general(build_llm_messages(prompt, keyword_text))
             parsed_keywords = self._parse_llm_keyword_lines(result, allowed_keywords)
             self.events.append(f"{label} dedup completed: llm")

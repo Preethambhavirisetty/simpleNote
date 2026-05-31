@@ -143,16 +143,15 @@ services:
       FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       QDRANT_URL:             http://qdrant:6333
-      BACKEND_API_URL:        http://backend:8000
       BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://host.containers.internal:3100
     volumes:
       - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
+      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
     ports:
       - "3002:8000"
     networks:
@@ -175,15 +174,14 @@ services:
       FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
       SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       QDRANT_URL:             http://qdrant:6333
-      BACKEND_API_URL:        http://backend:8000
       BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://host.containers.internal:3100
     volumes:
       - agent-model-cache:/app/.cache
+      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
       - ./feature_flags.json:/app/feature_flags.json:ro
     networks:
       - notelite-net
