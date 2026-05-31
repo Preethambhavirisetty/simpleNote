@@ -348,7 +348,7 @@ function NoteEditor({ note, onSave, isSaving }) {
 
 export default function NotesPage() {
   const { folderId: folderParam } = useParams()
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const raw = folderParam ?? searchParams.get('folder')
   const folderId = raw && raw !== 'undefined' ? raw : null
 
@@ -371,14 +371,29 @@ export default function NotesPage() {
   }, [folderId, fetchNotes, clearActiveNote])
 
   useEffect(() => {
-    if (noteParam && notes.length > 0 && !isLoading) {
+    if (noteParam && notes.length > 0 && !isLoading && activeNote?.id !== noteParam) {
       openNote(noteParam)
     }
-  }, [noteParam, notes.length, isLoading, openNote])
+  }, [noteParam, notes.length, isLoading, activeNote?.id, openNote])
+
+  const selectNote = useCallback((noteId, { replace = false } = {}) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (noteId) next.set('note', noteId)
+      else next.delete('note')
+      return next
+    }, { replace })
+  }, [setSearchParams])
+
+  const handleSelect = useCallback((noteId) => {
+    selectNote(noteId)
+    openNote(noteId)
+  }, [openNote, selectNote])
 
   const handleNew = useCallback(async () => {
-    await createNote({ folder_id: folderId })
-  }, [folderId, createNote])
+    const result = await createNote({ folder_id: folderId })
+    if (result.ok) selectNote(result.note.id)
+  }, [folderId, createNote, selectNote])
 
   const handleSave = useCallback(
     (payload) => { if (activeNote?.id) updateNote(activeNote.id, payload) },
@@ -386,8 +401,11 @@ export default function NotesPage() {
   )
 
   const handleDelete = useCallback(
-    async (noteId) => { await deleteNote(noteId) },
-    [deleteNote],
+    async (noteId) => {
+      const result = await deleteNote(noteId)
+      if (result.ok && noteParam === noteId) selectNote(null, { replace: true })
+    },
+    [deleteNote, noteParam, selectNote],
   )
 
   return (
@@ -396,7 +414,7 @@ export default function NotesPage() {
         notes={notes}
         activeId={activeNote?.id}
         isLoading={isLoading}
-        onSelect={openNote}
+        onSelect={handleSelect}
         onNew={handleNew}
         onDelete={handleDelete}
       />

@@ -38,15 +38,14 @@ export const useChatStore = create(
         try {
           const conv = await conversationsApi.get(convId)
           const msgs = (conv.messages ?? []).map((m) => {
-            const raw = m.sources_used
-            const hasRichSources = Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'object'
+            const references = _normalizeReferences(m.sources_used)
             return {
               id: m.id,
               role: m.role,
               content: m.content,
               timestamp: m.created_at,
-              sources: hasRichSources ? raw.map((s) => s.note_id) : raw,
-              citations: hasRichSources ? raw : undefined,
+              sources: references.map((reference) => reference.note_id),
+              references,
             }
           })
           set({ messages: msgs, isLoadingMessages: false })
@@ -123,7 +122,12 @@ export const useChatStore = create(
             if (meta.message_id) {
               set((s) => ({
                 messages: s.messages.map((m) =>
-                  m.id === assistantMsg.id ? { ...m, id: meta.message_id } : m,
+                  m.id === assistantMsg.id ? {
+                    ...m,
+                    id: meta.message_id,
+                    sources: meta.sources,
+                    references: _normalizeReferences(meta.references ?? meta.sources),
+                  } : m,
                 ),
               }))
             }
@@ -156,8 +160,10 @@ export const useChatStore = create(
               msgs[msgs.length - 1] = {
                 ...last,
                 isStreaming: false,
-                sources: payload?.sources,
-                citations: payload?.citations,
+                sources: payload?.sources ?? last.sources,
+                references: payload?.references || payload?.sources
+                  ? _normalizeReferences(payload.references ?? payload.sources)
+                  : last.references,
                 latency_ms: payload?.latency_ms,
               }
               return { messages: msgs, isStreaming: false }
@@ -206,4 +212,13 @@ function _cancelActiveStream(set) {
       ? { ...message, content: message.content || 'Response stopped.', isStreaming: false, isCancelled: true }
       : message),
   }))
+}
+
+function _normalizeReferences(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((reference) => typeof reference === 'object'
+      ? reference
+      : { note_id: reference, title: 'Referenced note' })
+    .filter((reference) => reference?.note_id)
 }

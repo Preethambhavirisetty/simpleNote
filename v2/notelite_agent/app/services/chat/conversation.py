@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from app.services.chat.schema import ChatRequest
 from app.services.ingestion.workers.celery_app import CONVERSATION_TASK, celery_app
@@ -90,7 +91,7 @@ def persist_assistant_message(
     usage: dict[str, int],
     latency_ms: int,
     error_message: str | None,
-    source_ids: list[str],
+    references: list[dict[str, Any]],
     events: list[str],
     status: str | None = None,
 ) -> None:
@@ -103,7 +104,7 @@ def persist_assistant_message(
         "model_used": model,
         "latency_ms": latency_ms,
         "tokens_used": usage.get("total_tokens"),
-        "sources_used": source_ids,
+        "sources_used": references,
         "error_message": error_message,
     }
     try:

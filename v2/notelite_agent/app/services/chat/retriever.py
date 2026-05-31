@@ -23,7 +23,7 @@ def retrieve_context(
     user_id: str,
     k: int,
     role: str,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[dict[str, Any]]]:
     """Two-stage hybrid retrieval with optional cross-encoder reranking.
 
     Stage 1 — Summary search (dense only):
@@ -42,12 +42,13 @@ def retrieve_context(
         Remote cross-encoder (Cohere-compatible) if RERANKER_API_BASE is set;
         otherwise the RRF scores from Qdrant are used as-is.
 
-    Returns (context_texts, source_ids) respecting the token budget.
+    Returns (context_texts, references) respecting the token budget.
+    References are deduplicated notes, not internal chunk point IDs.
     """
-    context_texts, source_ids, _ = retrieve_context_diagnostics(
+    context_texts, references, _ = retrieve_context_diagnostics(
         vector_store, query, user_id, k, role,
     )
-    return context_texts, source_ids
+    return context_texts, references
 
 
 def retrieve_context_diagnostics(
@@ -56,7 +57,7 @@ def retrieve_context_diagnostics(
     user_id: str,
     k: int,
     role: str,
-) -> tuple[list[str], list[str], dict[str, Any]]:
+) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
     """Run retrieval and return its inspectable intermediate outputs."""
     metadata_filter = None if role == "admin" else {"user_id": user_id}
 
@@ -90,7 +91,8 @@ def retrieve_context_diagnostics(
 
     # Apply token budget
     context_texts: list[str] = []
-    source_ids: list[str] = []
+    references: list[dict[str, Any]] = []
+    references_by_note_id: dict[str, dict[str, Any]] = {}
     token_budget = _CONTEXT_BUDGET
 
     for doc, _score in ranked:
@@ -101,9 +103,20 @@ def retrieve_context_diagnostics(
         if chunk_tokens > token_budget:
             break
         context_texts.append(text)
-        source_ids.append(str(doc.id_))
+        reference = _reference_payload(doc)
+        note_id = reference.get("note_id")
+        if note_id:
+            existing_reference = references_by_note_id.get(note_id)
+            if existing_reference:
+                for chunk_id in reference["chunk_ids"]:
+                    if chunk_id not in existing_reference["chunk_ids"]:
+                        existing_reference["chunk_ids"].append(chunk_id)
+            else:
+                references.append(reference)
+                references_by_note_id[note_id] = reference
         token_budget -= chunk_tokens
 
+    source_ids = [reference["note_id"] for reference in references]
     diagnostics = {
         "query": query,
         "metadata_filter": metadata_filter,
@@ -115,16 +128,31 @@ def retrieve_context_diagnostics(
         "reranked_hits": [_hit_payload(doc, score) for doc, score in ranked],
         "selected_context": context_texts,
         "source_ids": source_ids,
+        "references": references,
         "context_budget_tokens": _CONTEXT_BUDGET,
         "remaining_context_budget_tokens": token_budget,
     }
-    return context_texts, source_ids, diagnostics
+    return context_texts, references, diagnostics
+
+
+def _reference_payload(doc: Any) -> dict[str, Any]:
+    metadata = doc.metadata or {}
+    chunk_id = metadata.get("chunk_id")
+    return {
+        "note_id": str(metadata.get("note_id") or ""),
+        "folder_id": str(metadata.get("folder_id") or ""),
+        "title": str(metadata.get("note_title") or "Untitled"),
+        "folder": str(metadata.get("folder_title") or ""),
+        "chunk_ids": [str(chunk_id)] if chunk_id else [],
+    }
 
 
 def _hit_payload(doc: Any, score: float) -> dict[str, Any]:
     return {
         "id": str(doc.id_),
         "doc_id": doc.metadata.get("doc_id"),
+        "note_id": doc.metadata.get("note_id"),
+        "chunk_id": doc.metadata.get("chunk_id"),
         "score": score,
         "text": doc.text,
     }

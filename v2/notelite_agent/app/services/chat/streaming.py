@@ -84,11 +84,11 @@ class StreamingService:
 
         # ── Retrieval ─────────────────────────────────────────────────────────
         context_texts: list[str] = []
-        source_ids: list[str] = []
+        references: list[dict[str, Any]] = []
         if vector_store is not None:
             retrieval_started = time.perf_counter()
             try:
-                context_texts, source_ids = retriever.retrieve_context(
+                context_texts, references = retriever.retrieve_context(
                     vector_store, query, request.user_id, request.k, request.role,
                 )
                 latencies_ms["retrieval_ms"] = _elapsed_ms(retrieval_started)
@@ -114,6 +114,8 @@ class StreamingService:
                 "model": self.model,
                 "prompt_tokens_estimate": prompt_tokens_estimate,
                 "context_chunks": len(context_texts),
+                "sources": [reference["note_id"] for reference in references],
+                "references": references,
             })
 
             answer_parts: list[str] = []
@@ -193,7 +195,7 @@ class StreamingService:
                     usage=usage,
                     latency_ms=latencies_ms["total_ms"],
                     error_message=error_message,
-                    source_ids=source_ids,
+                    references=references,
                     events=events,
                     status="partial" if was_cancelled else None,
                 )
@@ -205,6 +207,8 @@ class StreamingService:
                 "latencies_ms": latencies_ms,
                 "usage": usage,
                 "events": events,
+                "sources": [reference["note_id"] for reference in references],
+                "references": references,
                 "has_error": error_message is not None,
             })
 

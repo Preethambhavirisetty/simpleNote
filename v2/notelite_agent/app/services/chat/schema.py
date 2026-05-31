@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -61,6 +61,8 @@ class ChatCompletionData(BaseModel):
 class RetrievalHit(BaseModel):
     id: str
     doc_id: Optional[str] = None
+    note_id: Optional[str] = None
+    chunk_id: Optional[str] = None
     score: float
     text: str
 
@@ -76,6 +78,7 @@ class RetrievalDiagnosticsData(BaseModel):
     reranked_hits: list[RetrievalHit]
     selected_context: list[str]
     source_ids: list[str]
+    references: list[dict[str, Any]]
     context_budget_tokens: int
     remaining_context_budget_tokens: int
 

@@ -1,4 +1,4 @@
-import ChatMessageCitations from './ChatMessageCitations'
+import ChatMessageReferences from './ChatMessageReferences'
 import MarkdownContent from './MarkdownContent'
 
 function StreamingIndicator() {
@@ -14,7 +14,7 @@ export default function ChatMessage({ message }) {
       <div className={bubbleClass}>
         {message.isStreaming && !message.content ? <StreamingIndicator /> : isUser ? <p className="whitespace-pre-wrap">{message.content}</p> : <MarkdownContent content={message.content} />}
         {message.isStreaming && message.content && <span className="chat-streaming-cursor">|</span>}
-        {!isUser && !message.isStreaming && <ChatMessageCitations citations={message.citations} />}
+        {!isUser && !message.isStreaming && <ChatMessageReferences references={message.references} />}
       </div>
     </article>
   )
