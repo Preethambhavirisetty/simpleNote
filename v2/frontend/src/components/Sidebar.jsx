@@ -110,7 +110,7 @@ export default function Sidebar() {
         {/* Folders */}
         <div className="pt-3">
           <div className="flex items-center justify-between px-3 py-1 mb-0.5">
-            <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+            <span className="text-label font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
               Folders
             </span>
             <button
@@ -159,7 +159,7 @@ export default function Sidebar() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                   </svg>
                   <span className="truncate flex-1">{folder.name}</span>
-                  {folder.is_pinned && <span className="text-[10px] text-indigo-500 dark:text-indigo-400">●</span>}
+                  {folder.is_pinned && <span className="text-caption text-indigo-500 dark:text-indigo-400">●</span>}
                   <button
                     data-folder-menu
                     onClick={(e) => {
@@ -210,7 +210,7 @@ export default function Sidebar() {
           className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
           title="Settings"
         >
-          <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[11px] text-white font-semibold shrink-0">
+          <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-label text-white font-semibold shrink-0">
             {initials}
           </div>
           <span className="text-xs text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-200 truncate flex-1 text-left transition-colors">

@@ -124,6 +124,7 @@ class StreamingService:
                 "total_tokens": prompt_tokens_estimate,
             }
             model_reported_usage = False
+            was_cancelled = False
             inference_started = time.perf_counter()
             first_token_ms: int | None = None
             events.append("llm stream started")
@@ -152,6 +153,10 @@ class StreamingService:
                         events.append("llm stream error")
                         yield _sse("error", {"message": error_message})
                         break
+            except GeneratorExit:
+                was_cancelled = True
+                events.append("client.disconnected")
+                raise
             except httpx.HTTPError as exc:
                 error_message = str(exc)
                 events.append("llm http error")
@@ -162,31 +167,36 @@ class StreamingService:
                 events.append("llm stream exception")
                 log.warning("chat stream failed", exc_info=True)
                 yield _sse("error", {"message": error_message})
-
-            answer = "".join(answer_parts)
-            latencies_ms["inference_ms"] = _elapsed_ms(inference_started)
-            latencies_ms["total_ms"] = _elapsed_ms(started_at)
-            events.append("llm.stream.completed" if not error_message else "llm.stream.failed")
-
-            if not usage.get("completion_tokens"):
-                usage["completion_tokens"] = count_tokens(answer) if answer else 0
-            if not model_reported_usage or not usage.get("total_tokens"):
-                usage["total_tokens"] = (
-                    usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+            finally:
+                answer = "".join(answer_parts)
+                latencies_ms["inference_ms"] = _elapsed_ms(inference_started)
+                latencies_ms["total_ms"] = _elapsed_ms(started_at)
+                events.append(
+                    "llm.stream.cancelled" if was_cancelled
+                    else "llm.stream.completed" if not error_message
+                    else "llm.stream.failed"
                 )
 
-            conversation.persist_assistant_message(
-                request=request,
-                conversation_id=conversation_id,
-                assistant_message_id=assistant_message_id,
-                answer=answer,
-                model=self.model,
-                usage=usage,
-                latency_ms=latencies_ms["total_ms"],
-                error_message=error_message,
-                source_ids=source_ids,
-                events=events,
-            )
+                if not usage.get("completion_tokens"):
+                    usage["completion_tokens"] = count_tokens(answer) if answer else 0
+                if not model_reported_usage or not usage.get("total_tokens"):
+                    usage["total_tokens"] = (
+                        usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+                    )
+
+                conversation.persist_assistant_message(
+                    request=request,
+                    conversation_id=conversation_id,
+                    assistant_message_id=assistant_message_id,
+                    answer=answer,
+                    model=self.model,
+                    usage=usage,
+                    latency_ms=latencies_ms["total_ms"],
+                    error_message=error_message,
+                    source_ids=source_ids,
+                    events=events,
+                    status="partial" if was_cancelled else None,
+                )
 
             yield _sse("done", {
                 "conversation_id": conversation_id,
@@ -198,4 +208,11 @@ class StreamingService:
                 "has_error": error_message is not None,
             })
 
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )

@@ -4,6 +4,8 @@ import { conversationsApi } from '@/api/conversations'
 import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
 
+let activeStreamController = null
+
 export const useChatStore = create(
   devtools(
     (set, get) => ({
@@ -31,6 +33,7 @@ export const useChatStore = create(
 
       selectConversation: async (convId) => {
         if (get().activeConvId === convId) return
+        _cancelActiveStream(set)
         set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
         try {
           const conv = await conversationsApi.get(convId)
@@ -54,6 +57,7 @@ export const useChatStore = create(
       },
 
       newConversation: () => {
+        _cancelActiveStream(set)
         set({ activeConvId: null, messages: [], error: null })
       },
 
@@ -72,7 +76,10 @@ export const useChatStore = create(
 
       // ── Streaming chat ─────────────────────────────────────────────
 
+      cancelStream: () => _cancelActiveStream(set),
+
       sendMessage: async (query) => {
+        _cancelActiveStream(set)
         const { user } = useAuthStore.getState()
         if (!user) return
 
@@ -96,8 +103,12 @@ export const useChatStore = create(
           conversation_title: !activeConvId && messages.length === 0 ? query.slice(0, 100) : undefined,
         }
 
+        const streamController = new AbortController()
+        activeStreamController = streamController
+
         await streamChat({
           body,
+          signal: streamController.signal,
           onMeta: (meta) => {
             const convId = meta.conversation_id
             set({ activeConvId: convId })
@@ -163,6 +174,8 @@ export const useChatStore = create(
             set({ isStreaming: false, error: err.message })
           },
         })
+
+        if (activeStreamController === streamController) activeStreamController = null
       },
     }),
     { name: 'chat-store' },
@@ -180,5 +193,17 @@ function _makeMsg(role, content, extra = {}) {
 function _updateLastMsg(set, patch) {
   set((s) => ({
     messages: s.messages.map((m, i) => (i === s.messages.length - 1 ? { ...m, ...patch } : m)),
+  }))
+}
+
+function _cancelActiveStream(set) {
+  if (!activeStreamController) return
+  activeStreamController.abort()
+  activeStreamController = null
+  set((state) => ({
+    isStreaming: false,
+    messages: state.messages.map((message, index) => index === state.messages.length - 1 && message.isStreaming
+      ? { ...message, content: message.content || 'Response stopped.', isStreaming: false, isCancelled: true }
+      : message),
   }))
 }

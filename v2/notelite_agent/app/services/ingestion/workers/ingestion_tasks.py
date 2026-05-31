@@ -30,7 +30,7 @@ def ingest_in_background(self, data=None, **kwargs):
     retry_backoff=True,
 )
 def persist_message(self, data: dict):
-    """Update the assistant message in the backend after streaming completes."""
+    """Update the assistant message after streaming completes or disconnects."""
     from app.shared.backend_conversation_client import BackendConversationClient
     client = BackendConversationClient()
 

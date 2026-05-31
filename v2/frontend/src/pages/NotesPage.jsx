@@ -215,7 +215,7 @@ function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
               {note.description && (
                 <p className="text-xs text-zinc-500 mt-0.5 truncate">{note.description}</p>
               )}
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-600 mt-1">
+              <p className="text-label text-zinc-400 dark:text-zinc-600 mt-1">
                 {new Date(note.updated_at ?? note.created_at).toLocaleDateString()}
               </p>
             </button>
@@ -329,7 +329,7 @@ function NoteEditor({ note, onSave, isSaving }) {
           placeholder="Untitled"
           className="flex-1 bg-transparent text-lg font-semibold text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none"
         />
-        <span className="text-[11px] text-zinc-400 dark:text-zinc-600 shrink-0">
+        <span className="text-label text-zinc-400 dark:text-zinc-600 shrink-0">
           {isSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}
         </span>
       </div>

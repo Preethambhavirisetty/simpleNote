@@ -1,7 +1,7 @@
 import agentClient, { AGENT_BASE_URL, AGENT_PATH_PREFIX, AGENT_API_KEY } from './agentClient'
 
-// In dev:   AGENT_PATH_PREFIX = '/agent' → Vite proxy rewrites /agent/api/* → localhost:3002/api/*
-// In prod:  AGENT_PATH_PREFIX = ''       → AGENT_BASE_URL is set to real host, paths are /api/*
+// In dev: AGENT_PATH_PREFIX = '/agent' and Vite proxies to the local agent.
+// In prod: AGENT_BASE_URL is the agent origin and paths begin with /api.
 const p = (path) => `${AGENT_PATH_PREFIX}${path}`
 
 export const agentApi = {
@@ -11,31 +11,21 @@ export const agentApi = {
   chat: (data) => agentClient.post(p('/api/chat/completions'), data),
 }
 
-/**
- * SSE streaming via the agent's /api/chat/stream endpoint.
- * Events: meta, delta, error, done.
- */
-export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
-  const url = AGENT_BASE_URL
-    ? `${AGENT_BASE_URL}/api/chat/stream`
-    : `${AGENT_PATH_PREFIX}/api/chat/stream`
-
+/** Stream SSE chat events until completion or until the caller aborts the request. */
+export async function streamChat({ body, signal, onMeta, onDelta, onDone, onError }) {
+  const url = AGENT_BASE_URL ? `${AGENT_BASE_URL}/api/chat/stream` : `${AGENT_PATH_PREFIX}/api/chat/stream`
   let reader
   let doneFired = false
 
   try {
     const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': AGENT_API_KEY,
-      },
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': AGENT_API_KEY },
       body: JSON.stringify(body),
+      signal,
     })
-
-    if (!response.ok) {
-      throw new Error(`Agent responded with ${response.status}`)
-    }
+    if (!response.ok) throw new Error(`Agent responded with ${response.status}`)
+    if (!response.body) throw new Error('Agent response did not include a stream')
 
     reader = response.body.getReader()
     const decoder = new TextDecoder()
@@ -44,41 +34,44 @@ export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-
       buffer += decoder.decode(value, { stream: true })
       const parts = buffer.split('\n\n')
       buffer = parts.pop()
-
-      for (const part of parts) {
-        const lines = part.split('\n')
-        let event = ''
-        let data = ''
-
-        for (const line of lines) {
-          if (line.startsWith('event: ')) event = line.slice(7).trim()
-          else if (line.startsWith('data: ')) data = line.slice(6).trim()
-        }
-        if (!event || !data) continue
-
-        try {
-          const parsed = JSON.parse(data)
-          if (event === 'meta') onMeta?.(parsed)
-          else if (event === 'delta') onDelta?.(parsed.content ?? '')
-          else if (event === 'error') onError?.(new Error(parsed.message))
-          else if (event === 'done' && !doneFired) {
-            doneFired = true
-            onDone?.(parsed)
-          }
-        } catch {
-          // skip malformed
-        }
-      }
+      parts.forEach((part) => handleEvent(part, { onMeta, onDelta, onDone: (payload) => {
+        if (doneFired) return
+        doneFired = true
+        onDone?.(payload)
+      }, onError }))
     }
 
-    if (!doneFired) onDone?.({})
-  } catch (err) {
-    onError?.(err)
+    if (!doneFired && !signal?.aborted) onDone?.({})
+  } catch (error) {
+    if (!isAbortError(error)) onError?.(error)
   } finally {
     reader?.cancel().catch(() => {})
   }
+}
+
+function handleEvent(part, handlers) {
+  let event = ''
+  let data = ''
+  part.split('\n').forEach((line) => {
+    if (line.startsWith('event: ')) event = line.slice(7).trim()
+    else if (line.startsWith('data: ')) data += line.slice(6).trim()
+  })
+  if (!event || !data) return
+
+  try {
+    const payload = JSON.parse(data)
+    if (event === 'meta') handlers.onMeta?.(payload)
+    else if (event === 'delta') handlers.onDelta?.(payload.content ?? '')
+    else if (event === 'error') handlers.onError?.(new Error(payload.message))
+    else if (event === 'done') handlers.onDone?.(payload)
+  } catch {
+    // Ignore malformed SSE events and continue consuming the stream.
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === 'AbortError'
 }

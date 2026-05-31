@@ -92,13 +92,14 @@ def persist_assistant_message(
     error_message: str | None,
     source_ids: list[str],
     events: list[str],
+    status: str | None = None,
 ) -> None:
     payload = {
         "user_id": request.user_id,
         "conversation_id": conversation_id,
         "message_id": assistant_message_id,
         "content": answer,
-        "status": "error" if error_message else "complete",
+        "status": status or ("error" if error_message else "complete"),
         "model_used": model,
         "latency_ms": latency_ms,
         "tokens_used": usage.get("total_tokens"),
