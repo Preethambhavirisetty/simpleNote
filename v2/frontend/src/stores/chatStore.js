@@ -94,7 +94,7 @@ export const useChatStore = create(
 
         const body = {
           query,
-          k: 5,
+          k: 20,
           user_id: user.id,
           role: user.roles?.includes('admin') ? 'admin' : 'user',
           tenant_id: user.id,

@@ -11,6 +11,7 @@ from app.services.ingestion.processors.summary.summary_helpers import (
     FINAL_SUMMARY_MAX_TOKENS,
     GROUP_SUMMARY_MAX_TOKENS,
     MIN_CHUNK_CHARS_FOR_SUMMARY,
+    SUMMARY_GROUP_TOKEN_BUFFER,
     SUMMARY_GROUP_TOKEN_LIMIT,
     chunk_text,
     fallback_final_summary,
@@ -88,6 +89,9 @@ class SummaryProcessor:
                     max_tokens=GROUP_SUMMARY_MAX_TOKENS,
                 )
                 api_calls += 1
+                if summary.strip() == "SKIP":
+                    events.append(f"summary skipped: group {index}")
+                    continue
             except Exception:
                 log.warning("summary group failed", exc_info=True)
                 api_calls += 1
@@ -150,6 +154,10 @@ class SummaryProcessor:
             events.append("summary failed: chunk")
             return SummaryResult(summary="", api_calls=1, events=events)
 
+        if summary.strip() == "SKIP":
+            events.append("summary skipped: chunk")
+            return SummaryResult(summary="", api_calls=1, events=events)
+
         summary = valid_summary(summary)
         events.append("summary completed: chunk" if summary else "summary discarded: low quality")
         return SummaryResult(summary=summary, api_calls=1, events=events)
@@ -162,10 +170,18 @@ class SummaryProcessor:
         groups = []
         current_group = []
         current_size = 0
+        system_prompt_tokens = count_tokens(get_group_summary_system_prompt())
+        # Reserve room for system prompt, summary completion tokens, and a safety buffer.
+        group_tokens_left = (
+            max_tokens
+            - system_prompt_tokens
+            - GROUP_SUMMARY_MAX_TOKENS
+            - SUMMARY_GROUP_TOKEN_BUFFER
+        )
 
         for chunk in chunks:
             chunk_tokens = count_tokens(chunk_text(chunk))
-            if current_size + chunk_tokens > max_tokens and current_group:
+            if current_size + chunk_tokens > group_tokens_left and current_group:
                 groups.append(current_group)
                 current_group = [chunk]
                 current_size = chunk_tokens

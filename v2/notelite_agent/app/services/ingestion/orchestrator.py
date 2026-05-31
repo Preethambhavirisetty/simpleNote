@@ -87,9 +87,8 @@ class IngestionOrchestrator:
             "note_id": payload.get("note_id"),
             "text_tokens": text_tokens,
             "chunk_count": len(chunks),
-            "top_keywords": top_kw,
-            "entities": top_ent,
-            "summary": note_summary_obj.summary,
+            "top_keywords": len(top_kw),
+            "entities": len(top_ent),
             "questions": questions,
             "api_calls": {
                 "keyword_dedup": self.keyword_processor.api_calls,
@@ -111,6 +110,7 @@ class IngestionOrchestrator:
                 "document_ingestion": round((doc_ingestion_end - document_build_end) * 1000, 2),
                 "total": round((doc_ingestion_end - start) * 1000, 2),
             },
+            "summary": note_summary_obj.summary
         }
 
     def delete_action(self, payload: dict) -> dict:

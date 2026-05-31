@@ -11,7 +11,7 @@ from app.shared.utils import count_tokens
 
 log = logging.getLogger(__name__)
 
-_SUMMARY_TOP_K = 5  # notes to surface from summary-level search
+_SUMMARY_TOP_K = 10  # notes to surface from summary-level search
 
 # Token budget for injected excerpts — leave room for output, system prompt, and history.
 _CONTEXT_BUDGET = min(LLM_CONTEXT_WINDOW // 4, 8196)

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 from jinja2 import StrictUndefined, Template
+
+
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 
 class PromptError(RuntimeError):
@@ -15,25 +20,32 @@ class PromptError(RuntimeError):
 class PromptManager:
     """Load YAML prompts and refresh cached entries when files change."""
 
-    def __init__(self, prompts_dir: str | Path | None = None):
+    VERSION_ENV_VARS = {
+        "chat_system": "ACTIVE_CHAT_SYSTEM_VERSION",
+        "summarizer": "ACTIVE_SUMMARIZER_VERSION",
+    }
+
+    def __init__(
+        self,
+        prompts_dir: str | Path | None = None,
+        active_versions: dict[str, str] | None = None,
+    ):
         self.dir = Path(prompts_dir) if prompts_dir else Path(__file__).parent
-        self._cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
+        self.active_versions = active_versions or {}
+        self._cache: dict[Path, tuple[int, int, dict[str, Any]]] = {}
 
     def get(self, prompt_name: str) -> dict[str, Any]:
         path = self._path(prompt_name)
         try:
             stat = path.stat()
         except FileNotFoundError as exc:
-            raise PromptError(f"Prompt file not found: {prompt_name}") from exc
+            raise PromptError(f"Prompt file not found: {path.name}") from exc
 
-        cached = self._cache.get(prompt_name)
+        cached = self._cache.get(path)
         fingerprint = (stat.st_mtime_ns, stat.st_size)
         if cached is None or cached[:2] != fingerprint:
-            self._cache[prompt_name] = (*fingerprint, self._load(path))
-            print(f"prompt for {prompt_name} cached")
-        else:
-            print(f"Using cached prompt for {prompt_name}")
-        return deepcopy(self._cache[prompt_name][2])
+            self._cache[path] = (*fingerprint, self._load(path))
+        return deepcopy(self._cache[path][2])
 
     def get_text(self, prompt_name: str, field: str) -> str:
         value = self.get(prompt_name).get(field)
@@ -54,7 +66,18 @@ class PromptManager:
     def _path(self, prompt_name: str) -> Path:
         if not prompt_name or Path(prompt_name).name != prompt_name:
             raise PromptError("Prompt name must be a file stem without path separators.")
-        return self.dir / f"{prompt_name}.yaml"
+
+        version_env_var = self.VERSION_ENV_VARS.get(prompt_name)
+        version = self.active_versions.get(prompt_name)
+        if version is None and version_env_var:
+            version = os.getenv(version_env_var)
+        if version_env_var and not version:
+            raise PromptError(f"Missing required environment variable: {version_env_var}")
+        if version and (Path(version).name != version or version in {".", ".."}):
+            raise PromptError(f"Invalid prompt version for {prompt_name}: {version}")
+
+        suffix = f"_{version}" if version else ""
+        return self.dir / f"{prompt_name}{suffix}.yaml"
 
     @staticmethod
     def _load(path: Path) -> dict[str, Any]:

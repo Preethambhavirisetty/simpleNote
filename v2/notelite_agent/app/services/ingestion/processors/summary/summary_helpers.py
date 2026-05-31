@@ -3,15 +3,17 @@ from __future__ import annotations
 import logging
 import re
 
+from app.core.config import LLM_CONTEXT_WINDOW
 from app.services.ingestion.processors.chunking import TextChunk
 
 
 MIN_SUMMARY_WORDS = 5
 MIN_CHUNK_CHARS_FOR_SUMMARY = 30
 DIRECT_SUMMARY_THRESHOLD = 3000
-SUMMARY_GROUP_TOKEN_LIMIT = 1000
-GROUP_SUMMARY_MAX_TOKENS = 200
-FINAL_SUMMARY_MAX_TOKENS = 400
+SUMMARY_GROUP_TOKEN_LIMIT = LLM_CONTEXT_WINDOW  # model context window in tokens
+SUMMARY_GROUP_TOKEN_BUFFER = 128  # safety reserve for overhead and estimation error
+GROUP_SUMMARY_MAX_TOKENS = 150
+FINAL_SUMMARY_MAX_TOKENS = 260
 FALLBACK_SUMMARY_CHAR_CAP = 1400
 GENERIC_FALLBACK_SUMMARY = (
     "This document contains multi-topic journal entries covering software architecture, "
