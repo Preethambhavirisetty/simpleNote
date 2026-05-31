@@ -12,6 +12,7 @@ from app.core.config import POSTGRES_DB_URL, SECRET_KEY, HASH_ALGORITHM
 from app.db.postgres.session import dispose_postgres, init_postgres
 from app.exceptions.handlers import register_exceptions
 from app.logger import setup_logging, logger
+from app.core.openapi import OPENAPI_TAGS, configure_openapi
 
 
 @asynccontextmanager
@@ -22,7 +23,18 @@ async def lifespan(app: FastAPI):
 
 
 setup_logging()
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Notelite Backend API",
+    description="Core API for authentication, notes, folders, tags, users, and conversations.",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=OPENAPI_TAGS,
+    swagger_ui_parameters={"displayRequestDuration": True, "filter": True, "persistAuthorization": True},
+    lifespan=lifespan,
+)
+configure_openapi(app)
 
 register_exceptions(app)
 

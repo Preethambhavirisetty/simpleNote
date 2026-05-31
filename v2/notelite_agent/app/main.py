@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.services.ingestion.routes import router as ingestion_router
 from app.services.chat.routes import router as chat_router
+from app.core.openapi import OPENAPI_TAGS, configure_openapi
 from app.core.settings import init_llama_index_settings
 from app.shared.routes import router as shared_router
 from app.shared.schema import ApiResponse
@@ -26,10 +27,17 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Notelite AI Service",
+    title="Notelite Agent API",
+    description="RAG ingestion, chat streaming, diagnostics, and prompt preview API.",
     version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=OPENAPI_TAGS,
+    swagger_ui_parameters={"displayRequestDuration": True, "filter": True, "persistAuthorization": True},
     lifespan=lifespan,
 )
+configure_openapi(app)
 
 
 # ── Uniform error responses ────────────────────────────────────────────────────
@@ -104,7 +112,7 @@ async def request_middleware(request: Request, call_next):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.get("/health", response_model=ApiResponse[dict])
+@app.get("/health", response_model=ApiResponse[dict], tags=["health"], summary="Check agent health")
 def health():
     return ApiResponse.ok({"status": "ok"})
 

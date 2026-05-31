@@ -15,7 +15,7 @@ from app.shared.schema import ApiResponse
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/ingest")
+router = APIRouter(prefix="/api/ingest", tags=["ingestion"])
 
 _UPSERT_REQUIRED = ("user_id", "folder_id", "note_id")
 
