@@ -62,14 +62,15 @@ function useSelectionRect(editor) {
       })
     }
 
+    const clear = () => setRect(null)
     editor.on('selectionUpdate', update)
     editor.on('focus', update)
-    editor.on('blur', () => setRect(null))
+    editor.on('blur', clear)
 
     return () => {
       editor.off('selectionUpdate', update)
       editor.off('focus', update)
-      editor.off('blur', () => setRect(null))
+      editor.off('blur', clear)
     }
   }, [editor])
 
@@ -255,10 +256,11 @@ function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
 const AUTOSAVE_MS = 1200
 
 function NoteEditor({ note, onSave, isSaving }) {
-  const [title, setTitle] = useState('')
+  const initialTitle = note?.title ?? ''
+  const [title, setTitle] = useState(initialTitle)
   const [dirty, setDirty] = useState(false)
   const timerRef = useRef(null)
-  const titleRef = useRef('')
+  const titleRef = useRef(initialTitle)
   const onSaveRef = useRef(onSave)
   useEffect(() => { onSaveRef.current = onSave }, [onSave])
 
@@ -268,7 +270,7 @@ function NoteEditor({ note, onSave, isSaving }) {
       Underline,
       Placeholder.configure({ placeholder: 'Start writing…' }),
     ],
-    content: { type: 'doc', content: [{ type: 'paragraph' }] },
+    content: parseContent(note?.content ?? note?.content_json),
     immediatelyRender: false,
     editorProps: {
       attributes: { class: 'tiptap-note focus:outline-none' },
@@ -284,17 +286,6 @@ function NoteEditor({ note, onSave, isSaving }) {
       }, AUTOSAVE_MS)
     },
   })
-
-  // Load content when switching notes
-  useEffect(() => {
-    if (!note || !editor || editor.isDestroyed) return
-    clearTimeout(timerRef.current)
-    setDirty(false)
-    const t = note.title ?? ''
-    setTitle(t)
-    titleRef.current = t
-    editor.commands.setContent(parseContent(note.content ?? note.content_json), false)
-  }, [note?.id, editor])
 
   useEffect(() => { titleRef.current = title }, [title])
   useEffect(() => () => clearTimeout(timerRef.current), [])
@@ -418,7 +409,7 @@ export default function NotesPage() {
         onNew={handleNew}
         onDelete={handleDelete}
       />
-      <NoteEditor note={activeNote} onSave={handleSave} isSaving={isSaving} />
+      <NoteEditor key={activeNote?.id ?? 'empty'} note={activeNote} onSave={handleSave} isSaving={isSaving} />
     </div>
   )
 }

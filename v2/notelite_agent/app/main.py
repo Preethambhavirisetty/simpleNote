@@ -2,7 +2,6 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from fastapi import FastAPI, Request, HTTPException
@@ -16,9 +15,11 @@ from app.core.settings import init_llama_index_settings
 from app.shared.api_models import HealthData
 from app.shared.routes import router as shared_router
 from app.shared.schema import ApiResponse
+from app.logger import logger, setup_logging
 
 
-log = structlog.get_logger()
+setup_logging(service="agent")
+log = logger
 
 
 @asynccontextmanager

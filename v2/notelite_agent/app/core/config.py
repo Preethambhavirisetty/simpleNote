@@ -17,6 +17,11 @@ BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
 
 
+# Prompt selection
+ACTIVE_CHAT_SYSTEM_VERSION = require_env("ACTIVE_CHAT_SYSTEM_VERSION")
+ACTIVE_SUMMARIZER_VERSION = require_env("ACTIVE_SUMMARIZER_VERSION")
+
+
 # Knowledge ingestion
 MAX_CHUNK_SIZE = int(require_env("MAX_CHUNK_SIZE"))
 CHUNK_OVERLAP = int(require_env("CHUNK_OVERLAP"))

@@ -3,6 +3,9 @@ import { devtools } from 'zustand/middleware'
 import { notesApi } from '@/api/notes'
 import { unwrap, unwrapList } from '@/lib/api'
 
+const pendingNoteLoads = new Map()
+let requestedNoteId = null
+
 // ---------- TipTap helpers ----------
 // BE field is "content" (TipTap JSON). These helpers convert to/from plain text
 // for the baseline textarea editor. Swap out when adding a rich editor.
@@ -59,19 +62,28 @@ export const useNoteStore = create(
       openNote: async (noteId) => {
         if (!noteId) return null
 
-        // Optimistically show cached version while full note loads
-        const cached = get().notes.find((n) => n.id === noteId)
-        if (cached) set({ activeNote: cached })
+        requestedNoteId = noteId
+        if (get().activeNote?.id !== noteId) set({ activeNote: null })
 
-        try {
-          const { data } = await notesApi.get(noteId)
-          const note = normalizeNote(unwrap(data))
-          set({ activeNote: note })
-          return note
-        } catch (err) {
-          console.error('[noteStore] openNote:', err.response?.data ?? err.message)
-          return null
-        }
+        // URL synchronization and click handlers can request the same note in
+        // the same render cycle. Share that request instead of issuing two GETs.
+        const pending = pendingNoteLoads.get(noteId)
+        if (pending) return pending
+
+        const request = notesApi.get(noteId)
+          .then(({ data }) => {
+            const note = normalizeNote(unwrap(data))
+            if (requestedNoteId === noteId) set({ activeNote: note })
+            return note
+          })
+          .catch((err) => {
+            console.error('[noteStore] openNote:', err.response?.data ?? err.message)
+            return null
+          })
+          .finally(() => pendingNoteLoads.delete(noteId))
+
+        pendingNoteLoads.set(noteId, request)
+        return request
       },
 
       createNote: async (payload) => {
@@ -85,6 +97,7 @@ export const useNoteStore = create(
           }
           const { data } = await notesApi.create(body)
           const note = normalizeNote(unwrap(data))
+          requestedNoteId = note.id
           set((s) => ({ notes: [note, ...s.notes], activeNote: note }))
           return { ok: true, note }
         } catch (err) {
@@ -114,6 +127,7 @@ export const useNoteStore = create(
       deleteNote: async (noteId) => {
         try {
           await notesApi.delete(noteId)
+          if (requestedNoteId === noteId) requestedNoteId = null
           set((s) => ({
             notes: s.notes.filter((n) => n.id !== noteId),
             activeNote: s.activeNote?.id === noteId ? null : s.activeNote,
@@ -135,7 +149,10 @@ export const useNoteStore = create(
         }
       },
 
-      clearActiveNote: () => set({ activeNote: null }),
+      clearActiveNote: () => {
+        requestedNoteId = null
+        set({ activeNote: null })
+      },
     }),
     { name: 'note-store' },
   ),

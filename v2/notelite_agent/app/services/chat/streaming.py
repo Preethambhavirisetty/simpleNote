@@ -10,7 +10,8 @@ import httpx
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.core.config import LLM_REASONER_MODEL
+from app.core.config import ACTIVE_CHAT_SYSTEM_VERSION, LLM_REASONER_MODEL
+from app.logger import logger
 from app.services.chat import conversation, llm_client, retriever
 from app.shared.prompts import prompt
 from app.services.chat.schema import ChatRequest
@@ -96,7 +97,7 @@ class StreamingService:
             except Exception:
                 latencies_ms["retrieval_ms"] = _elapsed_ms(retrieval_started)
                 events.append("retrieval.failed")
-                log.warning("context retrieval failed", exc_info=True)
+                logger.exception("retrieval.failed", retrieval_ms=latencies_ms["retrieval_ms"])
 
         # ── Prompt assembly ───────────────────────────────────────────────────
         prompt_started = time.perf_counter()
@@ -185,6 +186,28 @@ class StreamingService:
                     usage["total_tokens"] = (
                         usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
                     )
+
+                outcome = "cancelled" if was_cancelled else "failed" if error_message else "completed"
+                logger_method = logger.error if error_message else logger.info
+                logger_method(
+                    "chat.completed",
+                    outcome=outcome,
+                    model=self.model,
+                    chat_system_version=ACTIVE_CHAT_SYSTEM_VERSION,
+                    context_chunk_count=len(context_texts),
+                    source_count=len(references),
+                    retrieval_ms=latencies_ms.get("retrieval_ms", 0),
+                    prompt_ms=latencies_ms.get("prompt_ms", 0),
+                    first_token_ms=latencies_ms.get("first_token_ms", 0),
+                    inference_ms=latencies_ms["inference_ms"],
+                    total_ms=latencies_ms["total_ms"],
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    cancelled=was_cancelled,
+                    inference_error=bool(error_message),
+                    events=events,
+                )
 
                 conversation.persist_assistant_message(
                     request=request,

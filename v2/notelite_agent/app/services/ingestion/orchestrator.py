@@ -6,6 +6,8 @@ from app.services.ingestion.processors.keywords import KeywordProcessor
 from app.services.ingestion.processors.summary.questions_generator import QuestionsGenerator
 from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
 from app.services.ingestion.processors.ingest.document_builder import DocumentBuilder
+from app.core.config import ACTIVE_SUMMARIZER_VERSION
+from app.logger import logger
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.utils import count_tokens
 
@@ -81,7 +83,7 @@ class IngestionOrchestrator:
 
         events.append("ingestion completed")
 
-        return {
+        result = {
             "action": action,
             "status": "processed",
             "note_id": payload.get("note_id"),
@@ -112,16 +114,41 @@ class IngestionOrchestrator:
             },
             "summary": note_summary_obj.summary
         }
+        stages_ms = result["stages_ms"]
+        api_calls = result["api_calls"]
+        logger.info(
+            "ingestion.completed",
+            note_id=result["note_id"],
+            summarizer_version=ACTIVE_SUMMARIZER_VERSION,
+            text_tokens=text_tokens,
+            chunk_count=result["chunk_count"],
+            summary_skipped=not bool(note_summary_obj.summary),
+            llm_calls_total=api_calls["total"],
+            keyword_dedup_calls=api_calls["keyword_dedup"],
+            summary_calls=api_calls["summary"],
+            question_calls=api_calls["questions"],
+            chunking_ms=stages_ms["chunking"],
+            keyword_extraction_ms=stages_ms["keyword_extraction"],
+            summary_ms=stages_ms["summary"],
+            questions_ms=stages_ms["questions"],
+            document_build_ms=stages_ms["document_build"],
+            document_ingestion_ms=stages_ms["document_ingestion"],
+            total_ms=stages_ms["total"],
+            events=events,
+        )
+        return result
 
     def delete_action(self, payload: dict) -> dict:
         doc_id = self._doc_id(payload)
         self.vector_store.delete_document(doc_id)
-        return {
+        result = {
             "action": "delete",
             "status": "deleted",
             "doc_id": doc_id,
             "note_id": payload.get("note_id"),
         }
+        logger.info("ingestion.deleted", note_id=result["note_id"])
+        return result
 
     @staticmethod
     def _payload(data: Optional[dict], **kwargs) -> dict:

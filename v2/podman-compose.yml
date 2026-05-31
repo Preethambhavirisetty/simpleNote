@@ -28,6 +28,8 @@ volumes:
   postgres-data:
   qdrant-data:
   agent-model-cache:
+  loki-data:
+  grafana-data:
 
 services:
 
@@ -86,6 +88,38 @@ services:
     networks:
       - notelite-net
 
+  # ── Observability ────────────────────────────────────────────────────────────
+
+  loki:
+    image: docker.io/grafana/loki:2.9.0
+    container_name: notelite-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./logging/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+    networks:
+      - notelite-net
+
+  grafana:
+    image: docker.io/grafana/grafana:10.2.0
+    container_name: notelite-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./logging/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - notelite-net
+
   # ── Backend (FastAPI) ────────────────────────────────────────────────────────
 
   backend:
@@ -101,6 +135,7 @@ services:
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     ports:
@@ -148,6 +183,7 @@ services:
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
     volumes:
       - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
@@ -179,6 +215,7 @@ services:
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
     volumes:
       - agent-model-cache:/app/.cache
       - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro

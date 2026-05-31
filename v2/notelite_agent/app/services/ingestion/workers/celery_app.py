@@ -1,4 +1,7 @@
 from celery import Celery
+from celery.signals import worker_process_init
+
+from app.logger import setup_logging
 
 from app.core.config import (
     CELERY_RESULT_BACKEND,
@@ -30,3 +33,8 @@ celery_app.conf.update(
     },
     imports=("app.services.ingestion.workers.ingestion_tasks",),
 )
+
+
+@worker_process_init.connect
+def configure_worker_logging(**_kwargs) -> None:
+    setup_logging(service="agent-celery")

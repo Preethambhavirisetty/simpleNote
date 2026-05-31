@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_postgres_db, get_qdrant_store
+from app.logger import logger
 from app.services.ingestion.orchestrator import IngestionOrchestrator
 from app.services.ingestion.schema import (
     IngestionDeletedData,
@@ -72,8 +73,10 @@ def ingest_note_direct(
         result = IngestionOrchestrator(vector_store=vector_store).run(payload.model_dump(exclude_none=True))
         return ApiResponse.ok(result)
     except ValueError as exc:
+        logger.warning("ingestion.failed", action=payload.action, note_id=payload.note_id, error_type=type(exc).__name__)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
+        logger.error("ingestion.failed", action=payload.action, note_id=payload.note_id, error_type=type(exc).__name__)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 

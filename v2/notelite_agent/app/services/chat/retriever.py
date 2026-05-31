@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from app.core.config import LLM_CONTEXT_WINDOW, RERANKER_API_BASE
+from app.logger import logger
 from app.services.chat.reranker import rerank
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.utils import count_tokens
@@ -132,6 +133,19 @@ def retrieve_context_diagnostics(
         "context_budget_tokens": _CONTEXT_BUDGET,
         "remaining_context_budget_tokens": token_budget,
     }
+    logger.info(
+        "retrieval.completed",
+        summary_hit_count=len(summary_hits),
+        chunk_hit_count=len(chunk_hits),
+        reranked_hit_count=len(ranked),
+        selected_context_count=len(context_texts),
+        source_count=len(source_ids),
+        remaining_context_budget_tokens=token_budget,
+        context_budget_tokens=_CONTEXT_BUDGET,
+        fallback_to_all_chunks=not bool(doc_ids),
+        reranker_enabled=bool(RERANKER_API_BASE),
+        chunk_search_scope=diagnostics["chunk_search_scope"],
+    )
     return context_texts, references, diagnostics
 
 

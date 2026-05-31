@@ -2,6 +2,7 @@ import logging
 
 from app.core.config import INGESTION_TASK_STRING
 from app.core.settings import init_llama_index_settings
+from app.logger import logger
 from app.services.ingestion.orchestrator import IngestionOrchestrator
 from app.services.ingestion.workers.celery_app import CONVERSATION_TASK, celery_app
 
@@ -18,7 +19,16 @@ log = logging.getLogger(__name__)
 )
 def ingest_in_background(self, data=None, **kwargs):
     init_llama_index_settings()
-    return IngestionOrchestrator().run(data, **kwargs)
+    try:
+        return IngestionOrchestrator().run(data, **kwargs)
+    except Exception:
+        payload = IngestionOrchestrator._payload(data, **kwargs)
+        logger.exception(
+            "ingestion.failed",
+            action=payload.get("action", "upsert"),
+            note_id=payload.get("note_id"),
+        )
+        raise
 
 
 @celery_app.task(
