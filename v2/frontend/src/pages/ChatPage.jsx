@@ -34,10 +34,17 @@ export default function ChatPage() {
     if (conversationId) selectConversation(conversationId)
     else newConversation()
   }, [conversationId, newConversation, selectConversation])
+  // A newly streamed conversation starts at /chat and receives its ID from
+  // SSE metadata. Existing conversation URLs remain the source of truth.
   useEffect(() => {
-    if (activeConversationId && activeConversationId !== conversationId) navigate(`/chat/${activeConversationId}`, { replace: true })
-  }, [activeConversationId, conversationId, navigate])
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+    if (isStreaming && activeConversationId && !conversationId) navigate(`/chat/${activeConversationId}`, { replace: true })
+  }, [activeConversationId, conversationId, isStreaming, navigate])
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [isStreaming, messages])
   useEffect(() => () => cancelStream(), [cancelStream])
 
   const handleSend = async () => {
