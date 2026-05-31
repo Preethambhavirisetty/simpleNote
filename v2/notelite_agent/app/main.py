@@ -13,6 +13,7 @@ from app.services.ingestion.routes import router as ingestion_router
 from app.services.chat.routes import router as chat_router
 from app.core.openapi import OPENAPI_TAGS, configure_openapi
 from app.core.settings import init_llama_index_settings
+from app.shared.api_models import HealthData
 from app.shared.routes import router as shared_router
 from app.shared.schema import ApiResponse
 
@@ -112,8 +113,9 @@ async def request_middleware(request: Request, call_next):
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.get("/health", response_model=ApiResponse[dict], tags=["health"], summary="Check agent health")
+@app.get("/health", response_model=ApiResponse[HealthData], tags=["health"], summary="Check agent health")
 def health():
+    """Return a lightweight agent liveness response."""
     return ApiResponse.ok({"status": "ok"})
 
 

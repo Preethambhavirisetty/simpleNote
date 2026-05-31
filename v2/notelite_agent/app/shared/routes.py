@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import secrets
-from typing import Any
-
 from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.core.config import AGENT_API_KEY
+from app.shared.api_models import PromptDefinition, PromptPreviewData, PromptPreviewRequest
 from app.shared.prompts.prompt_manager import PromptError, prompt_manager
 from app.shared.schema import ApiResponse
 
@@ -24,7 +23,7 @@ router = APIRouter(
 )
 
 
-@router.get("/{name}", response_model=ApiResponse[dict])
+@router.get("/{name}", response_model=ApiResponse[PromptDefinition], summary="Get a prompt definition")
 def get_prompt(name: str):
     """Return the current YAML prompt definition."""
     try:
@@ -33,11 +32,11 @@ def get_prompt(name: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/{name}/preview", response_model=ApiResponse[dict])
-def preview_prompt(name: str, variables: dict[str, Any]):
+@router.post("/{name}/preview", response_model=ApiResponse[PromptPreviewData], summary="Preview a rendered prompt")
+def preview_prompt(name: str, variables: PromptPreviewRequest):
     """Render a prompt definition without calling an LLM."""
     try:
-        return ApiResponse.ok(prompt_manager.render(name, **variables))
+        return ApiResponse.ok(prompt_manager.render(name, **variables.root))
     except PromptError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:

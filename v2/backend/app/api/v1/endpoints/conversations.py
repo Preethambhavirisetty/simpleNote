@@ -5,6 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
+from app.schema.responses import ApiResponse, ConversationData, ConversationDetailData, MessageData
+
 from app.core.config import AGENT_API_KEY
 from app.core.feature_flags import require_feature
 from app.db.postgres.models.conversation import Conversation, Message
@@ -103,7 +105,7 @@ def _msg_dict(msg: Message) -> dict:
 
 # ── Cookie-auth routes (FE) ──────────────────────────────────────────────────
 
-@router.get("/")
+@router.get("/", response_model=ApiResponse[list[ConversationData]], summary="List conversations")
 def list_conversations(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -111,39 +113,43 @@ def list_conversations(
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """List conversations owned by the authenticated user."""
     convs = service.list(db, current_user.id, skip=skip, limit=limit)
     return success_response([_conv_dict(c) for c in convs], "Conversations retrieved")
 
 
-@router.post("/")
+@router.post("/", response_model=ApiResponse[ConversationData], summary="Create a conversation")
 def create_conversation(
     payload: ConversationCreate,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Create a conversation for the authenticated user."""
     conv = service.create(db, current_user.id, payload)
     return success_response(_conv_dict(conv), "Conversation created")
 
 
-@router.get("/{conv_id}")
+@router.get("/{conv_id}", response_model=ApiResponse[ConversationDetailData], summary="Get a conversation")
 def get_conversation(
     conv_id: UUID,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Return one conversation and its messages."""
     conv = service.get(db, conv_id, current_user.id)
     return success_response(_conv_detail_dict(conv), "Conversation retrieved")
 
 
-@router.delete("/{conv_id}")
+@router.delete("/{conv_id}", response_model=ApiResponse[None], summary="Delete a conversation")
 def delete_conversation(
     conv_id: UUID,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Delete one conversation owned by the authenticated user."""
     service.delete(db, conv_id, current_user.id)
     return success_response(None, "Conversation deleted")
 
@@ -151,7 +157,7 @@ def delete_conversation(
 # ── Internal service routes (Agent -> Backend) ────────────────────────────────
 # These use X-Internal-Key + X-User-Id headers instead of cookies.
 
-@router.get("/internal/{conv_id}")
+@router.get("/internal/{conv_id}", response_model=ApiResponse[ConversationDetailData], summary="Get a conversation internally")
 def internal_get_conversation(
     conv_id: UUID,
     x_internal_key: str = Header(...),
@@ -159,12 +165,13 @@ def internal_get_conversation(
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Return one conversation for an authenticated internal agent request."""
     user_id = _resolve_user_id(x_internal_key=x_internal_key, x_user_id=x_user_id)
     conv = service.get(db, conv_id, user_id)
     return success_response(_conv_detail_dict(conv), "Conversation retrieved")
 
 
-@router.post("/internal/")
+@router.post("/internal/", response_model=ApiResponse[ConversationData], summary="Create a conversation internally")
 def internal_create_conversation(
     payload: ConversationCreate,
     x_internal_key: str = Header(...),
@@ -172,12 +179,13 @@ def internal_create_conversation(
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Create a conversation for an authenticated internal agent request."""
     user_id = _resolve_user_id(x_internal_key=x_internal_key, x_user_id=x_user_id)
     conv = service.create(db, user_id, payload)
     return success_response(_conv_dict(conv), "Conversation created")
 
 
-@router.post("/internal/{conv_id}/messages")
+@router.post("/internal/{conv_id}/messages", response_model=ApiResponse[MessageData], summary="Create a conversation message internally")
 def internal_create_message(
     conv_id: UUID,
     payload: MessageCreate,
@@ -186,12 +194,13 @@ def internal_create_message(
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Create a message in a conversation from the agent service."""
     user_id = _resolve_user_id(x_internal_key=x_internal_key, x_user_id=x_user_id)
     msg = service.create_message(db, conv_id, user_id, payload)
     return success_response(_msg_dict(msg), "Message created")
 
 
-@router.patch("/internal/{conv_id}/messages/{msg_id}")
+@router.patch("/internal/{conv_id}/messages/{msg_id}", response_model=ApiResponse[MessageData], summary="Update a conversation message internally")
 def internal_update_message(
     conv_id: UUID,
     msg_id: UUID,
@@ -201,6 +210,7 @@ def internal_update_message(
     db: Session = Depends(get_postgres_session),
     service: ConversationService = Depends(get_conversation_service),
 ):
+    """Update a conversation message from the agent service."""
     user_id = _resolve_user_id(x_internal_key=x_internal_key, x_user_id=x_user_id)
     msg = service.update_message(db, conv_id, msg_id, user_id, payload)
     return success_response(_msg_dict(msg), "Message updated")

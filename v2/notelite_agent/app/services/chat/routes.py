@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.config import LLM_REASONER_MODEL
 from app.core.dependencies import get_qdrant_store
 from app.services.chat import retriever
-from app.services.chat.schema import ChatRequest, ChatStageRequest, ConversationHistoryRequest
+from app.services.chat.schema import (
+    ChatCompletionData,
+    ChatCompletionRequest,
+    ChatRequest,
+    ChatStageRequest,
+    ConversationHistoryData,
+    ConversationHistoryRequest,
+    PromptStageData,
+    RetrievalDiagnosticsData,
+)
 from app.services.chat.streaming import StreamingService
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.backend_conversation_client import BackendConversationClient
@@ -25,12 +32,10 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 _streaming_service = StreamingService()
 
 
-@router.post("/completions", response_model=ApiResponse[dict])
-def chat_completion(payload: dict[str, Any] = Body(...)):
+@router.post("/completions", response_model=ApiResponse[ChatCompletionData], summary="Create a direct chat completion")
+def chat_completion(payload: ChatCompletionRequest):
     """Non-streaming LLM proxy. Does not perform retrieval or manage conversations."""
-    messages = payload.get("messages")
-    if not messages or not isinstance(messages, list):
-        raise HTTPException(status_code=400, detail="'messages' must be a non-empty list")
+    messages = [message.model_dump() for message in payload.messages]
 
     try:
         response = llm_call_general(messages, model=LLM_REASONER_MODEL)
@@ -42,7 +47,7 @@ def chat_completion(payload: dict[str, Any] = Body(...)):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@router.post("/stages/retrieval", response_model=ApiResponse[dict])
+@router.post("/stages/retrieval", response_model=ApiResponse[RetrievalDiagnosticsData], summary="Inspect retrieval stages")
 def retrieval_stage(
     request: ChatStageRequest,
     vector_store: QdrantVectorStore = Depends(get_qdrant_store),
@@ -55,7 +60,7 @@ def retrieval_stage(
     return ApiResponse.ok(diagnostics)
 
 
-@router.post("/stages/prompt", response_model=ApiResponse[dict])
+@router.post("/stages/prompt", response_model=ApiResponse[PromptStageData], summary="Inspect assembled prompt")
 def prompt_stage(
     request: ChatStageRequest,
     vector_store: QdrantVectorStore = Depends(get_qdrant_store),
@@ -75,7 +80,7 @@ def prompt_stage(
     })
 
 
-@router.post("/conversation-history", response_model=ApiResponse[dict])
+@router.post("/conversation-history", response_model=ApiResponse[ConversationHistoryData], summary="Fetch conversation history")
 def get_conversation_history(request: ConversationHistoryRequest):
     """Fetch raw stored messages without creating a chat turn."""
     client = BackendConversationClient()
@@ -87,7 +92,12 @@ def get_conversation_history(request: ConversationHistoryRequest):
     })
 
 
-@router.post("/stream")
+@router.post(
+    "/stream",
+    summary="Stream a RAG chat response",
+    description="Streams Server-Sent Events: meta, delta, error, and done.",
+    responses={200: {"description": "SSE chat stream", "content": {"text/event-stream": {}}}},
+)
 def chat_stream(
     request: ChatRequest,
     vector_store: QdrantVectorStore = Depends(get_qdrant_store),
