@@ -1,10 +1,16 @@
 import re
 
-from app.core.config import CHUNK_OVERLAP, MAX_CHUNK_SIZE
+from app.core.config import MAX_CHUNK_SIZE
 from app.services.ingestion.processors.chunking.token_budget import (
     split_by_token_window,
     token_count,
     within_chunk_budget,
+)
+from app.services.ingestion.processors.chunking.validators import (
+    is_fenced_code_block,
+    is_table_like,
+    is_table_rowish_chunk,
+    split_preserving_fenced_code_blocks,
 )
 
 
@@ -12,7 +18,7 @@ _sentencizer = None
 
 
 class WindowChunker:
-    """Final size splitter using sentence-aware windows with overlap."""
+    """Final size splitter using sentence-aware and table-aware boundaries."""
 
     def split(self, text: str) -> list[str]:
         clean = text.strip()
@@ -21,16 +27,26 @@ class WindowChunker:
         if within_chunk_budget(clean):
             return [clean]
 
-        sentences = self._split_sentences(clean)
-        if len(sentences) <= 1:
-            return self._hard_split(clean)
+        parts: list[str] = []
+        for segment in split_preserving_fenced_code_blocks(clean):
+            if is_fenced_code_block(segment):
+                parts.append(segment.strip())
+                continue
 
-        parts = self._merge_sentence_windows(sentences)
-        if any(not within_chunk_budget(part) for part in parts):
-            bounded_parts = []
-            for part in parts:
-                bounded_parts.extend(self._hard_split(part))
-            return bounded_parts
+            if within_chunk_budget(segment):
+                parts.append(segment.strip())
+                continue
+
+            if is_table_like(segment):
+                parts.extend(self._split_table_rows(segment))
+                continue
+
+            sentences = self._split_sentences(segment)
+            if len(sentences) <= 1:
+                parts.extend(self._hard_split(segment))
+                continue
+
+            parts.extend(self._merge_sentence_windows(sentences))
 
         return parts
 
@@ -45,8 +61,8 @@ class WindowChunker:
 
             if current and current_len + separator_len + sentence_len > MAX_CHUNK_SIZE:
                 parts.append(" ".join(current).strip())
-                current = self._overlap_sentences(current)
-                current_len = token_count(" ".join(current)) if current else 0
+                current = []
+                current_len = 0
 
             if not current:
                 current = [sentence]
@@ -68,21 +84,42 @@ class WindowChunker:
 
         return [part for part in parts if part]
 
+    def _split_table_rows(self, text: str) -> list[str]:
+        parts: list[str] = []
+        current: list[str] = []
+        header_context = self._table_header_context(text)
+
+        for line in [line.rstrip() for line in text.splitlines() if line.strip()]:
+            candidate_lines = [*current, line]
+            candidate = "\n".join(candidate_lines).strip()
+            if current and not within_chunk_budget(candidate):
+                parts.append("\n".join(current).strip())
+                current = [*header_context]
+                if line not in current:
+                    current.append(line)
+                continue
+
+            current = candidate_lines
+
+        if current:
+            parts.append("\n".join(current).strip())
+
+        output: list[str] = []
+        for part in parts:
+            if within_chunk_budget(part) or is_table_rowish_chunk(part):
+                output.append(part)
+            else:
+                output.extend(self._merge_sentence_windows(self._split_sentences(part)))
+        return [part for part in output if part]
+
     @staticmethod
-    def _overlap_sentences(sentences: list[str]) -> list[str]:
-        if not sentences or CHUNK_OVERLAP <= 0:
-            return []
-
-        overlap = []
-        total_len = 0
-        for sentence in reversed(sentences):
-            next_len = token_count(sentence) + (1 if overlap else 0)
-            if overlap and total_len + next_len > CHUNK_OVERLAP:
-                break
-            overlap.insert(0, sentence)
-            total_len += next_len
-
-        return overlap[-1:] if not overlap else overlap
+    def _table_header_context(text: str) -> list[str]:
+        lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+        for index, line in enumerate(lines[:-1]):
+            next_line = lines[index + 1].strip()
+            if line.count("|") >= 2 and re.match(r"^\|?[-: ]+\|[-|: ]+\|?$", next_line):
+                return [line, lines[index + 1]]
+        return []
 
     @staticmethod
     def _split_sentences(text: str) -> list[str]:
@@ -106,7 +143,7 @@ class WindowChunker:
         if within_chunk_budget(clean):
             return [clean]
 
-        return split_by_token_window(clean)
+        return split_by_token_window(clean, overlap_tokens=0)
 
 
 def _get_sentencizer():

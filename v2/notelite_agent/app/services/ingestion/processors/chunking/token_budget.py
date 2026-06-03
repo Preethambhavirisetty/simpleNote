@@ -21,7 +21,7 @@ def within_overlap_budget(text: str) -> bool:
     return token_count(text) <= CHUNK_OVERLAP
 
 
-def split_by_token_window(text: str) -> list[str]:
+def split_by_token_window(text: str, overlap_tokens: int | None = None) -> list[str]:
     clean = text.strip()
     if not clean:
         return []
@@ -30,7 +30,8 @@ def split_by_token_window(text: str) -> list[str]:
     if len(tokens) <= MAX_CHUNK_SIZE:
         return [clean]
 
-    overlap = max(0, min(CHUNK_OVERLAP, max(0, MAX_CHUNK_SIZE - 1)))
+    requested_overlap = CHUNK_OVERLAP if overlap_tokens is None else overlap_tokens
+    overlap = max(0, min(requested_overlap, max(0, MAX_CHUNK_SIZE - 1)))
     step = max(1, MAX_CHUNK_SIZE - overlap)
 
     parts = []

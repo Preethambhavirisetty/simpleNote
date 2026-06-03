@@ -8,6 +8,10 @@ from llama_index.core.node_parser import SemanticSplitterNodeParser
 
 from app.core.config import BREAKPOINT_PERCENTILE
 from app.services.ingestion.processors.chunking.token_budget import within_chunk_budget
+from app.services.ingestion.processors.chunking.validators import (
+    is_fenced_code_block,
+    split_preserving_fenced_code_blocks,
+)
 from app.services.ingestion.processors.chunking.window_chunker import WindowChunker
 
 
@@ -28,13 +32,18 @@ class SemanticChunker:
         if within_chunk_budget(clean):
             return [clean]
 
-        semantic_parts = self._semantic_split(clean)
-        if not semantic_parts:
-            semantic_parts = [clean]
+        parts: list[str] = []
+        for segment in split_preserving_fenced_code_blocks(clean):
+            if is_fenced_code_block(segment):
+                parts.append(segment.strip())
+                continue
 
-        parts = []
-        for part in semantic_parts:
-            parts.extend(self._window_chunker.split(part))
+            semantic_parts = self._semantic_split(segment)
+            if not semantic_parts:
+                semantic_parts = [segment]
+
+            for part in semantic_parts:
+                parts.extend(self._window_chunker.split(part))
 
         return parts
 

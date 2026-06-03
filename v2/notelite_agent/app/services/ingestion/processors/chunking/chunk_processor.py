@@ -7,10 +7,7 @@ from app.services.ingestion.processors.chunking.heading_chunker import HeadingCh
 from app.services.ingestion.processors.chunking.heading_processor import HeadingProcessor
 from app.services.ingestion.processors.chunking.post_processor import ChunkPostProcessor
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
-from app.services.ingestion.processors.chunking.token_budget import (
-    token_count,
-    within_chunk_budget,
-)
+from app.services.ingestion.processors.chunking.token_budget import token_count
 from app.services.ingestion.processors.chunking.validators import validate_chunk
 
 
@@ -36,28 +33,23 @@ class ChunkProcessor:
         log.info("Chunking began...")
 
         prepared_text = self.heading_chunker.inject_numbered_line_breaks(text)
-        paragraphs = [p.strip() for p in prepared_text.split("\n\n") if p.strip()]
+        paragraphs = self._split_paragraphs_preserving_code(prepared_text)
 
         chunks = []
         pending_paragraph = ""
 
+        heading_context: list[str] = []
         for paragraph in paragraphs:
             current = f"{pending_paragraph}\n{paragraph}".strip() if pending_paragraph else paragraph
             pending_paragraph = ""
 
-            if within_chunk_budget(current):
-                pending_paragraph = self._handle_small_paragraph(current, chunks)
-                continue
-
             heading_parts = self.heading_chunker.split(current)
-            if len(heading_parts) > 1:
-                pending_paragraph = self.heading_processor.process(
-                    heading_parts,
-                    chunks,
-                    pending_paragraph,
-                )
-            else:
-                chunks.extend(self.semantic_chunker.split(current))
+            pending_paragraph = self.heading_processor.process(
+                heading_parts,
+                chunks,
+                pending_paragraph,
+                heading_context,
+            )
 
         if pending_paragraph and validate_chunk(pending_paragraph) != "DISCARD":
             chunks.append(pending_paragraph)
@@ -78,11 +70,29 @@ class ChunkProcessor:
         ]
 
     @staticmethod
-    def _handle_small_paragraph(paragraph: str, chunks: list[str]) -> str:
-        verdict = validate_chunk(paragraph)
-        if verdict == "VALID":
-            chunks.append(paragraph)
-            return ""
-        if verdict == "NEEDS_MERGE":
-            return paragraph
-        return ""
+    def _split_paragraphs_preserving_code(text: str) -> list[str]:
+        paragraphs = []
+        current = []
+        in_code = False
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_code = not in_code
+                current.append(line)
+                continue
+
+            if not stripped and not in_code:
+                paragraph = "\n".join(current).strip()
+                if paragraph:
+                    paragraphs.append(paragraph)
+                current = []
+                continue
+
+            current.append(line)
+
+        paragraph = "\n".join(current).strip()
+        if paragraph:
+            paragraphs.append(paragraph)
+
+        return paragraphs
