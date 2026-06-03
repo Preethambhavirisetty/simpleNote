@@ -9,7 +9,7 @@ from fastapi.openapi.utils import get_openapi
 OPENAPI_TAGS = [
     {"name": "health", "description": "Agent service liveness check."},
     {"name": "ingestion", "description": "Queue, run, and inspect note ingestion jobs."},
-    {"name": "chat", "description": "Chat completion, retrieval diagnostics, prompt inspection, and SSE streaming."},
+    {"name": "chat", "description": "Chat completion, conversation history, and SSE streaming."},
     {"name": "pipeline-actions", "description": "Typed one-off ingestion and retrieval stage runners for debugging."},
     {"name": "prompts", "description": "Internal prompt definition and rendering previews."},
 ]

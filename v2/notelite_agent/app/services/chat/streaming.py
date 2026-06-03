@@ -90,7 +90,7 @@ class StreamingService:
             retrieval_started = time.perf_counter()
             try:
                 context_texts, references = retriever.retrieve_context(
-                    vector_store, query, request.user_id, request.k, request.role,
+                    vector_store, query, request.user_id, request.k, request.role, history,
                 )
                 latencies_ms["retrieval_ms"] = _elapsed_ms(retrieval_started)
                 events.append(f"retrieval.completed chunks={len(context_texts)}")

@@ -7,22 +7,17 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import LLM_REASONER_MODEL
 from app.core.dependencies import get_qdrant_store
-from app.services.chat import retriever
 from app.services.chat.schema import (
     ChatCompletionData,
     ChatCompletionRequest,
     ChatRequest,
-    ChatStageRequest,
     ConversationHistoryData,
     ConversationHistoryRequest,
-    PromptStageData,
-    RetrievalDiagnosticsData,
 )
 from app.services.chat.streaming import StreamingService
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.backend_conversation_client import BackendConversationClient
 from app.shared.llm import llm_call_general
-from app.shared.prompts import prompt
 from app.shared.schema import ApiResponse
 
 
@@ -45,39 +40,6 @@ def chat_completion(payload: ChatCompletionRequest):
         raise HTTPException(status_code=503, detail="Inference service error") from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-
-@router.post("/stages/retrieval", response_model=ApiResponse[RetrievalDiagnosticsData], summary="Inspect retrieval stages")
-def retrieval_stage(
-    request: ChatStageRequest,
-    vector_store: QdrantVectorStore = Depends(get_qdrant_store),
-):
-    """Inspect summary search, chunk search, reranking, and context selection."""
-    query = _require_query(request.query)
-    _, _, diagnostics = retriever.retrieve_context_diagnostics(
-        vector_store, query, request.user_id, request.k, request.role,
-    )
-    return ApiResponse.ok(diagnostics)
-
-
-@router.post("/stages/prompt", response_model=ApiResponse[PromptStageData], summary="Inspect assembled prompt")
-def prompt_stage(
-    request: ChatStageRequest,
-    vector_store: QdrantVectorStore = Depends(get_qdrant_store),
-):
-    """Inspect the exact messages assembled after retrieval."""
-    query = _require_query(request.query)
-    context_texts, _, diagnostics = retriever.retrieve_context_diagnostics(
-        vector_store, query, request.user_id, request.k, request.role,
-    )
-    history = [message.model_dump() for message in request.history]
-    messages = prompt.build_messages(query, history, context_texts)
-    return ApiResponse.ok({
-        "retrieval": diagnostics,
-        "history": history,
-        "messages": messages,
-        "prompt_tokens_estimate": prompt.estimate_prompt_tokens(messages),
-    })
 
 
 @router.post("/conversation-history", response_model=ApiResponse[ConversationHistoryData], summary="Fetch conversation history")
@@ -104,10 +66,3 @@ def chat_stream(
 ) -> StreamingResponse:
     """Stream assistant output as SSE with RAG context from the user's notes."""
     return _streaming_service.stream(request, vector_store=vector_store)
-
-
-def _require_query(query: str) -> str:
-    query = query.strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty.")
-    return query
