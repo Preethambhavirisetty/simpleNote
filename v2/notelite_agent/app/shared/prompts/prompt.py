@@ -50,3 +50,8 @@ def build_messages(
 def estimate_prompt_tokens(messages: Sequence[dict[str, str]]) -> int:
     # ~4 overhead tokens per message beyond content (chat template overhead)
     return sum(count_tokens(m.get("content", "")) + 4 for m in messages)
+
+
+if __name__ == "__main__":
+    summary_prompt = get_group_summary_system_prompt()
+    print(summary_prompt)
