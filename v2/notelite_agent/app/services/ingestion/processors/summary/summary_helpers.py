@@ -5,12 +5,13 @@ import re
 
 from app.core.config import LLM_CONTEXT_WINDOW
 from app.services.ingestion.processors.chunking import TextChunk
+from app.shared.utils import count_tokens
 
 
 MIN_SUMMARY_WORDS = 5
 MIN_CHUNK_CHARS_FOR_SUMMARY = 30
 DIRECT_SUMMARY_THRESHOLD = 3000
-SUMMARY_GROUP_TOKEN_LIMIT = LLM_CONTEXT_WINDOW  # model context window in tokens
+SUMMARY_GROUP_TOKEN_LIMIT = LLM_CONTEXT_WINDOW
 SUMMARY_GROUP_TOKEN_BUFFER = 128  # safety reserve for overhead and estimation error
 GROUP_SUMMARY_MAX_TOKENS = 150
 FINAL_SUMMARY_MAX_TOKENS = 260
@@ -46,6 +47,13 @@ LIST_SUMMARY_PATTERN = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+", re.MULTILINE)
 
 def chunk_text(chunk: TextChunk | str) -> str:
     return chunk.content if isinstance(chunk, TextChunk) else str(chunk)
+
+def estimate_summary_request_tokens(system_prompt: str, conversation: str) -> int:
+    """Estimate prompt size from the system prompt and accumulated chunk text."""
+    return count_tokens(system_prompt) + count_tokens(conversation)
+
+def summary_request_token_limit(context_window: int, completion_tokens: int) -> int:
+    return context_window - completion_tokens - SUMMARY_GROUP_TOKEN_BUFFER
 
 def is_useless_summary(text: str) -> bool:
     """Return True when the model produced a refusal/placeholder instead of a real summary."""

@@ -11,10 +11,11 @@ from app.services.ingestion.processors.summary.summary_helpers import (
     FINAL_SUMMARY_MAX_TOKENS,
     GROUP_SUMMARY_MAX_TOKENS,
     MIN_CHUNK_CHARS_FOR_SUMMARY,
-    SUMMARY_GROUP_TOKEN_BUFFER,
     SUMMARY_GROUP_TOKEN_LIMIT,
     chunk_text,
+    estimate_summary_request_tokens,
     fallback_final_summary,
+    summary_request_token_limit,
     valid_summary,
 )
 from app.shared.llm import llm_call_general
@@ -43,19 +44,24 @@ class SummaryProcessor:
         total_tokens = sum(count_tokens(chunk_text(chunk)) for chunk in chunks)
         events = [f"summary started: {len(chunks)} chunks, {total_tokens} tokens"]
 
-        # if total tokens less than configured direct summary tokens
-        if total_tokens <= DIRECT_SUMMARY_THRESHOLD:
-            # combine all chunk text
-            text = "\n\n".join(chunk_text(chunk) for chunk in chunks)
+        text = "\n\n".join(chunk_text(chunk) for chunk in chunks)
+        final_prompt = get_final_summary_system_prompt()
+        direct_prompt_tokens = estimate_summary_request_tokens(final_prompt, text)
+        direct_prompt_limit = summary_request_token_limit(
+            SUMMARY_GROUP_TOKEN_LIMIT, FINAL_SUMMARY_MAX_TOKENS
+        )
+
+        # Use a direct call only when both the document and estimated request fit safely.
+        if total_tokens <= DIRECT_SUMMARY_THRESHOLD and direct_prompt_tokens <= direct_prompt_limit:
             try:
-                events.append("summary api call: direct")
+                events.append(f"summary api call: direct, estimated prompt tokens: {direct_prompt_tokens}")
                 summary = llm_call_general(
-                    build_llm_messages(get_final_summary_system_prompt(), text),
+                    build_llm_messages(final_prompt, text),
                     max_tokens=FINAL_SUMMARY_MAX_TOKENS,
                 )
-            except Exception:
+            except Exception as exc:
                 log.warning("summary direct failed", exc_info=True)
-                events.append("summary failed: direct")
+                events.append(f"summary failed: direct ({self._failure_label(exc)})")
                 return SummaryResult(summary="", api_calls=1, events=events)
 
             summary = valid_summary(
@@ -75,27 +81,33 @@ class SummaryProcessor:
         )
 
     def summarize_hierarchical(self, chunks: Sequence[TextChunk | str]) -> SummaryResult:
-        groups = self.group_chunks(chunks)
+        try:
+            groups = self.group_chunks(chunks)
+        except ValueError as exc:
+            log.warning("summary grouping failed: %s", exc)
+            return SummaryResult(summary="", api_calls=0, events=[f"summary failed: {exc}"])
         events = [f"summary hierarchical: {len(groups)} groups"]
         summaries = []
         api_calls = 0
 
+        group_prompt = get_group_summary_system_prompt()
         for index, group in enumerate(groups, start=1):
             text = "\n\n".join(chunk_text(chunk) for chunk in group)
+            prompt_tokens = estimate_summary_request_tokens(group_prompt, text)
             try:
-                events.append(f"summary api call: group {index}")
+                events.append(f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}")
                 summary = llm_call_general(
-                    build_llm_messages(get_group_summary_system_prompt(), text),
+                    build_llm_messages(group_prompt, text),
                     max_tokens=GROUP_SUMMARY_MAX_TOKENS,
                 )
                 api_calls += 1
                 if summary.strip() == "SKIP":
                     events.append(f"summary skipped: group {index}")
                     continue
-            except Exception:
+            except Exception as exc:
                 log.warning("summary group failed", exc_info=True)
                 api_calls += 1
-                events.append(f"summary failed: group {index}")
+                events.append(f"summary failed: group {index} ({self._failure_label(exc)})")
                 continue
 
             summary = valid_summary(summary)
@@ -110,18 +122,25 @@ class SummaryProcessor:
             events.append("summary completed: hierarchical")
             return SummaryResult(summary=summaries[0], api_calls=api_calls, events=events)
 
+        llm_text = "\n\n".join(summaries)
+        final_prompt = get_final_summary_system_prompt()
+        prompt_tokens = estimate_summary_request_tokens(final_prompt, llm_text)
+        prompt_limit = summary_request_token_limit(SUMMARY_GROUP_TOKEN_LIMIT, FINAL_SUMMARY_MAX_TOKENS)
+        if prompt_tokens > prompt_limit:
+            events.append(f"summary fallback: final merge exceeds safe prompt limit ({prompt_tokens} tokens)")
+            return SummaryResult(summary=fallback_final_summary(summaries), api_calls=api_calls, events=events)
+
         try:
-            events.append("summary api call: final merge")
-            llm_text = "\n\n".join(summaries)
+            events.append(f"summary api call: final merge, estimated prompt tokens: {prompt_tokens}")
             final_summary = llm_call_general(
-                build_llm_messages(get_final_summary_system_prompt(), llm_text),
+                build_llm_messages(final_prompt, llm_text),
                 max_tokens=FINAL_SUMMARY_MAX_TOKENS,
             )
             api_calls += 1
-        except Exception:
+        except Exception as exc:
             log.warning("summary final merge failed", exc_info=True)
             api_calls += 1
-            events.append("summary failed: final merge")
+            events.append(f"summary failed: final merge ({self._failure_label(exc)})")
             return SummaryResult(summary=summaries[0], api_calls=api_calls, events=events)
 
         final_summary = valid_summary(
@@ -143,15 +162,22 @@ class SummaryProcessor:
             events.append("summary skipped: text too short")
             return SummaryResult(summary="", api_calls=0, events=events)
 
+        group_prompt = get_group_summary_system_prompt()
+        prompt_tokens = estimate_summary_request_tokens(group_prompt, stripped)
+        prompt_limit = summary_request_token_limit(SUMMARY_GROUP_TOKEN_LIMIT, GROUP_SUMMARY_MAX_TOKENS)
+        if prompt_tokens > prompt_limit:
+            events.append(f"summary failed: chunk exceeds safe prompt limit ({prompt_tokens} tokens)")
+            return SummaryResult(summary="", api_calls=0, events=events)
+
         try:
-            events.append("summary api call: chunk")
+            events.append(f"summary api call: chunk, estimated prompt tokens: {prompt_tokens}")
             summary = llm_call_general(
-                build_llm_messages(get_group_summary_system_prompt(), stripped),
+                build_llm_messages(group_prompt, stripped),
                 max_tokens=GROUP_SUMMARY_MAX_TOKENS,
             )
-        except Exception:
+        except Exception as exc:
             log.warning("summary chunk failed", exc_info=True)
-            events.append("summary failed: chunk")
+            events.append(f"summary failed: chunk ({self._failure_label(exc)})")
             return SummaryResult(summary="", api_calls=1, events=events)
 
         if summary.strip() == "SKIP":
@@ -169,27 +195,72 @@ class SummaryProcessor:
     ) -> list[list[TextChunk | str]]:
         groups = []
         current_group = []
-        current_size = 0
-        system_prompt_tokens = count_tokens(get_group_summary_system_prompt())
-        # Reserve room for system prompt, summary completion tokens, and a safety buffer.
-        group_tokens_left = (
-            max_tokens
-            - system_prompt_tokens
-            - GROUP_SUMMARY_MAX_TOKENS
-            - SUMMARY_GROUP_TOKEN_BUFFER
-        )
+        system_prompt = get_group_summary_system_prompt()
+        prompt_limit = summary_request_token_limit(max_tokens, GROUP_SUMMARY_MAX_TOKENS)
+        if prompt_limit <= 0:
+            raise ValueError("summary context window leaves no prompt budget")
 
         for chunk in chunks:
-            chunk_tokens = count_tokens(chunk_text(chunk))
-            if current_size + chunk_tokens > group_tokens_left and current_group:
+            candidate = [*current_group, chunk]
+            candidate_text = "\n\n".join(chunk_text(item) for item in candidate)
+            candidate_tokens = estimate_summary_request_tokens(system_prompt, candidate_text)
+            if candidate_tokens > prompt_limit and current_group:
                 groups.append(current_group)
                 current_group = [chunk]
-                current_size = chunk_tokens
+                single_tokens = estimate_summary_request_tokens(system_prompt, chunk_text(chunk))
+                if single_tokens > prompt_limit:
+                    raise ValueError(f"summary chunk exceeds safe prompt limit ({single_tokens} tokens)")
+            elif candidate_tokens > prompt_limit:
+                raise ValueError(f"summary chunk exceeds safe prompt limit ({candidate_tokens} tokens)")
             else:
                 current_group.append(chunk)
-                current_size += chunk_tokens
 
         if current_group:
             groups.append(current_group)
 
         return groups
+
+    @staticmethod
+    def _failure_label(exc: Exception) -> str:
+        status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        return f"{type(exc).__name__} status={status_code}" if status_code else type(exc).__name__
+
+
+if __name__ == "__main__":
+    text = """Hush, hush! for pity's sake! I must not listen to such words from a
+stranger. I am ungrateful to call you a stranger. Oh! how one may be
+mistaken! If I had known you were so bold--” And Margaret's bosom began
+to heave, and her cheeks were covered with blushes, and she looked
+towards her sleeping father, very much like a timid thing that meditates
+actual flight.
+
+Then Gerard was frightened at the alarm he caused. “Forgive me,” said he
+imploringly. “How could any one help loving you?”
+
+“Well, sir, I will try and forgive you--you are so good in other
+respects; but then you must promise me never to say you--to say that
+again.”
+
+“Give me your hand then, or you don't forgive me.”
+
+She hesitated; but eventually put out her hand a very little way, very
+slowly, and with seeming reluctance. He took it, and held it prisoner.
+When she thought it had been there long enough, she tried gently to draw
+it away. He held it tight: it submitted quite patiently to force.
+What is the use resisting force. She turned her head away, and her long
+eyelashes drooped sweetly. Gerard lost nothing by his promise. Words
+were not needed here; and silence was more eloquent. Nature was in that
+day what she is in ours; but manners were somewhat freer. Then as now,
+virgins drew back alarmed at the first words of love; but of prudery
+and artificial coquetry there was little, and the young soon read one
+another's hearts. Everything was on Gerard's side, his good looks, her
+belief in his goodness, her gratitude; and opportunity for at the Duke's
+banquet this mellow summer eve, all things disposed the female nature
+to tenderness: the avenues to the heart lay open; the senses were so
+soothed and subdued with lovely colours, gentle sounds, and delicate
+odours; the sun gently sinking, the warm air, the green canopy, the cool
+music of the now violet fountain.
+"""
+    sp = SummaryProcessor()
+    res = sp.summarize_chunk(text)
+    print(res)
