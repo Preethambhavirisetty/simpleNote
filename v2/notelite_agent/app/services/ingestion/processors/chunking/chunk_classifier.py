@@ -69,9 +69,6 @@ def split_into_typed_chunks(text: str) -> list[tuple[str, str]]:
 
     for block_kind, block in blocks:
         if block_kind == "divider":
-            if headings:
-                emit("\n\n".join(headings), "heading_only")
-                headings.clear()
             force_boundary = True
             continue
 
@@ -299,7 +296,14 @@ def _merge_heading_only_runs(chunks: list[tuple[str, str]]) -> list[tuple[str, s
     output: list[tuple[str, str]] = []
     for content, kind in chunks:
         if output and kind == "heading_only" and output[-1][1] == "heading_only":
-            output[-1] = (f"{output[-1][0]}\n\n{content}", kind)
+            previous, _ = output[-1]
+            headings = dict.fromkeys(
+                line.strip()
+                for value in (previous, content)
+                for line in value.splitlines()
+                if line.strip()
+            )
+            output[-1] = ("\n\n".join(headings), kind)
         else:
             output.append((content, kind))
     return output

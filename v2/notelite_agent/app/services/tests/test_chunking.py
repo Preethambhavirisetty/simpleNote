@@ -69,6 +69,43 @@ def test_divider_only_document_produces_no_chunks():
     assert chunks == []
 
 
+def test_divider_after_heading_preserves_heading_for_following_prose():
+    text = "# Root\n\n## Section\n\n---\n\nFirst prose line.\n\n## Next\n\nNext body."
+
+    chunks = ChunkProcessor().process(text)
+
+    assert chunks[0].content == "# Root\n\n## Section\n\nFirst prose line."
+    assert chunks[0].metadata["heading_context"] == "Root > Section"
+    assert not any(chunk.chunk_type == "heading_only" and "## Section" in chunk.content for chunk in chunks)
+
+
+def test_semantic_splitter_receives_prose_without_heading_lines():
+    processor = ChunkProcessor()
+    received: list[str] = []
+
+    def split_prose(text: str) -> list[str]:
+        received.append(text)
+        return ["First prose sentence.", "Second prose sentence."]
+
+    processor.semantic_chunker.split_prose = split_prose
+    chunks = processor.process("# Root\n\n## Section\n\n---\n\nFirst prose sentence. Second prose sentence.")
+
+    assert received == ["First prose sentence. Second prose sentence."]
+    assert chunks[0].content == "# Root\n\n## Section\n\nFirst prose sentence."
+    assert chunks[0].metadata["h2"] == "Section"
+    assert chunks[1].metadata["h2"] == "Section"
+
+
+def test_heading_only_run_does_not_duplicate_shared_ancestor_headings():
+    text = "# Root\n\n## Empty A\n\n## Empty B\n\n## Empty C"
+
+    chunks = ChunkProcessor().process(text)
+
+    assert len(chunks) == 1
+    assert chunks[0].chunk_type == "heading_only"
+    assert chunks[0].content.splitlines() == ["# Root", "", "## Empty A", "", "## Empty B", "", "## Empty C"]
+
+
 def test_headed_document_is_not_short_circuited_by_contact_signal():
     text = "# Review\n\n## Summary\n\nWork completed.\n\n## Contact\n\nEmail: team@example.com\n\n## Final\n\nDone."
 

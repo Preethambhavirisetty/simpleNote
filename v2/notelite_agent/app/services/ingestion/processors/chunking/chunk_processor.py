@@ -11,6 +11,27 @@ from app.services.ingestion.processors.chunking.chunk_classifier import split_in
 from app.services.ingestion.processors.text_normalization import repair_ocr_hyphenation
 
 
+def _split_leading_heading_prefix(text: str) -> tuple[str, str]:
+    headings: list[str] = []
+    lines = text.splitlines()
+    body_start = 0
+
+    for index, line in enumerate(lines):
+        clean = line.strip()
+        if re.fullmatch(r"#{1,6}\s+\S[^\n]*", clean):
+            headings.append(clean)
+            body_start = index + 1
+            continue
+        if headings and not clean:
+            body_start = index + 1
+            continue
+        break
+
+    if not headings:
+        return "", text.strip()
+    return "\n\n".join(headings), "\n".join(lines[body_start:]).strip()
+
+
 @dataclass(frozen=True)
 class TextChunk:
     content: str
@@ -32,9 +53,16 @@ class ChunkProcessor:
         expanded: list[tuple[str, str]] = []
         for chunk, chunk_type in chunks:
             if chunk_type == ChunkType.CONTENT.value:
+                heading_prefix, prose = _split_leading_heading_prefix(chunk)
+                parts = self.semantic_chunker.split_prose(prose) if prose else []
+                if not parts:
+                    expanded.append((chunk, chunk_type))
+                    continue
+                if heading_prefix:
+                    parts[0] = f"{heading_prefix}\n\n{parts[0]}".strip()
                 expanded.extend(
                     (part, classify_chunk_type(part).value)
-                    for part in self.semantic_chunker.split_prose(chunk)
+                    for part in parts
                 )
             else:
                 expanded.append((chunk, chunk_type))
@@ -43,7 +71,7 @@ class ChunkProcessor:
         output: list[TextChunk] = []
         for index, (chunk, chunk_type) in enumerate(expanded):
             for line in chunk.splitlines():
-                match = re.match(r"^(#{1,6})\s+(\S.*)$", line.strip())
+                match = re.fullmatch(r"(#{1,6})\s+(\S[^\n]*)", line.strip())
                 if not match:
                     continue
                 depth = len(match.group(1))
