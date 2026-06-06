@@ -493,7 +493,7 @@ def is_quote_type(text: str, body: str) -> bool:
     Attribution lines (— Name) are part of the quote chunk.
     Requires at least one actual quote line.
     """
-    lines = _non_empty_lines(text)
+    lines = _non_empty_lines(body or text)
     if not lines:
         return False
 

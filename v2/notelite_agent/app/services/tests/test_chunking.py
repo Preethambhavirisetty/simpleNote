@@ -518,3 +518,25 @@ def test_divider_only_document_produces_no_chunks():
     chunks = ChunkProcessor().process("---\n________\n********")
 
     assert chunks == []
+
+
+def test_headed_document_is_not_short_circuited_by_contact_signal():
+    text = "# Review\n\n## Summary\n\nWork completed.\n\n## Contact\n\nEmail: team@example.com\n\n## Final\n\nDone."
+
+    chunks = ChunkProcessor().process(text)
+
+    assert len(chunks) == 3
+    assert [chunk.metadata.get("h2") for chunk in chunks] == ["Summary", "Contact", "Final"]
+    assert [chunk.chunk_type for chunk in chunks] == ["content", "contact", "content"]
+
+
+def test_headed_document_splits_inline_footer_bands_and_preamble():
+    text = "Cover Page\nPage 1 of 2\n\n# Report\n\n## First\n\nFirst body.\n\nCONFIDENTIAL - INTERNAL USE ONLY\nPage 2 of 2\n\n## Second\n\nSecond body."
+
+    chunks = ChunkProcessor().process(text)
+
+    assert chunks[0].content == "Cover Page"
+    assert any(chunk.chunk_type == "footer" for chunk in chunks)
+    assert any(chunk.metadata.get("h2") == "First" and "First body" in chunk.content for chunk in chunks)
+    assert any(chunk.metadata.get("h2") == "Second" and "Second body" in chunk.content for chunk in chunks)
+    assert not any("First body" in chunk.content and "Second body" in chunk.content for chunk in chunks)

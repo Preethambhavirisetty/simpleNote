@@ -135,8 +135,8 @@ CHUNK_TYPE_RULES: tuple[ChunkTypeRule, ...] = (
     ChunkTypeRule(ChunkType.CONTACT, is_contact_type),
     ChunkTypeRule(ChunkType.ADDRESS, is_address_type),
     # Definition and list types
-    ChunkTypeRule(ChunkType.GLOSSARY, is_glossary_type),
     ChunkTypeRule(ChunkType.APPENDIX, is_appendix_type),
+    ChunkTypeRule(ChunkType.GLOSSARY, is_glossary_type),
     ChunkTypeRule(ChunkType.STRUCTURED_LIST, is_structured_list_type),
     ChunkTypeRule(ChunkType.LIST, is_list_type),
 )

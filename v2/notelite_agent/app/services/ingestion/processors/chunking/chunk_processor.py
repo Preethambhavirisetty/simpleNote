@@ -10,7 +10,7 @@ from app.services.ingestion.processors.chunking.heading_chunker import HeadingCh
 from app.services.ingestion.processors.chunking.heading_processor import HeadingProcessor
 from app.services.ingestion.processors.chunking.post_processor import ChunkPostProcessor
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
-from app.services.ingestion.processors.chunking.token_budget import token_count
+from app.services.ingestion.processors.chunking.token_budget import token_count, within_chunk_budget
 from app.services.ingestion.processors.chunking.validators import validate_chunk
 from app.services.ingestion.processors.text_normalization import repair_ocr_hyphenation
 
@@ -109,7 +109,52 @@ class ChunkProcessor:
             if metadata:
                 metadata["heading_context"] = " > ".join(metadata[key] for key in sorted(metadata))
             output.append(TextChunk(chunk, str(index), chunk_type, metadata))
-        return output
+        return self._merge_compatible_section_chunks(output)
+
+    @staticmethod
+    def _merge_compatible_section_chunks(chunks: list[TextChunk]) -> list[TextChunk]:
+        compatible_groups = (
+            {ChunkType.ADDRESS.value, ChunkType.CONTACT.value},
+            {ChunkType.QUOTE.value},
+            {ChunkType.LIST.value, ChunkType.STRUCTURED_LIST.value},
+        )
+        appendix_types = {
+            ChunkType.APPENDIX.value,
+            ChunkType.CONTENT.value,
+            ChunkType.LIST.value,
+            ChunkType.STRUCTURED_LIST.value,
+        }
+        merged: list[TextChunk] = []
+        for chunk in chunks:
+            if merged:
+                previous = merged[-1]
+                same_section = (
+                    previous.metadata.get("heading_context")
+                    and previous.metadata.get("heading_context") == chunk.metadata.get("heading_context")
+                )
+                compatible = any(
+                    previous.chunk_type in group and chunk.chunk_type in group
+                    for group in compatible_groups
+                ) or (
+                    ChunkType.APPENDIX.value in {previous.chunk_type, chunk.chunk_type}
+                    and previous.chunk_type in appendix_types
+                    and chunk.chunk_type in appendix_types
+                )
+                candidate = f"{previous.content}\n\n{chunk.content}".strip()
+                if same_section and compatible and within_chunk_budget(candidate):
+                    merged[-1] = TextChunk(
+                        content=candidate,
+                        chunk_id=previous.chunk_id,
+                        chunk_type=classify_chunk_type(candidate).value,
+                        metadata=dict(previous.metadata),
+                    )
+                    continue
+            merged.append(chunk)
+
+        return [
+            TextChunk(chunk.content, str(index), chunk.chunk_type, dict(chunk.metadata))
+            for index, chunk in enumerate(merged)
+        ]
 
     @staticmethod
     def _split_numbered_sections(chunks: list[str]) -> list[str]:
