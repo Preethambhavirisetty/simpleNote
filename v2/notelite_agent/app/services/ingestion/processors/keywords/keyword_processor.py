@@ -38,6 +38,8 @@ class ChunkKeywordResult:
     entities: list[str]
     chunk_type: str = ChunkType.CONTENT.value
     metadata: dict[str, Any] = field(default_factory=dict)
+    chunk_index: int = 0
+    total_chunks: int = 0
 
 
 @dataclass(frozen=True)
@@ -87,6 +89,8 @@ class KeywordProcessor:
                     entities=entities,
                     chunk_type=chunk_type,
                     metadata=metadata,
+                    chunk_index=chunk.chunk_index if isinstance(chunk, TextChunk) else index,
+                    total_chunks=chunk.total_chunks if isinstance(chunk, TextChunk) else len(chunks),
                 )
             )
 

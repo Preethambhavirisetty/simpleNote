@@ -33,7 +33,6 @@ SUMMARY_SKIP_TYPES = {
     ChunkType.CONTACT.value,
     ChunkType.GLOSSARY.value,
     ChunkType.APPENDIX.value,
-    ChunkType.FOOTER.value,
     # ChunkType.HEADER.value,
     ChunkType.QUOTE.value,
     # ChunkType.OCR_NOISE.value,

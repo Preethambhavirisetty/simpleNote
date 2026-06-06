@@ -544,8 +544,8 @@ TEST_CASES = [
     "name": "page_break_markers",
     "text": "The system processed all requests successfully.\n\n--- PAGE BREAK ---\n\n© 2024 Company Inc. All rights reserved. Page 47 of 312.\n\nSection 3.4 continued\n\nThe next phase began in January 2024.",
     "expected": {
-        "chunk_count": 2,
-        "chunk_types": ["content", "footer"],
+        "chunk_count": 1,
+        "chunk_types": ["content"],
         "must_contain": ["processed all requests", "next phase"]
     }
 },
@@ -553,8 +553,8 @@ TEST_CASES = [
     "name": "running_footer_repeated",
     "text": "The organization completed FY2025 review.\n\nCONFIDENTIAL - INTERNAL USE ONLY\nPage 2 of 8\n\nCustomer satisfaction improved by 17%.\n\nCONFIDENTIAL - INTERNAL USE ONLY\nPage 3 of 8\n\nInfrastructure investments reduced costs.",
     "expected": {
-        "chunk_count": 3,
-        "chunk_types": ["content", "footer", "content"],
+        "chunk_count": 1,
+        "chunk_types": ["content"],
         "must_contain": ["FY2025 review", "satisfaction improved", "Infrastructure investments"]
     }
 },
@@ -586,7 +586,7 @@ TEST_CASES = [
     "text": "CONFIDENTIAL\nCONFIDENTIAL\nCONFIDENTIAL\nCONFIDENTIAL\nCONFIDENTIAL",
     "expected": {
         "chunk_count": 1,
-        "chunk_types": ["footer"],
+        "chunk_types": ["content"],
         "must_contain": ["CONFIDENTIAL"]
     }
 },

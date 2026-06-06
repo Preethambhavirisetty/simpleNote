@@ -1,5 +1,7 @@
 import pytest
 
+from app.services.ingestion.actions.schema import ChunkPayload
+from app.services.ingestion.actions.services import IngestionActionServices
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
 from app.services.tests.chunk_test_data_stress import TEST_CASES
 
@@ -52,6 +54,39 @@ def test_declared_atomic_chunks_keep_fragments_together(case):
     assert len(chunks) == 1
     for fragment in expected_fragments:
         assert fragment in chunks[0].content
+
+
+def test_chunk_processor_records_and_resets_events_per_call():
+    processor = ChunkProcessor()
+
+    processor.process("First paragraph.")
+    first_events = list(processor.events)
+    processor.process("Second paragraph.\n\n---\n\nThird paragraph.")
+
+    assert first_events[0].startswith("chunking started:")
+    assert first_events[-1] == "chunking completed: 1 chunks"
+    assert processor.events[0].startswith("chunking started:")
+    assert processor.events[-1] == "chunking completed: 2 chunks"
+    assert sum(event.startswith("chunking started:") for event in processor.events) == 1
+
+
+def test_chunk_action_returns_chunking_events():
+    result = IngestionActionServices().chunk(ChunkPayload(text="Before.\n\n---\n\nAfter."))
+
+    assert result["chunk_count"] == 2
+    assert result["events"][0].startswith("chunking started:")
+    assert result["events"][-1] == "chunking completed: 2 chunks"
+
+
+def test_final_chunks_include_ordering_and_size_metadata():
+    chunks = ChunkProcessor().process("# Root\n\n## First\n\nFirst body.\n\n## Second\n\nSecond body.")
+
+    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
+    assert [chunk.total_chunks for chunk in chunks] == [2, 2]
+    for chunk in chunks:
+        assert chunk.metadata["has_heading_context"] is True
+        assert chunk.metadata["token_count"] > 0
+        assert chunk.metadata["char_count"] == len(chunk.content)
 
 
 def test_divider_lines_force_boundaries_without_becoming_chunks():
@@ -116,13 +151,13 @@ def test_headed_document_is_not_short_circuited_by_contact_signal():
     assert [chunk.chunk_type for chunk in chunks] == ["content", "contact", "content"]
 
 
-def test_headed_document_splits_inline_footer_bands_and_preamble():
+def test_headed_document_keeps_footer_like_text_as_content_within_sections():
     text = "Cover Page\nPage 1 of 2\n\n# Report\n\n## First\n\nFirst body.\n\nCONFIDENTIAL - INTERNAL USE ONLY\nPage 2 of 2\n\n## Second\n\nSecond body."
 
     chunks = ChunkProcessor().process(text)
 
-    assert chunks[0].content == "Cover Page"
-    assert any(chunk.chunk_type == "footer" for chunk in chunks)
-    assert any(chunk.metadata.get("h2") == "First" and "First body" in chunk.content for chunk in chunks)
+    assert chunks[0].content == "Cover Page\nPage 1 of 2"
+    assert all(chunk.chunk_type == "content" for chunk in chunks)
+    assert any(chunk.metadata.get("h2") == "First" and "CONFIDENTIAL" in chunk.content for chunk in chunks)
     assert any(chunk.metadata.get("h2") == "Second" and "Second body" in chunk.content for chunk in chunks)
     assert not any("First body" in chunk.content and "Second body" in chunk.content for chunk in chunks)

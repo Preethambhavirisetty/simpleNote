@@ -11,6 +11,8 @@ class ActionChunk(BaseModel):
     chunk_id: str | None = None
     content: str = Field(..., min_length=1)
     chunk_type: str = "content"
+    chunk_index: int = 0
+    total_chunks: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from collections import Counter
 from collections.abc import Callable
 
 
@@ -42,41 +41,6 @@ def is_heading_only_type(text: str, body: str) -> bool:
         return False
     return all(re.match(r"^#{1,6}\s+\S", l) for l in lines)
 
-
-def is_footer_type(text: str, body: str) -> bool:
-    """
-    Page markers, copyright, confidentiality notices, or repeated
-    identical boilerplate lines with no informational value.
-    """
-    lines = _non_empty_lines(text)
-    if not lines:
-        return False
-
-    FOOTER_PATTERNS = [
-        r"^page\s+\d+\s+of\s+\d+$",
-        r"^©\s*\d{4}",
-        r"^\(c\)\s*\d{4}",
-        r"confidential",
-        r"internal use only",
-        r"proprietary",
-        r"^generated on\b",
-        r"^prepared by\b",
-        r"^review date\b",
-        r"^all rights reserved",
-        r"^for (compliance|legal) inquiries",
-        r"^--- page break ---$",
-    ]
-
-    def is_footer_line(l: str) -> bool:
-        low = l.lower()
-        return any(re.search(p, low) for p in FOOTER_PATTERNS)
-
-    # Any single line repeated 3+ times → footer
-    counts = Counter(l.strip().lower() for l in lines)
-    if any(v >= 3 for v in counts.values()):
-        return True
-
-    return _line_ratio(text, is_footer_line) >= 0.7
 
 
 def is_fenced_json_type(text: str, body: str) -> bool:

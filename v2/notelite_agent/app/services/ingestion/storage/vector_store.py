@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any, List
@@ -204,17 +205,37 @@ class QdrantVectorStore:
         self.events.append("summary vector upserted")
 
     def upsert_chunks(self, chunks: Sequence[LlamaDocument]) -> None:
-        if not chunks:
-            self.events.append("chunk vector upsert skipped: no chunks")
+        """Embed and store indexable chunk artifacts.
+
+        Input:
+            Documents whose text is embed_text and whose metadata contains original content,
+            identity, ordering, skip status, keywords/entities, and chunk metadata.
+
+        Stored payload:
+            Top-level content/embed_text and chunk identity fields, keywords/entities, plus
+            metadata enriched with embedding_model, embedding_dim, and indexed_at.
+        """
+        indexable = [chunk for chunk in chunks if not (chunk.metadata or {}).get("skip_indexing")]
+        if not indexable:
+            self.events.append("chunk vector upsert skipped: no indexable chunks")
             return
 
         points = []
-        embeddings = self.embed_texts([chunk.text for chunk in chunks])
-        for index, chunk in enumerate(chunks):
+        embeddings = self.embed_texts([chunk.text for chunk in indexable])
+        indexed_at = datetime.now(timezone.utc).isoformat()
+        embedding_model = self.embedding_client.remote_service.model
+        for index, chunk in enumerate(indexable):
             metadata = dict(chunk.metadata or {})
             keywords = list(metadata.pop("keywords", []))
             entities = list(metadata.pop("entities", []))
+            content = str(metadata.pop("content", chunk.text))
+            embed_text = str(metadata.pop("embed_text", chunk.text))
+            skip_indexing = bool(metadata.pop("skip_indexing", False))
+            skip_reason = str(metadata.pop("skip_reason", ""))
             point_id = chunk.id_ or f"{metadata.get('doc_id', 'chunk')}-{index}"
+            metadata["embedding_model"] = embedding_model
+            metadata["embedding_dim"] = len(embeddings.dense[index])
+            metadata["indexed_at"] = indexed_at
 
             points.append(
                 models.PointStruct(
@@ -224,9 +245,19 @@ class QdrantVectorStore:
                         SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[index]),
                     },
                     payload={
-                        "text": chunk.text,
+                        "chunk_id": metadata.get("chunk_id", ""),
+                        "note_id": metadata.get("note_id", ""),
+                        "folder_id": metadata.get("folder_id", ""),
+                        "chunk_index": metadata.get("chunk_index", index),
+                        "total_chunks": metadata.get("total_chunks", len(chunks)),
+                        "chunk_type": metadata.get("chunk_type", "content"),
+                        "content": content,
+                        "embed_text": embed_text,
+                        "skip_indexing": skip_indexing,
+                        "skip_reason": skip_reason,
                         "keywords": keywords,
                         "entities": entities,
+                        "text": content,
                         "created_at": int(time.time()),
                         "metadata": metadata,
                     },
@@ -234,7 +265,10 @@ class QdrantVectorStore:
             )
 
         self.client.upsert(collection_name=CHUNK_COLLECTION, points=points)
+        skipped = len(chunks) - len(indexable)
         self.events.append(f"chunk vectors upserted: {len(points)}")
+        if skipped:
+            self.events.append(f"chunk vectors skipped: {skipped}")
 
     def replace_document(
         self,
@@ -324,6 +358,12 @@ class QdrantVectorStore:
         metadata = dict(payload.get("metadata") or {})
         metadata.update(
             {
+                "chunk_id": payload.get("chunk_id", metadata.get("chunk_id")),
+                "note_id": payload.get("note_id", metadata.get("note_id")),
+                "folder_id": payload.get("folder_id", metadata.get("folder_id")),
+                "chunk_index": payload.get("chunk_index", metadata.get("chunk_index")),
+                "total_chunks": payload.get("total_chunks", metadata.get("total_chunks")),
+                "chunk_type": payload.get("chunk_type", metadata.get("chunk_type")),
                 "keywords": payload.get("keywords", []),
                 "entities": payload.get("entities", []),
                 "created_at": payload.get("created_at"),
@@ -332,7 +372,7 @@ class QdrantVectorStore:
         return (
             LlamaDocument(
                 id_=str(point.id),
-                text=payload.get("text", ""),
+                text=payload.get("content", payload.get("text", "")),
                 metadata=metadata,
             ),
             point.score,

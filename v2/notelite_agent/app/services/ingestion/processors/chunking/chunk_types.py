@@ -13,7 +13,6 @@ from app.services.ingestion.processors.chunking.chunk_type_rules import (
     is_fenced_json_type,
     is_glossary_type,
     is_heading_only_type,
-    is_footer_type,
     is_json_type,
     is_list_type,
     is_quote_type,
@@ -40,7 +39,6 @@ class ChunkType(StrEnum):
     QUOTE = "quote"
     LIST = "list"
     STRUCTURED_LIST = "structured_list"
-    FOOTER = "footer"
 
 
 RulePredicate = Callable[[str, str], bool]
@@ -53,8 +51,6 @@ class ChunkTypeRule:
 
 
 CHUNK_TYPE_RULES: tuple[ChunkTypeRule, ...] = (
-    # Footer first — boilerplate should never be misclassified as content
-    ChunkTypeRule(ChunkType.FOOTER, is_footer_type),
     ChunkTypeRule(ChunkType.HEADING_ONLY, is_heading_only_type),
     ChunkTypeRule(ChunkType.JSON, is_fenced_json_type),
     ChunkTypeRule(ChunkType.CODE, is_fenced_code_type),

@@ -29,6 +29,7 @@ class IngestionActionServices:
         return {
             "chunk_count": len(chunks),
             "chunks": [asdict(chunk) for chunk in chunks],
+            "events": processor.events,
         }
 
     def keywords(self, payload: KeywordsPayload) -> dict[str, Any]:
@@ -89,6 +90,8 @@ class IngestionActionServices:
                 chunk_id=chunk.chunk_id or str(index),
                 chunk_type=chunk.chunk_type,
                 metadata=dict(chunk.metadata),
+                chunk_index=chunk.chunk_index,
+                total_chunks=chunk.total_chunks,
             )
             for index, chunk in enumerate(chunks)
         ]
@@ -102,6 +105,8 @@ class IngestionActionServices:
             metadata=dict(chunk.metadata),
             keywords=chunk.keywords,
             entities=chunk.entities,
+            chunk_index=chunk.chunk_index,
+            total_chunks=chunk.total_chunks,
         )
 
     @staticmethod
@@ -110,8 +115,20 @@ class IngestionActionServices:
 
     @staticmethod
     def _document_payload(document: Any) -> dict[str, Any]:
-        return {
-            "id": str(document.id_),
-            "text": document.text,
-            "metadata": dict(document.metadata or {}),
-        }
+        metadata = dict(document.metadata or {})
+        if "content" not in metadata:
+            return {
+                "id": str(document.id_),
+                "text": document.text,
+                "metadata": metadata,
+            }
+
+        top_level_keys = (
+            "chunk_id", "note_id", "folder_id", "chunk_index", "total_chunks",
+            "chunk_type", "content", "embed_text", "skip_indexing", "skip_reason",
+            "keywords", "entities",
+        )
+        artifact = {"id": str(document.id_)}
+        artifact.update({key: metadata.pop(key) for key in top_level_keys})
+        artifact["metadata"] = metadata
+        return artifact

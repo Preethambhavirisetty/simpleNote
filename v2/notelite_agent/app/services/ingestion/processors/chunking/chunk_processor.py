@@ -6,7 +6,7 @@ from typing import Any
 
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType, classify_chunk_type
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
-from app.services.ingestion.processors.chunking.token_budget import within_chunk_budget
+from app.services.ingestion.processors.chunking.token_budget import token_count, within_chunk_budget
 from app.services.ingestion.processors.chunking.chunk_classifier import split_into_typed_chunks
 from app.services.ingestion.processors.text_normalization import repair_ocr_hyphenation
 
@@ -38,6 +38,8 @@ class TextChunk:
     chunk_id: str
     chunk_type: str = ChunkType.CONTENT.value
     metadata: dict[str, Any] = field(default_factory=dict)
+    chunk_index: int = 0
+    total_chunks: int = 0
 
 
 class ChunkProcessor:
@@ -45,12 +47,27 @@ class ChunkProcessor:
 
     def __init__(self):
         self.semantic_chunker = SemanticChunker()
+        self.events: list[str] = []
 
     def process(self, text: str) -> list[TextChunk]:
+        """Build final ordered chunks from normalized document text.
+
+        Input:
+            A complete document string.
+
+        Output:
+            TextChunk(content, chunk_id, chunk_type, chunk_index, total_chunks, metadata),
+            where metadata contains available heading context plus has_heading_context,
+            token_count, and char_count.
+        """
+        self.events = [f"chunking started: {token_count(text)} tokens"]
+        self.semantic_chunker.events = []
         normalized_text = repair_ocr_hyphenation(text)
         chunks = split_into_typed_chunks(normalized_text)
+        self.events.append(f"chunking structural split: {len(chunks)} chunks")
 
         expanded: list[tuple[str, str]] = []
+        semantic_split_count = 0
         for chunk, chunk_type in chunks:
             if chunk_type == ChunkType.CONTENT.value:
                 heading_prefix, prose = _split_leading_heading_prefix(chunk)
@@ -60,12 +77,20 @@ class ChunkProcessor:
                     continue
                 if heading_prefix:
                     parts[0] = f"{heading_prefix}\n\n{parts[0]}".strip()
+                if len(parts) > 1:
+                    semantic_split_count += 1
                 expanded.extend(
                     (part, classify_chunk_type(part).value)
                     for part in parts
                 )
             else:
                 expanded.append((chunk, chunk_type))
+
+        self.events.extend(self.semantic_chunker.events)
+        if semantic_split_count:
+            self.events.append(
+                f"chunking semantic split: {semantic_split_count} source chunks; {len(expanded)} total chunks"
+            )
 
         heading_context: dict[int, str] = {}
         output: list[TextChunk] = []
@@ -86,7 +111,12 @@ class ChunkProcessor:
             if metadata:
                 metadata["heading_context"] = " > ".join(metadata[key] for key in sorted(metadata))
             output.append(TextChunk(chunk, str(index), chunk_type, metadata))
-        return self._merge_compatible_section_chunks(output)
+        final_chunks = self._merge_compatible_section_chunks(output)
+        merged_count = len(output) - len(final_chunks)
+        if merged_count:
+            self.events.append(f"chunking compatible merges: {merged_count}")
+        self.events.append(f"chunking completed: {len(final_chunks)} chunks")
+        return final_chunks
 
     @staticmethod
     def _merge_compatible_section_chunks(chunks: list[TextChunk]) -> list[TextChunk]:
@@ -128,7 +158,20 @@ class ChunkProcessor:
                     continue
             merged.append(chunk)
 
+        total_chunks = len(merged)
         return [
-            TextChunk(chunk.content, str(index), chunk.chunk_type, dict(chunk.metadata))
+            TextChunk(
+                content=chunk.content,
+                chunk_id=str(index),
+                chunk_type=chunk.chunk_type,
+                metadata={
+                    **chunk.metadata,
+                    "has_heading_context": bool(chunk.metadata.get("heading_context")),
+                    "token_count": token_count(chunk.content),
+                    "char_count": len(chunk.content),
+                },
+                chunk_index=index,
+                total_chunks=total_chunks,
+            )
             for index, chunk in enumerate(merged)
         ]

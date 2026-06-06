@@ -42,7 +42,7 @@ class IngestionOrchestrator:
         # Step 1: Chunk the text
         chunks = self.chunk_processor.process(text)
         chunking_end = time.perf_counter()
-        events.append(f"chunking completed: {len(chunks)} chunks")
+        events.extend(self.chunk_processor.events)
 
         # Step 2: Extract keywords and entities from chunks
         chunks_with_kw_ent, top_kw, top_ent = self.keyword_processor.process(chunks)

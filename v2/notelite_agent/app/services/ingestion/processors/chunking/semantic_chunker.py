@@ -33,6 +33,7 @@ class SemanticChunker:
     def __init__(self, window_chunker: WindowChunker | None = None):
         self._splitter: SemanticSplitterNodeParser | None = None
         self._window_chunker = window_chunker or WindowChunker()
+        self.events: list[str] = []
 
     def split(self, text: str) -> list[str]:
         clean = text.strip()
@@ -97,14 +98,20 @@ class SemanticChunker:
 
     def _semantic_split(self, text: str) -> list[str]:
         if time.monotonic() < type(self)._remote_disabled_until:
+            event = "semantic chunking skipped: failure cooldown"
+            if event not in self.events:
+                self.events.append(event)
             return []
 
         try:
             splitter = self._get_splitter()
             nodes = splitter.get_nodes_from_documents([LlamaDocument(text=text)])
-            return [node.get_content().strip() for node in nodes if node.get_content().strip()]
+            parts = [node.get_content().strip() for node in nodes if node.get_content().strip()]
+            self.events.append(f"semantic chunking completed: {len(parts)} parts")
+            return parts
         except Exception as exc:
             type(self)._remote_disabled_until = time.monotonic() + SEMANTIC_CHUNKING_FAILURE_COOLDOWN
+            self.events.append(f"semantic chunking failed: {type(exc).__name__}; local fallback")
             log.warning(
                 "Semantic splitting failed (%s); using local fallback for %.0fs.",
                 type(exc).__name__,

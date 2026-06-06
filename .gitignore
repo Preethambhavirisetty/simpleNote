@@ -3,10 +3,12 @@ __pycache__
 .env
 *.pyc
 _others
-docs/
+# docs/
 decisions/
 .DS_STORE
 # notelite_inference - decoupled
 _backup
 certs/
 v2_/
+new.txt
+old.txt

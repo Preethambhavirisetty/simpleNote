@@ -37,10 +37,10 @@ def split_into_typed_chunks(text: str) -> list[tuple[str, str]]:
         return [(clean, whole_type)]
     if whole_type == "content" and not re.search(r"^#{1,6}\s+\S", clean, re.MULTILINE):
         paragraph_types = [classify_chunk(block) for kind, block in _structural_blocks(clean) if kind == "prose"]
-        has_structural_blocks = any(kind in {"code", "divider", "json", "table", "footer"} for kind, _ in _structural_blocks(clean))
+        has_structural_blocks = any(kind in {"code", "divider", "json", "table"} for kind, _ in _structural_blocks(clean))
         if not has_structural_blocks and "code" not in paragraph_types:
             return [(clean, whole_type)]
-    if whole_type in {"footer", "heading_only", "transcript"} and not has_markdown_headings and "```" not in clean and "~~~" not in clean:
+    if whole_type in {"heading_only", "transcript"} and not has_markdown_headings and "```" not in clean and "~~~" not in clean:
         return [(clean, whole_type)]
     if whole_type in {"code", "table"} and "\n\n" not in clean:
         return [(clean, whole_type)]
@@ -56,10 +56,6 @@ def split_into_typed_chunks(text: str) -> list[tuple[str, str]]:
         if not value:
             return
         kind = chunk_type or classify_chunk(value)
-        if chunks and kind == "footer" and chunks[-1][1] == "footer" and not force_boundary:
-            previous, _ = chunks[-1]
-            chunks[-1] = (f"{previous}\n{value}", kind)
-            return
         if not force_boundary and chunks and kind == "content" and chunks[-1][1] == "content" and not _starts_markdown_heading(value):
             previous, _ = chunks[-1]
             chunks[-1] = (f"{previous}\n\n{value}", kind)
@@ -78,18 +74,6 @@ def split_into_typed_chunks(text: str) -> list[tuple[str, str]]:
                 emit("\n\n".join(headings), "heading_only")
                 headings = headings[: max(0, depth - 1)]
             headings.append(block)
-            continue
-
-        if block_kind == "footer":
-            if headings:
-                block = f"{'\n\n'.join(headings)}\n\n{block}".strip()
-                headings.clear()
-            if chunks and chunks[-1][1] == "footer":
-                previous, _ = chunks[-1]
-                chunks[-1] = (f"{previous}\n{block}", "footer")
-            else:
-                chunks.append((block, "footer"))
-            force_boundary = True
             continue
 
         if block_kind in {"table", "code", "json"}:
@@ -113,8 +97,6 @@ def split_into_typed_chunks(text: str) -> list[tuple[str, str]]:
         emit("\n\n".join(headings), "heading_only")
 
 
-    if not has_markdown_headings:
-        chunks = _coalesce_unheaded_footer_bands(chunks)
     chunks = _merge_dialogue_chunks(chunks, whole_type == "transcript")
     has_subsections = any(re.match(r"^#{2,6}\s+\S", line.strip()) for content, _ in chunks for line in content.splitlines())
     if not has_subsections:
@@ -170,12 +152,6 @@ def _structural_blocks(text: str) -> list[tuple[str, str]]:
             blocks.append(("divider", ""))
             continue
 
-        if _is_footer_line(stripped):
-            flush_paragraph()
-            flush_table()
-            blocks.append(("footer", stripped))
-            continue
-
         if re.match(r"^#{1,6}\s+\S", stripped):
             flush_paragraph()
             flush_table()
@@ -205,25 +181,6 @@ def _structural_blocks(text: str) -> list[tuple[str, str]]:
 
 
 
-def _coalesce_unheaded_footer_bands(chunks: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    if any(kind not in {"content", "footer"} for _, kind in chunks):
-        return chunks
-    footer_indexes = [index for index, (_, kind) in enumerate(chunks) if kind == "footer"]
-    if not footer_indexes:
-        return chunks
-
-    footer = "\n".join(chunks[index][0] for index in footer_indexes)
-    content_indexes = [index for index, (_, kind) in enumerate(chunks) if kind == "content"]
-    merge_indexes = content_indexes if len(footer_indexes) == 1 else content_indexes[1:]
-    merged_content = "\n\n".join(chunks[index][0] for index in merge_indexes)
-
-    output: list[tuple[str, str]] = []
-    if content_indexes and len(footer_indexes) > 1:
-        output.append(chunks[content_indexes[0]])
-    output.append((footer, "footer"))
-    if merged_content:
-        output.append((merged_content, "content"))
-    return output
 
 def _looks_like_narrative_dialogue(text: str) -> bool:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -232,13 +189,6 @@ def _looks_like_narrative_dialogue(text: str) -> bool:
     if any(re.match(r"^[-*+]\s+", line) for line in lines[1:]):
         return False
     return sum(1 for line in lines[1:] if re.match(r"^[A-Z][A-Za-z'’-]+\s+\S", line)) >= 2
-
-def _is_footer_line(line: str) -> bool:
-    return bool(line and re.search(
-        r"(^page\s+\d+\s+of\s+\d+$|^confidential(?:\s+-.*)?$|^internal use only$|---\s*page break\s*---|^©\s*\d{4}|all rights reserved)",
-        line,
-        re.IGNORECASE,
-    ))
 
 
 def _heading_depth(heading: str) -> int:
