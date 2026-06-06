@@ -6,6 +6,7 @@ from typing import Sequence
 
 from app.shared.prompts.prompt import get_final_summary_system_prompt, get_group_summary_system_prompt
 from app.services.ingestion.processors.chunking import TextChunk
+from app.services.ingestion.processors.chunking.chunk_types import ChunkType
 from app.services.ingestion.processors.summary.summary_helpers import (
     DIRECT_SUMMARY_THRESHOLD,
     FINAL_SUMMARY_MAX_TOKENS,
@@ -24,6 +25,21 @@ from app.shared.utils import count_tokens, build_llm_messages
 
 log = logging.getLogger(__name__)
 
+SUMMARY_SKIP_TYPES = {
+    ChunkType.HEADING_ONLY.value,
+    ChunkType.CODE.value,
+    ChunkType.JSON.value,
+    ChunkType.ADDRESS.value,
+    ChunkType.CONTACT.value,
+    ChunkType.GLOSSARY.value,
+    ChunkType.APPENDIX.value,
+    ChunkType.FOOTER.value,
+    # ChunkType.HEADER.value,
+    ChunkType.QUOTE.value,
+    # ChunkType.OCR_NOISE.value,
+    # ChunkType.BOILERPLATE.value,
+}
+
 @dataclass(frozen=True)
 class SummaryResult:
     summary: str
@@ -39,12 +55,23 @@ class SummaryProcessor:
     def process(self, chunks: Sequence[TextChunk | str]) -> SummaryResult:
         if not chunks:
             return SummaryResult(summary="", api_calls=0, events=["summary skipped: no chunks"])
-        
-        # count total tokens with tiktoken
-        total_tokens = sum(count_tokens(chunk_text(chunk)) for chunk in chunks)
-        events = [f"summary started: {len(chunks)} chunks, {total_tokens} tokens"]
 
-        text = "\n\n".join(chunk_text(chunk) for chunk in chunks)
+        summary_chunks = self._summary_chunks(chunks)
+        skipped_count = len(chunks) - len(summary_chunks)
+        if not summary_chunks:
+            return SummaryResult(
+                summary="",
+                api_calls=0,
+                events=[f"summary skipped: all {len(chunks)} chunks are structural"],
+            )
+
+        # count total tokens with tiktoken
+        total_tokens = sum(count_tokens(chunk_text(chunk)) for chunk in summary_chunks)
+        events = [f"summary started: {len(summary_chunks)} chunks, {total_tokens} tokens"]
+        if skipped_count:
+            events.append(f"summary skipped structural chunks: {skipped_count}")
+
+        text = "\n\n".join(chunk_text(chunk) for chunk in summary_chunks)
         final_prompt = get_final_summary_system_prompt()
         direct_prompt_tokens = estimate_summary_request_tokens(final_prompt, text)
         direct_prompt_limit = summary_request_token_limit(
@@ -73,7 +100,7 @@ class SummaryProcessor:
             return SummaryResult(summary=summary, api_calls=1, events=events)
 
         # If total tokens exceed direct summary tokens, then compute hierarchial summary
-        hierarchical = self.summarize_hierarchical(chunks)
+        hierarchical = self.summarize_hierarchical(summary_chunks)
         return SummaryResult(
             summary=hierarchical.summary,
             api_calls=hierarchical.api_calls,
@@ -219,6 +246,14 @@ class SummaryProcessor:
             groups.append(current_group)
 
         return groups
+
+    @staticmethod
+    def _summary_chunks(chunks: Sequence[TextChunk | str]) -> list[TextChunk | str]:
+        return [
+            chunk
+            for chunk in chunks
+            if not isinstance(chunk, TextChunk) or chunk.chunk_type not in SUMMARY_SKIP_TYPES
+        ]
 
     @staticmethod
     def _failure_label(exc: Exception) -> str:

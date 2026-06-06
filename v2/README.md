@@ -324,6 +324,9 @@ output: ["inspector winston", "late summer"]
 is it too complicated? why couldn't you implement chat and stream feature properly? its pretty straightforward right? new chat -> ask questions get responses -> saves it in the BG to DB -> reload get all conversations for the user for the chat, when clicked on a chat, put it in the route and API call to convverations/{chatid} and render all chats
 
 
+**Chunking enhancements:**
+  - types: content, mixed_content, boilerplate
+  - metadata: {"has_dates": true, "has_links": true, "has_emails": true, "has_code": false, "heading_level": 2}
 
 
 ### STARTUP STEPS

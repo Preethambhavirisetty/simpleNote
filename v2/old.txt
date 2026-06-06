@@ -1,0 +1,60 @@
+{
+    "success": true,
+    "data": {
+        "action_name": "ingestion.chunk",
+        "result": {
+            "chunk_count": 12,
+            "chunks": [
+                {
+                    "content": "# CORPORATE OPERATIONS REPORT",
+                    "chunk_id": "0"
+                },
+                {
+                    "content": "## Executive Summary\nAcme Holdings completed its annual operational review for FY2025. Revenue increased by 18.4% while operating expenses increased by 7.2%.\n## Contact Information\nAcme Holdings",
+                    "chunk_id": "1"
+                },
+                {
+                    "content": "100 Main Street\nSuite 450\nDenver, CO 80202\nEmail: operations@acmeholdings.com\nWebsite: https://www.acmeholdings.com\n## Frequently Asked Questions\nQ: What was the biggest challenge this year?\nA: Supply chain disruptions.\nQ: What was the biggest success?\nA: Expansion into new markets.",
+                    "chunk_id": "2"
+                },
+                {
+                    "content": "## Financial Performance\n| Quarter | Revenue | Expenses | Profit |\n|----------|----------|----------|----------|\n| Q1 | 12.5M | 8.2M | 4.3M |\n| Q2 | 13.1M | 8.6M | 4.5M |\n| Q3 | 15.2M | 9.0M | 6.2M |\n| Q4 | 16.7M | 9.5M | 7.2M |",
+                    "chunk_id": "3"
+                },
+                {
+                    "content": "## Engineering Notes\n```python\ndef calculate_growth(current, previous):\n    return ((current - previous) / previous) * 100\n```",
+                    "chunk_id": "4"
+                },
+                {
+                    "content": "## Configuration\n```json\n{\n  \"environment\": \"production\",\n  \"region\": \"us-east-1\",\n  \"replicas\": 12,\n  \"features\": {\n    \"search\": true,\n    \"analytics\": true\n  }\n}\n```\n## Meeting Transcript\nSpeaker A:\nGood morning everyone.\nSpeaker B:\nLet's review the roadmap.\nSpeaker A:\nWe should prioritize customer retention.\nSpeaker C:\nAgreed.",
+                    "chunk_id": "5"
+                },
+                {
+                    "content": "## OCR Example\nThe customer experi-\nence improved signif-\nicantly after imple-\nmentation of the new system.\n## Repeated Content\nCONFIDENTIAL\nCONFIDENTIAL\nCONFIDENTIAL\nCONFIDENTIAL\nCONFIDENTIAL",
+                    "chunk_id": "6"
+                },
+                {
+                    "content": "## Very Long Paragraph\nThe organization continued to expand across multiple markets while simultaneously investing in employee development, operational efficiency, customer satisfaction initiatives, infrastructure modernization, supply chain optimization, regional partnerships, strategic acquisitions, compliance initiatives, sustainability programs, quality assurance frameworks, risk mitigation strategies, vendor consolidation efforts, customer success operations, long-term growth planning, leadership development, market intelligence gathering, operational analytics, partner enablement, customer education, digital transformation initiatives, internal process improvements, knowledge management systems, governance frameworks, performance monitoring systems, resource planning activities, vendor management improvements, customer engagement strategies, workforce planning, organizational restructuring efforts, innovation programs, strategic reviews, product enhancement initiatives, regional expansion opportunities, and numerous other operational priorities. This paragraph intentionally continues for a very long duration to stress-test semantic chunking, token-based chunking, overlap handling, keyword extraction, entity extraction, summarization, hierarchical summarization, and retrieval performance. The organization continued to expand across multiple markets while simultaneously investing in employee development, operational efficiency, customer satisfaction initiatives, infrastructure modernization, supply chain optimization, regional partnerships, strategic acquisitions, compliance initiatives, sustainability programs, quality assurance frameworks, risk mitigation strategies, vendor consolidation efforts, customer success operations, long-term growth planning, leadership development, market intelligence gathering, operational analytics, partner enablement, customer education, digital transformation initiatives, internal process improvements, knowledge management systems, governance frameworks, performance monitoring systems, resource planning activities, vendor management improvements, customer engagement strategies, workforce planning, organizational restructuring efforts, innovation programs, strategic reviews, product enhancement initiatives, regional expansion opportunities, and numerous other operational priorities.\n### Empty Section\n### Another Empty Section",
+                    "chunk_id": "7"
+                },
+                {
+                    "content": "## Mixed Numbering\n1. Item One\n2. Item Two",
+                    "chunk_id": "8"
+                },
+                {
+                    "content": "100 Main Street > 1.1 Sub Item",
+                    "chunk_id": "9"
+                },
+                {
+                    "content": "100 Main Street > 1.2 Another Sub Item\nA. Alternative Format\nB. Another Alternative Format\n(i) Roman Format\n(ii) Another Roman Format\n## Nested Lists\n- Corporate\n  - Finance\n    - Budget Planning\n    - Cost Optimization\n  - Operations\n    - Logistics\n    - Procurement\n- Technology\n  - Infrastructure\n  - Security\n## Address Blocks\nCorporate Headquarters",
+                    "chunk_id": "10"
+                },
+                {
+                    "content": "500 Innovation Parkway\nBuilding C\nAustin, TX 78701\nUnited States\nRegional Office\n200 Harbor Avenue\nSeattle, WA 98101\nUnited States\n## Quotes\n\"Success usually comes to those who are too busy to be looking for it.\"\n\"The secret of getting ahead is getting started.\"\n## Cross References\nFor details on revenue growth, see Section 'Financial Performance'.\nFor configuration settings, refer to 'Configuration'.\nFor definitions, see 'Glossary'.\n## Appendix A\nReference Number: ACM-2025-OPS-001\nSee Section 4.2 for additional information.\nAppendix Notes:\n- Internal Use Only\n- Review Annually\n- Archive After Five Years\n## Glossary\nARR: Annual Recurring Revenue\nEBITDA: Earnings Before Interest, Taxes, Depreciation, and Amortization\nSLA: Service Level Agreement\nKPI: Key Performance Indicator\nROI: Return on Investment\n## Footer Artifacts\nPage 12 of 48\nCONFIDENTIAL - INTERNAL USE ONLY\nGenerated on January 15, 2026",
+                    "chunk_id": "11"
+                }
+            ]
+        }
+    },
+    "error": null
+}

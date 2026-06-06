@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
+from typing import Any
 
+from app.services.ingestion.processors.chunking.chunk_types import ChunkType, classify_chunk_type
 from app.services.ingestion.processors.chunking.heading_chunker import HeadingChunker
 from app.services.ingestion.processors.chunking.heading_processor import HeadingProcessor
 from app.services.ingestion.processors.chunking.post_processor import ChunkPostProcessor
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
 from app.services.ingestion.processors.chunking.token_budget import token_count
 from app.services.ingestion.processors.chunking.validators import validate_chunk
+from app.services.ingestion.processors.text_normalization import repair_ocr_hyphenation
 
+from app.services.ingestion.processors.chunking.chunk_classifier import split_into_typed_chunks
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +23,8 @@ log = logging.getLogger(__name__)
 class TextChunk:
     content: str
     chunk_id: str
+    chunk_type: str = ChunkType.CONTENT.value
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class ChunkProcessor:
@@ -32,7 +39,8 @@ class ChunkProcessor:
     def split(self, text: str) -> list[str]:
         log.info("Chunking began...")
 
-        prepared_text = self.heading_chunker.inject_numbered_line_breaks(text)
+        normalized_text = repair_ocr_hyphenation(text)
+        prepared_text = self.heading_chunker.inject_numbered_line_breaks(normalized_text)
         paragraphs = self._split_paragraphs_preserving_code(prepared_text)
 
         chunks = []
@@ -54,7 +62,7 @@ class ChunkProcessor:
         if pending_paragraph and validate_chunk(pending_paragraph) != "DISCARD":
             chunks.append(pending_paragraph)
 
-        final_chunks = self.post_processor.process(chunks)
+        final_chunks = self._split_numbered_sections(self.post_processor.process(chunks))
         log.info(
             "Generated %d chunks (original=%d tokens, chunked=%d tokens)",
             len(final_chunks),
@@ -64,10 +72,72 @@ class ChunkProcessor:
         return final_chunks
 
     def process(self, text: str) -> list[TextChunk]:
-        return [
-            TextChunk(content=chunk, chunk_id=str(index))
-            for index, chunk in enumerate(self.split(text))
-        ]
+        # chunks = self.split(text)
+        normalized_text = repair_ocr_hyphenation(text)
+        chunks = split_into_typed_chunks(normalized_text)
+        # if not chunks and text.strip():
+        #     fallback_type = classify_chunk_type(text).value
+        #     if fallback_type == ChunkType.HEADING_ONLY.value:
+        #         return [TextChunk(content=text.strip(), chunk_id="0", chunk_type=fallback_type)]
+
+        expanded: list[tuple[str, str]] = []
+        for chunk, chunk_type in chunks:
+            if chunk_type == ChunkType.CONTENT.value:
+                expanded.extend(
+                    (part, classify_chunk_type(part).value)
+                    for part in self.semantic_chunker.split_prose(chunk)
+                )
+            else:
+                expanded.append((chunk, chunk_type))
+
+        heading_context: dict[int, str] = {}
+        output: list[TextChunk] = []
+        for index, (chunk, chunk_type) in enumerate(expanded):
+            for line in chunk.splitlines():
+                match = re.match(r"^(#{1,6})\s+(\S.*)$", line.strip())
+                if not match:
+                    continue
+                depth = len(match.group(1))
+                heading_context[depth] = match.group(2).strip()
+                for child_depth in [key for key in heading_context if key > depth]:
+                    del heading_context[child_depth]
+
+            metadata = {
+                f"h{depth}": heading_context[depth]
+                for depth in sorted(heading_context)
+            }
+            if metadata:
+                metadata["heading_context"] = " > ".join(metadata[key] for key in sorted(metadata))
+            output.append(TextChunk(chunk, str(index), chunk_type, metadata))
+        return output
+
+    @staticmethod
+    def _split_numbered_sections(chunks: list[str]) -> list[str]:
+        """Keep numbered section lines separate without splitting list runs."""
+        output: list[str] = []
+        numbered = re.compile(r"^\s*(?P<number>\d+(?:\.\d+)*\.?)\s+\S")
+
+        for chunk in chunks:
+            lines = chunk.splitlines()
+            groups: list[list[str]] = []
+            current: list[str] = []
+            for index, line in enumerate(lines):
+                match = numbered.match(line)
+                next_line = lines[index + 1].strip() if index + 1 < len(lines) else ""
+                next_is_numbered = bool(numbered.match(next_line))
+                raw_prefix = match.group("number") if match else ""
+                prefix = raw_prefix.rstrip(".")
+                is_nested_heading = bool(prefix and "." in prefix)
+                has_section_marker = is_nested_heading or raw_prefix.endswith(".")
+                starts_section = bool(match and has_section_marker and not next_is_numbered)
+                if starts_section and current:
+                    groups.append(current)
+                    current = []
+                current.append(line)
+            if current:
+                groups.append(current)
+            output.extend("\n".join(group).strip() for group in groups if "\n".join(group).strip())
+        return output
 
     @staticmethod
     def _split_paragraphs_preserving_code(text: str) -> list[str]:

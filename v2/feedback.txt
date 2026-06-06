@@ -1,0 +1,373 @@
+I think this is one of the **highest ROI improvements** you can make right now.
+
+In fact, I'd prioritize this **before** spending more time tuning keyword extraction prompts.
+
+---
+
+# Why this is a good idea
+
+Today your pipeline looks roughly like:
+
+```text
+Document
+   ↓
+Chunk
+   ↓
+Keywords
+   ↓
+Entities
+   ↓
+Vector DB
+```
+
+I would evolve it to:
+
+```text
+Document
+   ↓
+Chunk
+   ↓
+Chunk Classification
+   ↓
+Keywords
+Entities
+Summary
+   ↓
+Vector DB
+```
+
+where each chunk gets:
+
+```json
+{
+  "chunk_type": "table"
+}
+```
+
+or
+
+```json
+{
+  "chunk_type": "glossary"
+}
+```
+
+or
+
+```json
+{
+  "chunk_type": "code"
+}
+```
+
+---
+
+# Why this matters
+
+Your current test document perfectly demonstrates why.
+
+For example:
+
+```text
+## Glossary
+
+ARR
+EBITDA
+ROI
+```
+
+A glossary chunk should not be processed like:
+
+```text
+Meeting Transcript
+```
+
+Yet currently:
+
+```text
+keyword extractor
+entity extractor
+summary generator
+```
+
+treat them identically.
+
+That's the root cause of many of the weird results.
+
+---
+
+# Recommended Chunk Types
+
+I would start with:
+
+```python
+CONTENT
+HEADING_ONLY
+TABLE
+CODE
+JSON
+FAQ
+TRANSCRIPT
+ADDRESS
+CONTACT
+GLOSSARY
+APPENDIX
+FOOTER
+HEADER
+QUOTE
+LIST
+OCR_NOISE
+BOILERPLATE
+```
+
+Don't overcomplicate it initially.
+
+---
+
+# Different Processing Per Type
+
+## CONTENT
+
+Normal pipeline:
+
+```text
+keywords
+entities
+summary
+embedding
+```
+
+---
+
+## TABLE
+
+Instead of:
+
+```text
+Quarter | Revenue |
+```
+
+Generate:
+
+```json
+{
+  "table_summary":
+  "Quarterly revenue and profit data for FY2025."
+}
+```
+
+Store:
+
+```text
+table_summary
+```
+
+in embeddings.
+
+Huge improvement.
+
+---
+
+## CODE
+
+Instead of:
+
+```python
+def calculate_growth(...)
+```
+
+Keywords:
+
+```text
+growth calculation
+percentage computation
+python function
+```
+
+Entity extraction:
+
+```text
+skip
+```
+
+Most code chunks don't need NER.
+
+---
+
+## GLOSSARY
+
+Entity extraction:
+
+```text
+skip
+```
+
+Keyword extraction:
+
+```text
+skip
+```
+
+Store:
+
+```json
+{
+  "terms": [
+    "ARR",
+    "EBITDA",
+    "ROI"
+  ]
+}
+```
+
+---
+
+## FOOTER
+
+Example:
+
+```text
+Page 12 of 48
+CONFIDENTIAL
+```
+
+Processing:
+
+```text
+ignore
+```
+
+Do not embed.
+
+Do not summarize.
+
+Do not extract.
+
+---
+
+# Biggest Win: Retrieval Filtering
+
+Later during retrieval:
+
+```python
+allowed_types = [
+    "content",
+    "table",
+    "faq",
+    "transcript"
+]
+```
+
+Exclude:
+
+```python
+footer
+header
+boilerplate
+ocr_noise
+```
+
+before reranking.
+
+This often improves retrieval quality more than better embeddings.
+
+---
+
+# Example
+
+User asks:
+
+```text
+What was quarterly revenue?
+```
+
+Today:
+
+Retriever may return:
+
+```text
+Footer
+Glossary
+Table
+```
+
+because all are embedded.
+
+With chunk typing:
+
+```python
+search_types = [
+    "content",
+    "table"
+]
+```
+
+The glossary and footer never participate.
+
+Much cleaner.
+
+---
+
+# What I would NOT do
+
+I would NOT create 50 chunk types.
+
+Bad:
+
+```text
+corporate_glossary
+technical_glossary
+financial_glossary
+```
+
+Good:
+
+```text
+glossary
+```
+
+Keep the taxonomy small.
+
+---
+
+# My Recommended Architecture
+
+For a modern document RAG:
+
+```json
+{
+  "chunk_id": "...",
+  "chunk_type": "table",
+  "heading": "Financial Performance",
+  "content": "...",
+  "summary": "...",
+  "keywords": [...],
+  "entities": [...],
+  "embedding_text": "..."
+}
+```
+
+Then retrieval can use:
+
+```python
+chunk_type_filter
++
+hybrid search
++
+reranker
+```
+
+instead of relying on keywords alone.
+
+---
+
+If I were prioritizing your roadmap today:
+
+1. Chunk classification ✅
+2. OCR cleanup ✅
+3. Table normalization ✅
+4. Footer/header removal ✅
+5. Entity typing ✅
+6. Keyword improvements later
+
+The first four will likely improve retrieval quality far more than another round of keyword prompt engineering.

@@ -4,7 +4,24 @@ TOP_LEVEL_HEADING_PATTERN = re.compile(r"^\s*(?P<number>\d+)(?:\.\d+)*(?:\.)?\s+
 NUMBERED_HEADING_PREFIX_PATTERN = re.compile(r"^\s*(?P<prefix>\d+(?:\.\d+)*)(?:\.)?\s+")
 NUMBERED_LIST_ITEM_PATTERN = re.compile(r"^\s*\d+[.)]\s+")
 FENCED_CODE_BLOCK_PATTERN = re.compile(r"```[^\n]*\n[\s\S]*?\n```", re.DOTALL)
-FENCED_CODE_BLOCK_LINE_PATTERN = re.compile(r"^```.*$", re.MULTILINE)
+FENCED_CODE_BLOCK_LINE_PATTERN = re.compile(r"^```.*", re.MULTILINE)
+BOUNDARY_HEADING_PATTERN = re.compile(
+    r"^(?:#{1,6}\s*)?(?:appendix|glossary|faq|faqs|transcript|table|references?|bibliography|index)\b",
+    re.IGNORECASE,
+)
+EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+PHONE_PATTERN = re.compile(r"(?:\+?\d[\d().\-\s]{6,}\d)")
+URL_PATTERN = re.compile(r"\b(?:https?://|www\.)\S+\b", re.IGNORECASE)
+STREET_ADDRESS_PATTERN = re.compile(
+    r"\b\d{1,6}\s+[A-Za-z0-9][A-Za-z0-9 .'-]*\b(?:"
+    r"street|st\.?|road|rd\.?|avenue|ave\.?|boulevard|blvd\.?|drive|dr\.?|"
+    r"lane|ln\.?|court|ct\.?|circle|cir\.?|place|pl\.?|parkway|pkwy\.?|way|terrace|ter\.?"
+    r")\b",
+    re.IGNORECASE,
+)
+POSTAL_CODE_PATTERN = re.compile(
+    r"\b(?:[A-Z]{2}\s+\d{5}(?:-\d{4})?|\d{5}(?:-\d{4})?|[A-Z]\d[A-Z]\s?\d[A-Z]\d)\b"
+)
 
 
 def validate_chunk(chunk: str) -> str:
@@ -115,6 +132,12 @@ def has_parent_context(chunk: str) -> bool:
     return is_heading_like(first_line) or first_line.endswith(":") or "\n" in chunk
 
 
+def is_boundary_heading(chunk: str) -> bool:
+    first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
+    first_line = re.sub(r"^\d+(?:\.\d+)*(?:\.)?\s+", "", first_line).strip()
+    return bool(BOUNDARY_HEADING_PATTERN.match(first_line))
+
+
 def top_level_heading(chunk: str) -> str | None:
     first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
     match = TOP_LEVEL_HEADING_PATTERN.match(first_line)
@@ -156,7 +179,7 @@ def is_table_rowish_chunk(chunk: str) -> bool:
 
 def is_heading_only_chunk(chunk: str) -> bool:
     lines = [line.strip() for line in chunk.splitlines() if line.strip()]
-    if len(lines) <= 1:
+    if not lines:
         return False
     return all(_is_structural_heading_line(line) for line in lines)
 
@@ -178,17 +201,38 @@ def is_signature_like_chunk(chunk: str) -> bool:
         return False
 
     joined = " ".join(lines).lower()
-    contact_markers = (
-        "@",
-        "http://",
-        "https://",
-        "phone:",
-        "fax:",
-        "best regards",
-        "sincerely",
-    )
+    contact_markers = ("best regards", "sincerely")
+    if EMAIL_PATTERN.search(joined) or URL_PATTERN.search(joined):
+        return True
     return any(marker in joined for marker in contact_markers)
 
+
+def is_contact_like_chunk(chunk: str) -> bool:
+    text = chunk.strip()
+    if not text:
+        return False
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    joined = " ".join(lines)
+    lowered = joined.lower()
+
+    has_direct_contact = (
+        EMAIL_PATTERN.search(joined) is not None
+        or URL_PATTERN.search(joined) is not None
+        or PHONE_PATTERN.search(joined) is not None
+    )
+    has_address = (
+        STREET_ADDRESS_PATTERN.search(joined) is not None
+        or POSTAL_CODE_PATTERN.search(joined) is not None
+    )
+    has_contact_heading = bool(
+        re.search(r"^#{1,6}\s+(?:contact|contact information)\b", text, re.IGNORECASE)
+    )
+    has_explicit_label = bool(
+        re.search(r"\b(?:email|phone|fax|website|address|inquiries)\s*:", lowered)
+    )
+
+    return has_direct_contact or has_contact_heading or has_explicit_label or has_address
 
 def is_address_like_chunk(chunk: str) -> bool:
     lines = [line.strip() for line in chunk.splitlines() if line.strip()]
@@ -228,6 +272,7 @@ def is_address_like_chunk(chunk: str) -> bool:
         or re.search(r"\bSingapore\s+\d{6}\b", line, re.IGNORECASE)
         for line in lines
     )
+    has_street_line = any(STREET_ADDRESS_PATTERN.search(line) for line in lines)
     likely_heading_only = len(lines) == 1 and is_heading_like(lines[0])
 
-    return (has_keyword or has_postal_line) and not likely_heading_only
+    return (has_postal_line or has_street_line) and not likely_heading_only

@@ -185,6 +185,7 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
     volumes:
+      - ./notelite_agent/app:/app/app:ro
       - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
       - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
@@ -217,6 +218,7 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
     volumes:
+      - ./notelite_agent/app:/app/app:ro
       - agent-model-cache:/app/.cache
       - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
       - ./feature_flags.json:/app/feature_flags.json:ro

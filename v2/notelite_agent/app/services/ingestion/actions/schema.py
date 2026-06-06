@@ -10,6 +10,8 @@ from app.services.chat.actions.schema import PromptActionRequest, RetrievalActio
 class ActionChunk(BaseModel):
     chunk_id: str | None = None
     content: str = Field(..., min_length=1)
+    chunk_type: str = "content"
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ActionKeywordChunk(ActionChunk):

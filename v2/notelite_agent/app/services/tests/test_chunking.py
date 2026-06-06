@@ -1,4 +1,57 @@
+import pytest
+
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
+from app.services.tests.chunk_test_data_stress import TEST_CASES
+
+
+def _case_id(case: dict) -> str:
+    return case["name"]
+
+
+def _chunk_text(chunks) -> str:
+    return "\n\n".join(chunk.content for chunk in chunks)
+
+
+@pytest.mark.parametrize("case", TEST_CASES, ids=_case_id)
+def test_chunk_test_data_expectations(case):
+    chunks = ChunkProcessor().process(case["text"])
+    expected = case["expected"]
+
+    if "chunk_count" in expected:
+        assert len(chunks) == expected["chunk_count"]
+    if "chunk_count_min" in expected:
+        assert len(chunks) >= expected["chunk_count_min"]
+
+    chunk_types = [chunk.chunk_type for chunk in chunks]
+    for chunk_type in expected.get("chunk_types", []):
+        assert chunk_type in chunk_types
+
+    text = _chunk_text(chunks)
+    for fragment in expected.get("must_contain", []):
+        assert fragment in text
+
+    for fragment in expected.get("must_not_split", []):
+        containing_chunks = [chunk for chunk in chunks if fragment in chunk.content]
+        assert len(containing_chunks) == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        case
+        for case in TEST_CASES
+        if case["expected"].get("chunk_count") == 1
+        and case["expected"].get("must_not_split")
+    ],
+    ids=_case_id,
+)
+def test_declared_atomic_chunks_keep_fragments_together(case):
+    chunks = ChunkProcessor().process(case["text"])
+    expected_fragments = case["expected"]["must_not_split"]
+
+    assert len(chunks) == 1
+    for fragment in expected_fragments:
+        assert fragment in chunks[0].content
 
 
 def test_preserves_nested_heading_context():
@@ -15,9 +68,10 @@ Objective details.
 
     chunks = ChunkProcessor().split(text)
 
-    assert any("1. Introduction > 1.1 Background" in c for c in chunks)
-    assert any("1. Introduction > 1.2 Objectives" in c for c in chunks)
+    assert any("1.1 Background" in c for c in chunks)
+    assert any("1.2 Objectives" in c for c in chunks)
     assert any("1. Introduction" in c for c in chunks)
+    assert not any(" > " in c for c in chunks)
 
 
 def test_never_merge_across_top_level_headings():
@@ -231,7 +285,7 @@ The primary goals are retrieval accuracy, scalability, and maintainability.
     chunks = ChunkProcessor().split(text)
 
     assert any(
-        "1. Executive Summary > 1.2 Objectives" in chunk
+        "1.2 Objectives" in chunk
         and "The primary goals are retrieval accuracy" in chunk
         for chunk in chunks
     )
@@ -385,3 +439,82 @@ Phone: +65 6555 0100
     assert "Phone: +49 30 555 01000" in berlin_chunks[0]
     assert len(singapore_chunks) == 1
     assert "TechCorp Asia Pacific" in singapore_chunks[0]
+
+
+def test_plain_us_contact_address_block_stays_atomic():
+    text = """
+## Contact Information
+Acme Holdings
+100 Main Street
+Suite 450
+Denver, CO 80202
+Phone: +1 303 555 0100
+Email: hello@example.com
+
+## Quotes
+Quoted material belongs in a separate section.
+"""
+
+    chunks = ChunkProcessor().split(text)
+    address_chunks = [chunk for chunk in chunks if "100 Main Street" in chunk]
+
+    assert len(address_chunks) == 1
+    assert "Acme Holdings" in address_chunks[0]
+    assert "Suite 450" in address_chunks[0]
+    assert "hello@example.com" in address_chunks[0]
+    assert "## Quotes" not in address_chunks[0]
+
+
+def test_structural_boundary_sections_do_not_merge():
+    text = """
+## Address
+100 Main Street
+Denver, CO 80202
+
+## Quotes
+Quote one.
+
+## Appendix
+Appendix material.
+
+## Glossary
+Term definitions.
+
+## Footer
+Footer text.
+"""
+
+    chunks = ChunkProcessor().split(text)
+
+    assert not any("## Quotes" in chunk and "## Appendix" in chunk for chunk in chunks)
+    assert not any("## Appendix" in chunk and "## Glossary" in chunk for chunk in chunks)
+
+
+def test_ocr_hyphenation_repaired_before_chunking():
+    text = """
+## Notes
+The implementation improved experi-
+ence across the document.
+"""
+
+    chunks = ChunkProcessor().split(text)
+    joined = "\n\n".join(chunks)
+
+    assert "experience" in joined
+    assert "experi-" not in joined
+    assert "\nence" not in joined
+
+
+def test_divider_lines_force_boundaries_without_becoming_chunks():
+    text = "Before the divider.\n\n------------------------\n\nAfter the divider."
+
+    chunks = ChunkProcessor().process(text)
+
+    assert [chunk.content for chunk in chunks] == ["Before the divider.", "After the divider."]
+    assert all("---" not in chunk.content for chunk in chunks)
+
+
+def test_divider_only_document_produces_no_chunks():
+    chunks = ChunkProcessor().process("---\n________\n********")
+
+    assert chunks == []

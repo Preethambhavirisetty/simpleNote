@@ -84,7 +84,12 @@ class IngestionActionServices:
     @staticmethod
     def _text_chunks(chunks: list[ActionChunk]) -> list[TextChunk]:
         return [
-            TextChunk(content=chunk.content, chunk_id=chunk.chunk_id or str(index))
+            TextChunk(
+                content=chunk.content,
+                chunk_id=chunk.chunk_id or str(index),
+                chunk_type=chunk.chunk_type,
+                metadata=dict(chunk.metadata),
+            )
             for index, chunk in enumerate(chunks)
         ]
 
@@ -93,6 +98,8 @@ class IngestionActionServices:
         return ChunkKeywordResult(
             chunk_id=chunk.chunk_id or str(index),
             content=chunk.content,
+            chunk_type=chunk.chunk_type,
+            metadata=dict(chunk.metadata),
             keywords=chunk.keywords,
             entities=chunk.entities,
         )

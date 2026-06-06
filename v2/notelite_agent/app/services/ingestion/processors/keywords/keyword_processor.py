@@ -3,13 +3,15 @@ from __future__ import annotations
 import logging
 import re
 from collections import Counter
-from dataclasses import dataclass
-from typing import Literal, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Literal, Sequence
 
 from app.shared.prompts.prompt import get_entity_dedup_system_prompt, get_keyword_dedup_system_prompt
 from app.services.ingestion.processors.chunking import TextChunk
+from app.services.ingestion.processors.chunking.chunk_types import ChunkType
 from app.services.ingestion.processors.keywords.extractor import extract_keywords
 from app.services.ingestion.processors.keywords.terms import prune_keywords
+from app.services.ingestion.processors.text_normalization import normalize_text_for_keyword_extraction
 from app.shared.llm import llm_call_general
 from app.shared.utils import build_llm_messages
 
@@ -21,6 +23,12 @@ TermKind = Literal["kw", "ent"]
 
 log = logging.getLogger(__name__)
 
+NON_TEXT_TERM_TYPES = {
+    ChunkType.HEADING_ONLY.value,
+    ChunkType.CODE.value,
+    ChunkType.JSON.value,
+}
+
 
 @dataclass(frozen=True)
 class ChunkKeywordResult:
@@ -28,6 +36,8 @@ class ChunkKeywordResult:
     content: str
     keywords: list[str]
     entities: list[str]
+    chunk_type: str = ChunkType.CONTENT.value
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -63,14 +73,20 @@ class KeywordProcessor:
         chunk_results = []
 
         for index, chunk in enumerate(chunks):
-            chunk_id, content = self._chunk_data(chunk, index)
-            keywords, entities = extract_keywords(content, self.top_n_per_chunk)
+            chunk_id, content, chunk_type, metadata = self._chunk_data(chunk, index)
+            extraction_text = normalize_text_for_keyword_extraction(content)
+            if self._should_extract_terms(extraction_text, chunk_type):
+                keywords, entities = extract_keywords(extraction_text, self.top_n_per_chunk)
+            else:
+                keywords, entities = [], []
             chunk_results.append(
                 ChunkKeywordResult(
                     chunk_id=chunk_id,
                     content=content,
                     keywords=keywords,
                     entities=entities,
+                    chunk_type=chunk_type,
+                    metadata=metadata,
                 )
             )
 
@@ -86,6 +102,10 @@ class KeywordProcessor:
             f"keywords completed: {len(top_keywords)} top keywords, {len(top_entities)} entities"
         )
         return chunk_results, top_keywords, top_entities
+
+    @staticmethod
+    def _should_extract_terms(text: str, chunk_type: str) -> bool:
+        return chunk_type not in NON_TEXT_TERM_TYPES and any(char.isalpha() for char in text)
 
     def _rank_keyword_candidates(self, keywords: Sequence[str]) -> list[str]:
         display_by_key = {}
@@ -135,10 +155,10 @@ class KeywordProcessor:
         return [display_by_key[key] for key in ranked[: self.max_global_candidates]]
 
     @staticmethod
-    def _chunk_data(chunk: TextChunk | str, index: int) -> tuple[str, str]:
+    def _chunk_data(chunk: TextChunk | str, index: int) -> tuple[str, str, str, dict[str, Any]]:
         if isinstance(chunk, TextChunk):
-            return chunk.chunk_id, chunk.content
-        return str(index), chunk
+            return chunk.chunk_id, chunk.content, chunk.chunk_type, dict(chunk.metadata)
+        return str(index), chunk, ChunkType.CONTENT.value, {}
 
     @staticmethod
     def _parse_llm_keyword_lines(

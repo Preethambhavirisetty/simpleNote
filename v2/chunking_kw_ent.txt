@@ -1,0 +1,570 @@
+# CHUNKING ISSUES
+
+## 1. Contact Block Split Across Chunks
+
+### Current
+
+Chunk 1:
+
+```text
+## Contact Information
+Acme Holdings
+```
+
+Chunk 2:
+
+```text
+100 Main Street
+Suite 450
+Denver...
+```
+
+### Root Cause
+
+Semantic splitter is treating:
+
+```text
+Acme Holdings
+100 Main Street
+```
+
+as separate semantic units.
+
+Address blocks have very low semantic similarity.
+
+### Fix
+
+Before chunking detect patterns:
+
+```python
+ADDRESS_PATTERNS = [
+    email,
+    zip_code,
+    phone,
+    website,
+    street_address
+]
+```
+
+Create:
+
+```python
+BLOCK_TYPE = ADDRESS
+```
+
+and force them to stay together.
+
+---
+
+## 2. Metadata Path Leakage
+
+### Current
+
+```text
+100 Main Street > 1.1 Sub Item
+```
+
+### Root Cause
+
+Hierarchy/path information is being merged into content.
+
+Likely:
+
+```python
+parent_path + " > " + content
+```
+
+during chunk generation.
+
+### Fix
+
+Store hierarchy separately.
+
+Good:
+
+```json
+{
+  "content": "...",
+  "path": [
+    "Mixed Numbering",
+    "Sub Item"
+  ]
+}
+```
+
+Bad:
+
+```text
+Mixed Numbering > Sub Item
+```
+
+inside chunk text.
+
+---
+
+## 3. Multi-topic Chunk
+
+Chunk 11 contains:
+
+```text
+Address
+Quotes
+Appendix
+Glossary
+Footer
+```
+
+### Root Cause
+
+Chunker prioritizes token count over semantic boundaries.
+
+### Fix
+
+New chunk on:
+
+```text
+## Heading
+Appendix
+Glossary
+FAQ
+Transcript
+Table
+```
+
+Never merge these.
+
+---
+
+## 4. Empty Headings Attached
+
+Current:
+
+```text
+### Empty Section
+### Another Empty Section
+```
+
+inside long paragraph chunk.
+
+### Root Cause
+
+Empty sections are not detected.
+
+### Fix
+
+Pre-pass:
+
+```python
+if heading_has_no_content:
+    skip_heading()
+```
+
+or
+
+```python
+attach_to_previous = False
+```
+
+---
+
+# KEYWORD EXTRACTION ISSUES
+
+## 5. Markdown/Table Leakage
+
+### Current
+
+```text
+Quarter | Revenue |
+| Q1 |
+| Q2 |
+```
+
+became keywords.
+
+### Root Cause
+
+Keyword extractor sees raw markdown.
+
+### Fix
+
+Normalize tables first.
+
+Convert:
+
+```markdown
+| Q1 | 12M |
+```
+
+to:
+
+```text
+Q1 revenue 12M
+```
+
+before extraction.
+
+---
+
+## 6. OCR Garbage Keywords
+
+### Current
+
+```text
+ence
+mentation
+imple-
+```
+
+### Root Cause
+
+OCR cleanup missing.
+
+### Fix
+
+Before chunking:
+
+```python
+text = re.sub(
+    r'(\w+)-\n(\w+)',
+    r'\1\2',
+    text
+)
+```
+
+Example:
+
+```text
+experi-
+ence
+```
+
+becomes:
+
+```text
+experience
+```
+
+---
+
+## 7. Heading Pollution
+
+### Current
+
+```text
+Executive Summary Acme Holdings
+Contact Information Acme Holdings
+```
+
+### Root Cause
+
+Heading text merged with body text.
+
+### Fix
+
+Extract keywords from body.
+
+Store heading separately.
+
+Example:
+
+```json
+{
+  "heading": "Executive Summary",
+  "content": "...",
+  "keywords": [...]
+}
+```
+
+---
+
+## 8. Repeated Content Pollution
+
+### Current
+
+```text
+CONFIDENTIAL CONFIDENTIAL CONFIDENTIAL
+```
+
+becomes keyword.
+
+### Root Cause
+
+Boilerplate detection missing.
+
+### Fix
+
+Detect frequency.
+
+If phrase appears:
+
+```python
+> 3 times
+```
+
+mark as:
+
+```python
+boilerplate=True
+```
+
+and ignore.
+
+---
+
+# ENTITY EXTRACTION ISSUES
+
+## 9. Concepts Treated as Entities
+
+### Current
+
+```text
+keyword extraction
+```
+
+entity.
+
+### Root Cause
+
+LLM/entity extractor has no type validation.
+
+### Fix
+
+Require:
+
+```python
+PERSON
+ORG
+LOCATION
+DATE
+PRODUCT
+REFERENCE_ID
+EVENT
+```
+
+If entity doesn't match type:
+
+```python
+discard
+```
+
+---
+
+## 10. Glossary Terms Become Entities
+
+### Current
+
+```text
+Glossary ARR
+```
+
+### Root Cause
+
+Glossary section not handled specially.
+
+### Fix
+
+Detect:
+
+```text
+## Glossary
+```
+
+Store separately:
+
+```json
+{
+  "glossary": {
+     "ARR": "...",
+     "EBITDA": "..."
+  }
+}
+```
+
+Do not run entity extraction there.
+
+---
+
+## 11. Structural Text Becomes Entity
+
+### Current
+
+```text
+Main Street > 1.2
+A. Alternative Format B.
+Roman Format
+```
+
+### Root Cause
+
+Extractor receives malformed structural text.
+
+### Fix
+
+Before extraction remove:
+
+```python
+^\d+\.
+^[A-Z]\.
+^\([ivx]+\)
+```
+
+list markers.
+
+---
+
+## 12. Missing Entity Types
+
+### Current
+
+```json
+[
+  "Acme Holdings",
+  "Seattle",
+  "Denver"
+]
+```
+
+### Fix
+
+Store:
+
+```json
+[
+  {
+    "text": "Acme Holdings",
+    "type": "ORG"
+  },
+  {
+    "text": "Seattle",
+    "type": "CITY"
+  }
+]
+```
+
+Huge retrieval improvement.
+
+---
+
+## 13. Missing Important Entities
+
+### Current Missing
+
+```text
+Austin
+United States
+FY2025
+ACM-2025-OPS-001
+```
+
+### Root Cause
+
+Dedup stage likely removes low-frequency entities.
+
+### Fix
+
+Never dedup by frequency alone.
+
+Keep:
+
+```python
+ORG
+LOCATION
+DATE
+REFERENCE_ID
+```
+
+even if seen once.
+
+---
+
+# MODERN RAG IMPROVEMENTS
+
+## Add Section Metadata
+
+Store:
+
+```json
+{
+  "chunk_id": "...",
+  "heading": "...",
+  "parent_heading": "...",
+  "document_type": "...",
+  "content": "...",
+  "keywords": [...],
+  "entities": [...]
+}
+```
+
+---
+
+## Add Chunk Summary
+
+Store:
+
+```json
+{
+  "chunk_summary": "...",
+  "section_summary": "...",
+  "document_summary": "..."
+}
+```
+
+---
+
+## Add Entity Categories
+
+Store:
+
+```json
+{
+  "persons": [],
+  "organizations": [],
+  "locations": [],
+  "dates": [],
+  "ids": []
+}
+```
+
+instead of one giant list.
+
+---
+
+# Priority Order
+
+If I were your tech lead, I'd prioritize:
+
+### P0 (Must Fix)
+
+1. OCR cleanup
+2. Metadata path leakage
+3. Table normalization
+4. Boilerplate removal
+
+---
+
+### P1
+
+5. Entity typing
+6. Glossary handling
+7. Address block preservation
+
+---
+
+### P2
+
+8. Parent-child chunking
+9. Section metadata
+10. Hierarchical summaries
+
+---
+
+Overall assessment:
+
+| Component            | Score |
+| -------------------- | ----- |
+| Chunking             | 7/10  |
+| Keywords             | 5/10  |
+| Entities             | 4/10  |
+| Modern RAG Readiness | 6/10  |
+
+The encouraging part is that most of the problems are **preprocessing issues**, not embedding-model or LLM issues. Fixing preprocessing alone would likely move you from **6/10 to 8.5/10**.

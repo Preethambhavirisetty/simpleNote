@@ -36,8 +36,6 @@ class HeadingProcessor:
             prev_part = heading_parts[index - 1] if index > 0 else ""
             next_part = heading_parts[index + 1] if index + 1 < len(heading_parts) else ""
             heading_line, depth = self._parse_numbered_heading(part, prev_part, next_part)
-            if heading_line:
-                part = self._prefix_parent_context(part, heading_context, depth)
 
             candidate = f"{pending_chunk}\n{part}".strip() if pending_chunk else part
 
@@ -48,11 +46,9 @@ class HeadingProcessor:
                     chunks.append(pending_chunk)
                 if heading_line:
                     chunks.extend(
-                        self._split_part_with_heading_context(
+                        self._split_part_preserving_heading(
                             part,
                             heading_line,
-                            depth,
-                            heading_context,
                         )
                     )
                     pending_chunk = ""
@@ -106,20 +102,10 @@ class HeadingProcessor:
         depth = len(prefix.split(".")) if prefix else 0
         return first_line, depth
 
-    @staticmethod
-    def _prefix_parent_context(part: str, heading_context: list[str], depth: int) -> str:
-        if depth <= 1 or not heading_context:
-            return part
-
-        parent_context = HeadingProcessor._heading_context(heading_context, depth - 1)
-        if not parent_context or parent_context in part:
-            return part
-
-        return f"{parent_context} > {part}"
 
     @staticmethod
     def _heading_context(heading_context: list[str], depth: int) -> str:
-        return " > ".join(h for h in heading_context[:depth] if h)
+        return "\n".join(h for h in heading_context[:depth] if h)
 
     @staticmethod
     def _update_heading_context(
@@ -136,25 +122,19 @@ class HeadingProcessor:
             heading_context.append("")
         heading_context.append(heading_line)
 
-    def _split_part_with_heading_context(
+    def _split_part_preserving_heading(
         self,
         part: str,
         heading_line: str,
-        depth: int,
-        heading_context: list[str],
     ) -> list[str]:
         parts = self.semantic_chunker.split(part)
-        parent_context = self._heading_context(heading_context, depth - 1)
-        full_heading = (
-            f"{parent_context} > {heading_line}" if parent_context else heading_line
-        )
         output = []
         for chunk in parts:
             first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
             if first_line == heading_line:
                 output.append(chunk)
             else:
-                output.append(f"{full_heading}\n{chunk}".strip())
+                output.append(f"{heading_line}\n{chunk}".strip())
         return output
 
     @staticmethod

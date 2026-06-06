@@ -7,6 +7,11 @@ from app.services.ingestion.processors.chunking.patterns import (
     EMPTY_LIST_ITEM_PATTERN,
     SENTINEL_LINE_PATTERN,
 )
+from app.services.ingestion.processors.chunking.chunk_type_rules import (
+    continues_structured_list,
+    starts_glossary_block,
+    starts_transcript_block,
+)
 from app.services.ingestion.processors.chunking.token_budget import (
     token_count,
     within_chunk_budget,
@@ -15,6 +20,8 @@ from app.services.ingestion.processors.chunking.validators import (
     has_parent_context,
     heading_number_prefix,
     is_address_like_chunk,
+    is_boundary_heading,
+    is_contact_like_chunk,
     is_heading_like,
     is_heading_only_chunk,
     is_list_chunk,
@@ -43,7 +50,8 @@ class ChunkPostProcessor:
 
         merged_chunks = self._merge_orphan_headings(cleaned_chunks)
         linked_chunks = self._link_list_chunks(merged_chunks)
-        bounded_chunks = self._enforce_size(linked_chunks)
+        boundary_chunks = self._protect_section_boundaries(linked_chunks)
+        bounded_chunks = self._enforce_size(boundary_chunks)
         sized_chunks = self._merge_short_chunks(bounded_chunks)
         connected_chunks = self._merge_table_and_contact_chunks(sized_chunks)
         processed_chunks = self._drop_heading_only_chunks(connected_chunks)
@@ -85,6 +93,8 @@ class ChunkPostProcessor:
 
     @staticmethod
     def _should_merge_orphan_heading(current: str, nxt: str) -> bool:
+        if ChunkPostProcessor._starts_markdown_section(current) or is_boundary_heading(current):
+            return False
         if is_heading_like(nxt) or nxt.endswith(":"):
             return False
         return (
@@ -161,9 +171,12 @@ class ChunkPostProcessor:
         merged = []
         for chunk in chunks:
             if token_count(chunk) < MIN_CHUNK_TOKENS and merged:
+                if ChunkPostProcessor._should_keep_boundary_separate(merged[-1], chunk):
+                    merged.append(chunk)
+                    continue
                 if not ChunkPostProcessor._can_merge_under_same_heading_branch(
                     merged[-1], chunk
-                ):
+                ) and not ChunkPostProcessor._continues_structured_list(merged[-1], chunk):
                     merged.append(chunk)
                     continue
 
@@ -174,6 +187,67 @@ class ChunkPostProcessor:
             merged.append(chunk)
 
         return merged
+
+    @staticmethod
+    def _continues_structured_list(prev: str, current: str) -> bool:
+        return continues_structured_list(prev, current)
+
+    @staticmethod
+    def _protect_section_boundaries(chunks: list[str]) -> list[str]:
+        protected = []
+        for chunk in chunks:
+            if protected and ChunkPostProcessor._should_keep_boundary_separate(protected[-1], chunk):
+                protected.append(chunk)
+                continue
+            protected.append(chunk)
+        return protected
+
+    @staticmethod
+    def _should_keep_boundary_separate(prev: str, current: str) -> bool:
+        if ChunkPostProcessor._starts_markdown_section(current) or is_boundary_heading(current):
+            return True
+        if (
+            ChunkPostProcessor._starts_non_heading_structural_block(current)
+            and not ChunkPostProcessor._is_boundary_continuation(prev, current)
+        ):
+            return True
+        return is_boundary_heading(prev) and not ChunkPostProcessor._is_boundary_continuation(prev, current)
+
+    @staticmethod
+    def _starts_non_heading_structural_block(chunk: str) -> bool:
+        return (
+            is_table_like(chunk)
+            or ChunkPostProcessor._starts_transcript_block(chunk)
+            or ChunkPostProcessor._starts_glossary_block(chunk)
+        )
+
+    @staticmethod
+    def _starts_markdown_section(chunk: str) -> bool:
+        first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
+        return bool(re.match(r"^#{1,6}\s+\S", first_line))
+
+    @staticmethod
+    def _starts_transcript_block(chunk: str) -> bool:
+        return starts_transcript_block(chunk)
+
+    @staticmethod
+    def _starts_glossary_block(chunk: str) -> bool:
+        return starts_glossary_block(chunk)
+
+    @staticmethod
+    def _is_boundary_continuation(prev: str, current: str) -> bool:
+        return (
+            (is_table_like(prev) and (is_table_like(current) or is_table_rowish_chunk(current)))
+            or (
+                ChunkPostProcessor._starts_transcript_block(prev)
+                and ChunkPostProcessor._starts_transcript_block(current)
+            )
+            or (
+                ChunkPostProcessor._starts_glossary_block(prev)
+                and ChunkPostProcessor._starts_glossary_block(current)
+            )
+            or (is_contact_like_chunk(prev) and is_contact_like_chunk(current))
+        )
 
     @staticmethod
     def _merge_table_and_contact_chunks(chunks: list[str]) -> list[str]:
@@ -203,26 +277,41 @@ class ChunkPostProcessor:
 
     @staticmethod
     def _should_merge_contact_chunk(prev: str, current: str) -> bool:
-        if is_heading_only_chunk(prev):
+        if ChunkPostProcessor._starts_markdown_section(current) or is_boundary_heading(current):
+            return False
+
+        if is_heading_only_chunk(prev) and not is_contact_like_chunk(prev):
             return False
 
         previous_is_contact = (
-            is_address_like_chunk(prev)
+            is_contact_like_chunk(prev)
+            or is_address_like_chunk(prev)
             or is_signature_like_chunk(prev)
-            or "contact" in prev.lower()
         )
         current_is_contact = (
-            is_address_like_chunk(current)
+            is_contact_like_chunk(current)
+            or is_address_like_chunk(current)
             or is_signature_like_chunk(current)
-            or "best regards" in current.lower()
         )
         if previous_is_contact and ChunkPostProcessor._starts_new_contact_block(current):
             return False
         if previous_is_contact and current_is_contact:
             return True
+        if current_is_contact and ChunkPostProcessor._is_short_contact_prefix(prev):
+            return True
         if is_address_like_chunk(prev) and not is_heading_only_chunk(current):
             return True
         return is_signature_like_chunk(current) and not is_heading_only_chunk(prev)
+
+    @staticmethod
+    def _is_short_contact_prefix(chunk: str) -> bool:
+        lines = [line.strip() for line in chunk.splitlines() if line.strip()]
+        if len(lines) != 1:
+            return False
+        line = lines[0]
+        if ChunkPostProcessor._starts_markdown_section(line):
+            return False
+        return bool(re.search(r"[A-Za-z]", line)) and len(line.split()) <= 8
 
     @staticmethod
     def _starts_new_contact_block(chunk: str) -> bool:

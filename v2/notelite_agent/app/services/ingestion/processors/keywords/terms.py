@@ -60,8 +60,14 @@ TRAIL_STRIP = FUNC_WORDS | VAGUE_TRAIL
 
 
 def clean_term(term: str) -> str | None:
+    term = re.sub(r"(?<=\w)-\s+(?=\w)", "", term)
+    term = re.sub(r"(?m)^\s*\|?[-: ]+\|[-|: ]+\|?", " ", term)
+    if "|" in term:
+        term = " ".join(cell.strip() for cell in term.split("|") if cell.strip())
     term = re.sub(r"\s+", " ", term).strip()
     if len(term) < 3:
+        return None
+    if _looks_like_markdown_fragment(term):
         return None
 
     words = term.split()
@@ -79,8 +85,14 @@ def clean_term(term: str) -> str | None:
     lowered = term.lower()
     if len(words) == 1 and (lowered in NOISE_NOUNS or lowered in LEAD_STRIP):
         return None
+    if term.endswith("-"):
+        return None
 
     return term
+
+
+def _looks_like_markdown_fragment(term: str) -> bool:
+    return bool(re.fullmatch(r"[-:| ]+", term)) or term.startswith("|") or term.endswith("|")
 
 
 def stem(word: str) -> str:
