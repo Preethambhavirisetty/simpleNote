@@ -327,6 +327,13 @@ is it too complicated? why couldn't you implement chat and stream feature proper
 **Chunking enhancements:**
   - types: content, mixed_content, boilerplate
   - metadata: {"has_dates": true, "has_links": true, "has_emails": true, "has_code": false, "heading_level": 2}
+  Final new bugs:
+
+**Bugs to fix as of 06/06/2026(4 bugs for a stress test)**
+  - Heading context update inside fenced blocks — critical, corrupts metadata
+  - H2 heading split at period — high, creates orphan heading chunks
+  - Transcript timestamp regex — high, full datetime format not recognized
+  - Glossary entry atomicity — medium, entries split mid-definition
 
 
 ### STARTUP STEPS

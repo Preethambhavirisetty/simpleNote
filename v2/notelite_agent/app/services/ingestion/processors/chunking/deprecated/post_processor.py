@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from app.services.ingestion.processors.chunking.patterns import (
+from app.services.ingestion.processors.chunking.deprecated.patterns import (
     DIVIDER_LINE_PATTERN,
     EMPTY_LIST_ITEM_PATTERN,
     SENTINEL_LINE_PATTERN,

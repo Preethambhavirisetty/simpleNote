@@ -1,13 +1,10 @@
 import re
 
-from app.services.ingestion.processors.chunking.patterns import (
+from app.services.ingestion.processors.chunking.deprecated.patterns import (
     HEADING_PATTERN,
     NUMBERED_LINE_PATTERN,
 )
-from app.services.ingestion.processors.chunking.validators import (
-    is_inside_fenced_code,
-    is_numbered_list_item,
-)
+from app.services.ingestion.processors.chunking.validators import is_inside_fenced_code
 
 
 class HeadingChunker:

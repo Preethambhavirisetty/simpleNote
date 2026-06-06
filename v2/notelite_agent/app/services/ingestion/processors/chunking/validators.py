@@ -1,6 +1,5 @@
 import re
 
-TOP_LEVEL_HEADING_PATTERN = re.compile(r"^\s*(?P<number>\d+)(?:\.\d+)*(?:\.)?\s+")
 NUMBERED_HEADING_PREFIX_PATTERN = re.compile(r"^\s*(?P<prefix>\d+(?:\.\d+)*)(?:\.)?\s+")
 NUMBERED_LIST_ITEM_PATTERN = re.compile(r"^\s*\d+[.)]\s+")
 FENCED_CODE_BLOCK_PATTERN = re.compile(r"```[^\n]*\n[\s\S]*?\n```", re.DOTALL)
@@ -73,13 +72,6 @@ def is_list_chunk(chunk: str) -> bool:
     return all(bool(list_line_pattern.match(line)) for line in lines)
 
 
-def is_numbered_list_part(chunk: str) -> bool:
-    lines = [line.strip() for line in chunk.splitlines() if line.strip()]
-    if not lines:
-        return False
-    return all(bool(NUMBERED_LIST_ITEM_PATTERN.match(line)) for line in lines)
-
-
 def is_numbered_list_item(chunk: str) -> bool:
     first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
     return bool(NUMBERED_LIST_ITEM_PATTERN.match(first_line))
@@ -136,12 +128,6 @@ def is_boundary_heading(chunk: str) -> bool:
     first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
     first_line = re.sub(r"^\d+(?:\.\d+)*(?:\.)?\s+", "", first_line).strip()
     return bool(BOUNDARY_HEADING_PATTERN.match(first_line))
-
-
-def top_level_heading(chunk: str) -> str | None:
-    first_line = chunk.splitlines()[0].strip() if chunk.strip() else ""
-    match = TOP_LEVEL_HEADING_PATTERN.match(first_line)
-    return match.group("number") if match else None
 
 
 def is_table_like(chunk: str) -> bool:
