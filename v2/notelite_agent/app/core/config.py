@@ -26,6 +26,9 @@ ACTIVE_SUMMARIZER_VERSION = require_env("ACTIVE_SUMMARIZER_VERSION")
 MAX_CHUNK_SIZE = int(require_env("MAX_CHUNK_SIZE"))
 CHUNK_OVERLAP = int(require_env("CHUNK_OVERLAP"))
 BREAKPOINT_PERCENTILE = int(require_env("BREAKPOINT_PERCENTILE"))
+KEYWORD_MIN_CHUNK_TOKENS = int(require_env("KEYWORD_MIN_CHUNK_TOKENS", "5"))
+KEYWORD_OCR_MIN_TOKENS = int(require_env("KEYWORD_OCR_MIN_TOKENS", "8"))
+KEYWORD_OCR_SINGLE_CHAR_RATIO = float(require_env("KEYWORD_OCR_SINGLE_CHAR_RATIO", "0.4"))
 
 
 # Embeddings — always served remotely from RunPod (no local GPU on EC2)

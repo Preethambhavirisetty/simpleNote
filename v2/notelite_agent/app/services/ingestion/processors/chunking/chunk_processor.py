@@ -4,6 +4,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.core.config import (
+    KEYWORD_MIN_CHUNK_TOKENS,
+    KEYWORD_OCR_MIN_TOKENS,
+    KEYWORD_OCR_SINGLE_CHAR_RATIO,
+)
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType, classify_chunk_type
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
 from app.services.ingestion.processors.chunking.token_budget import token_count, within_chunk_budget
@@ -30,6 +35,20 @@ def _split_leading_heading_prefix(text: str) -> tuple[str, str]:
     if not headings:
         return "", text.strip()
     return "\n\n".join(headings), "\n".join(lines[body_start:]).strip()
+
+
+def _keyword_skip_reason(content: str) -> str:
+    count = token_count(content)
+    if count < KEYWORD_MIN_CHUNK_TOKENS:
+        return "short_chunk"
+
+    lexical_tokens = re.findall(r"\b[\w'-]+\b", content)
+    if len(lexical_tokens) < KEYWORD_OCR_MIN_TOKENS:
+        return ""
+    single_char_ratio = sum(len(token) == 1 for token in lexical_tokens) / len(lexical_tokens)
+    if single_char_ratio >= KEYWORD_OCR_SINGLE_CHAR_RATIO:
+        return "ocr_single_character_noise"
+    return ""
 
 
 @dataclass(frozen=True)
@@ -159,19 +178,24 @@ class ChunkProcessor:
             merged.append(chunk)
 
         total_chunks = len(merged)
-        return [
-            TextChunk(
-                content=chunk.content,
-                chunk_id=str(index),
-                chunk_type=chunk.chunk_type,
-                metadata={
-                    **chunk.metadata,
-                    "has_heading_context": bool(chunk.metadata.get("heading_context")),
-                    "token_count": token_count(chunk.content),
-                    "char_count": len(chunk.content),
-                },
-                chunk_index=index,
-                total_chunks=total_chunks,
+        final_chunks = []
+        for index, chunk in enumerate(merged):
+            skip_keywords_reason = _keyword_skip_reason(chunk.content)
+            final_chunks.append(
+                TextChunk(
+                    content=chunk.content,
+                    chunk_id=str(index),
+                    chunk_type=chunk.chunk_type,
+                    metadata={
+                        **chunk.metadata,
+                        "has_heading_context": bool(chunk.metadata.get("heading_context")),
+                        "token_count": token_count(chunk.content),
+                        "char_count": len(chunk.content),
+                        "skip_keywords": bool(skip_keywords_reason),
+                        "skip_keywords_reason": skip_keywords_reason,
+                    },
+                    chunk_index=index,
+                    total_chunks=total_chunks,
+                )
             )
-            for index, chunk in enumerate(merged)
-        ]
+        return final_chunks

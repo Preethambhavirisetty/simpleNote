@@ -11,7 +11,10 @@ from app.services.ingestion.processors.chunking import TextChunk
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType
 from app.services.ingestion.processors.keywords.extractor import extract_keywords
 from app.services.ingestion.processors.keywords.terms import prune_keywords
-from app.services.ingestion.processors.text_normalization import normalize_text_for_keyword_extraction
+from app.services.ingestion.processors.text_normalization import (
+    augment_markdown_table,
+    normalize_text_for_keyword_extraction,
+)
 from app.shared.llm import llm_call_general
 from app.shared.utils import build_llm_messages
 
@@ -28,6 +31,14 @@ NON_TEXT_TERM_TYPES = {
     ChunkType.CODE.value,
     ChunkType.JSON.value,
 }
+
+
+@dataclass(frozen=True)
+class RankedCandidate:
+    term: str
+    chunk_frequency: int
+    occurrences: int
+    specificity: int
 
 
 @dataclass(frozen=True)
@@ -73,14 +84,16 @@ class KeywordProcessor:
         self.api_calls = 0
         self.events = [f"keywords started: {len(chunks)} chunks"]
         chunk_results = []
+        skipped_count = 0
 
         for index, chunk in enumerate(chunks):
             chunk_id, content, chunk_type, metadata = self._chunk_data(chunk, index)
-            extraction_text = normalize_text_for_keyword_extraction(content)
-            if self._should_extract_terms(extraction_text, chunk_type):
+            extraction_text = self._extraction_text(content, chunk_type, metadata)
+            if self._should_extract_terms(extraction_text, chunk_type, metadata):
                 keywords, entities = extract_keywords(extraction_text, self.top_n_per_chunk)
             else:
                 keywords, entities = [], []
+                skipped_count += 1
             chunk_results.append(
                 ChunkKeywordResult(
                     chunk_id=chunk_id,
@@ -94,69 +107,80 @@ class KeywordProcessor:
                 )
             )
 
-        chunk_keywords = [result.keywords for result in chunk_results]
+        chunk_keywords = [self.split_conjunctions(result.keywords) for result in chunk_results]
         chunk_entities = [result.entities for result in chunk_results]
-        flattened_keywords = [keyword for keywords in chunk_keywords for keyword in keywords]
-        flattened_entities = [entity for entities in chunk_entities for entity in entities]
-        cleaned_keywords = self.split_conjunctions(flattened_keywords)
-        top_keywords = self.deduplicate_keywords(cleaned_keywords, kind="kw")
-        top_entities = self.deduplicate_keywords(flattened_entities, kind="ent")
+        keyword_candidates = self._rank_candidates(chunk_keywords, kind="kw")
+        entity_candidates = self._rank_candidates(chunk_entities, kind="ent")
+        top_keywords = self._deduplicate_candidates(keyword_candidates, kind="kw")
+        top_entities = self._deduplicate_candidates(entity_candidates, kind="ent")
 
+        if skipped_count:
+            self.events.append(f"keywords skipped: {skipped_count} chunks")
         self.events.append(
             f"keywords completed: {len(top_keywords)} top keywords, {len(top_entities)} entities"
         )
         return chunk_results, top_keywords, top_entities
 
     @staticmethod
-    def _should_extract_terms(text: str, chunk_type: str) -> bool:
-        return chunk_type not in NON_TEXT_TERM_TYPES and any(char.isalpha() for char in text)
+    def _extraction_text(content: str, chunk_type: str, metadata: dict[str, Any]) -> str:
+        if chunk_type == ChunkType.TABLE.value:
+            augmented = augment_markdown_table(content, metadata.get("heading_context", ""))
+            return normalize_text_for_keyword_extraction(augmented or content)
+        return normalize_text_for_keyword_extraction(content)
 
-    def _rank_keyword_candidates(self, keywords: Sequence[str]) -> list[str]:
-        display_by_key = {}
-        counter = Counter()
-        for keyword in keywords:
-            if not isinstance(keyword, str) or not keyword.strip():
-                continue
-            keyword = keyword.strip()
-            key = keyword.lower()
-            display_by_key.setdefault(key, keyword)
-            counter[key] += 1
-
-        filtered = [
-            (display_by_key[key], count)
-            for key, count in counter.items()
-            if count >= 2 or len(display_by_key[key].split()) >= 2
-        ]
-        ranked = [
-            keyword
-            for keyword, _count in sorted(
-                filtered,
-                key=lambda item: (-item[1], item[0]),
-            )[: self.max_global_candidates]
-        ]
-        return prune_keywords(ranked)[: self.max_global_candidates]
-
-    def _rank_entity_candidates(self, entities: Sequence[str]) -> list[str]:
-        display_by_key = {}
-        first_seen = {}
-        counter = Counter()
-
-        for index, entity in enumerate(entities):
-            if not isinstance(entity, str):
-                continue
-            entity = entity.strip()
-            if not entity or not any(char.isalpha() for char in entity):
-                continue
-            key = entity.lower()
-            display_by_key.setdefault(key, entity)
-            first_seen.setdefault(key, index)
-            counter[key] += 1
-
-        ranked = sorted(
-            display_by_key,
-            key=lambda key: (-counter[key], first_seen[key]),
+    @staticmethod
+    def _should_extract_terms(text: str, chunk_type: str, metadata: dict[str, Any]) -> bool:
+        return (
+            not metadata.get("skip_keywords", False)
+            and chunk_type not in NON_TEXT_TERM_TYPES
+            and any(char.isalpha() for char in text)
         )
-        return [display_by_key[key] for key in ranked[: self.max_global_candidates]]
+
+    def _rank_candidates(
+        self,
+        term_groups: Sequence[Sequence[str]],
+        kind: TermKind,
+    ) -> list[RankedCandidate]:
+        display_by_key: dict[str, str] = {}
+        occurrences: Counter[str] = Counter()
+        chunk_frequency: Counter[str] = Counter()
+
+        for terms in term_groups:
+            seen_in_chunk = set()
+            for term in terms:
+                if not isinstance(term, str) or not term.strip():
+                    continue
+                term = term.strip()
+                key = term.lower()
+                display_by_key.setdefault(key, term)
+                occurrences[key] += 1
+                seen_in_chunk.add(key)
+            chunk_frequency.update(seen_in_chunk)
+
+        candidates = [
+            RankedCandidate(
+                term=display_by_key[key],
+                chunk_frequency=chunk_frequency[key],
+                occurrences=occurrences[key],
+                specificity=len(display_by_key[key].split()),
+            )
+            for key in display_by_key
+            if kind == "ent" or chunk_frequency[key] >= 2 or len(display_by_key[key].split()) >= 2
+        ]
+        candidates.sort(
+            key=lambda candidate: (
+                -candidate.chunk_frequency,
+                -candidate.specificity,
+                -candidate.occurrences,
+                -len(candidate.term),
+                candidate.term.lower(),
+            )
+        )
+
+        if kind == "kw":
+            selected_terms = set(prune_keywords([candidate.term for candidate in candidates]))
+            candidates = [candidate for candidate in candidates if candidate.term in selected_terms]
+        return candidates[: self.max_global_candidates]
 
     @staticmethod
     def _chunk_data(chunk: TextChunk | str, index: int) -> tuple[str, str, str, dict[str, Any]]:
@@ -199,22 +223,31 @@ class KeywordProcessor:
         return filled[: self.max_top_keywords]
 
     def deduplicate_keywords(self, keywords: Sequence[str], kind: TermKind = "kw") -> list[str]:
-        local_keywords = (
-            self._rank_keyword_candidates(keywords)
-            if kind == "kw"
-            else self._rank_entity_candidates(keywords)
-        )
+        candidates = self._rank_candidates([[keyword] for keyword in keywords], kind)
+        return self._deduplicate_candidates(candidates, kind)
+
+    def _deduplicate_candidates(
+        self, candidates: Sequence[RankedCandidate], kind: TermKind
+    ) -> list[str]:
+        ranked_terms = [candidate.term for candidate in candidates]
         if not self.use_llm_dedup:
             self.events.append(f"{self._kind_label(kind)} dedup completed: local")
-            return local_keywords[: self.max_top_keywords]
-        return self.deduplicate_keywords_llm(local_keywords, kind)
+            return ranked_terms[: self.max_top_keywords]
+        return self.deduplicate_keywords_llm(list(candidates), kind)
 
-    def deduplicate_keywords_llm(self, keywords: list[str], kind: TermKind) -> list[str]:
-        if not keywords:
+    def deduplicate_keywords_llm(
+        self, candidates: list[RankedCandidate], kind: TermKind
+    ) -> list[str]:
+        if not candidates:
             return []
 
-        allowed_keywords = {keyword.lower(): keyword for keyword in keywords}
-        keyword_text = ", ".join(keywords)
+        ranked_terms = [candidate.term for candidate in candidates]
+        allowed_keywords = {term.lower(): term for term in ranked_terms}
+        keyword_text = "\n".join(
+            f"term: {candidate.term} | chunk_frequency: {candidate.chunk_frequency} | "
+            f"occurrences: {candidate.occurrences} | specificity: {candidate.specificity}"
+            for candidate in candidates
+        )
         try:
             label = self._kind_label(kind)
             self.events.append(f"{label} dedup api call")
@@ -223,12 +256,12 @@ class KeywordProcessor:
             result = llm_call_general(build_llm_messages(prompt, keyword_text))
             parsed_keywords = self._parse_llm_keyword_lines(result, allowed_keywords)
             self.events.append(f"{label} dedup completed: llm")
-            return self._fill_keywords(parsed_keywords, keywords)
+            return self._fill_keywords(parsed_keywords, ranked_terms)
         except Exception:
             log.warning("%s LLM dedup failed; using local dedup.", self._kind_label(kind), exc_info=True)
             self.events.append(f"{self._kind_label(kind)} dedup failed: using local fallback")
 
-        return keywords[: self.max_top_keywords]
+        return ranked_terms[: self.max_top_keywords]
 
     @staticmethod
     def _kind_label(kind: TermKind) -> str:

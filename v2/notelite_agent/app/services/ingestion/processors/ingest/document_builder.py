@@ -7,6 +7,7 @@ from llama_index.core import Document
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType
 from app.services.ingestion.processors.chunking.token_budget import token_count
 from app.services.ingestion.processors.keywords.keyword_processor import ChunkKeywordResult
+from app.services.ingestion.processors.text_normalization import augment_markdown_table
 
 _EXCLUDED_EMBED = ["user_id", "folder_id", "note_id", "chunk_id", "parent_summary"]
 _EXCLUDED_LLM = ["user_id", "folder_id", "note_id", "chunk_id"]
@@ -152,7 +153,7 @@ class DocumentBuilder:
     @staticmethod
     def _embedding_text(content: str, chunk_type: str, heading_context: str = "") -> str:
         if chunk_type == ChunkType.TABLE.value:
-            table_summary = DocumentBuilder._table_summary(content, heading_context)
+            table_summary = augment_markdown_table(content, heading_context)
             return f"{table_summary}\n\n{content}".strip() if table_summary else content
 
         body = DocumentBuilder._without_leading_headings(content)
@@ -176,36 +177,3 @@ class DocumentBuilder:
                 continue
             break
         return "\n".join(lines[index:]).strip() if found_heading else content.strip()
-
-    @staticmethod
-    def _table_summary(content: str, heading_context: str = "") -> str:
-        lines = [line.strip() for line in content.splitlines() if "|" in line]
-        if not lines:
-            return ""
-
-        header = DocumentBuilder._table_cells(lines[0])
-        if not header:
-            return ""
-
-        data_rows = [
-            DocumentBuilder._table_cells(line)
-            for line in lines[1:]
-            if not DocumentBuilder._is_table_separator(line)
-        ]
-        row_count = len([row for row in data_rows if row])
-        columns = ", ".join(header[:8])
-        extra = "" if len(header) <= 8 else f" and {len(header) - 8} more columns"
-        row_label = "row" if row_count == 1 else "rows"
-        summary = f"Table with {row_count} {row_label} and columns: {columns}{extra}."
-        if heading_context:
-            return f"Table from section: {heading_context}. {summary}"
-        return summary
-
-    @staticmethod
-    def _table_cells(line: str) -> list[str]:
-        return [cell.strip() for cell in line.strip().strip("|").split("|") if cell.strip()]
-
-    @staticmethod
-    def _is_table_separator(line: str) -> bool:
-        stripped = line.strip().strip("|").strip()
-        return bool(stripped) and all(char in "-: |" for char in stripped)

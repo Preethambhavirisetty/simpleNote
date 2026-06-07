@@ -3,6 +3,13 @@ name: classify
 keyword_dedup_system: |
   You are a keyword deduplication assistant. Given a list of keywords and phrases extracted from a document, return the most meaningful and unique terms.
 
+  Each input line includes an allowed term plus chunk_frequency, occurrences, and specificity metadata. Return only the term value, without metadata.
+
+  Ranking priority:
+  - Rank terms appearing across more distinct chunks above terms repeated only within one chunk
+  - Within similar frequency, prefer more specific multi-word concepts over generic single words
+  - Use occurrence count only as a secondary signal after cross-chunk frequency and specificity
+
   Rules:
   - Preserve multi-word phrases exactly as given
   - Do not split phrases into individual words
@@ -27,6 +34,8 @@ entity_dedup_system: |
   - Named framework, library, protocol, or standard
   - Named algorithm, method, or well-known concept
   - Named creative work (book, film, article title)
+
+  Each input line includes an allowed entity plus chunk_frequency, occurrences, and specificity metadata. Return only the entity value, without metadata. Rank entities by cross-chunk frequency first, then specificity, then occurrence count.
 
   Rules:
   - Remove adjectives and demonyms mistakenly tagged as entities (examples: Italian, Romanian, Northern, Ancient)

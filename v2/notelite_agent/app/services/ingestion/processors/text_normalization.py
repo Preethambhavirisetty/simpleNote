@@ -33,6 +33,33 @@ def normalize_markdown_tables_for_terms(text: str) -> str:
     return "\n".join(output)
 
 
+def augment_markdown_table(content: str, heading_context: str = "") -> str:
+    """Describe a Markdown table as natural language for search and term extraction."""
+    lines = [line.strip() for line in content.splitlines() if "|" in line]
+    rows = [
+        _split_table_cells(line)
+        for line in lines
+        if not MARKDOWN_TABLE_SEPARATOR_PATTERN.match(line.strip())
+    ]
+    if len(rows) < 2 or not rows[0]:
+        return ""
+
+    header = rows[0]
+    data_rows = [row for row in rows[1:] if len(row) == len(header)]
+    if not data_rows:
+        return ""
+
+    parts = []
+    if heading_context:
+        parts.append(f"Table from section: {heading_context}.")
+    parts.append(f"Columns: {', '.join(header)}.")
+    row_label = "row" if len(data_rows) == 1 else "rows"
+    parts.append(f"Contains {len(data_rows)} {row_label}.")
+    for row in data_rows:
+        parts.append(", ".join(f"{key} {value}" for key, value in zip(header, row)) + ".")
+    return " ".join(parts)
+
+
 def normalize_text_for_keyword_extraction(text: str) -> str:
     clean = repair_ocr_hyphenation(text)
     clean = normalize_markdown_tables_for_terms(clean)

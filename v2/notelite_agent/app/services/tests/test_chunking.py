@@ -161,3 +161,13 @@ def test_headed_document_keeps_footer_like_text_as_content_within_sections():
     assert any(chunk.metadata.get("h2") == "First" and "CONFIDENTIAL" in chunk.content for chunk in chunks)
     assert any(chunk.metadata.get("h2") == "Second" and "Second body" in chunk.content for chunk in chunks)
     assert not any("First body" in chunk.content and "Second body" in chunk.content for chunk in chunks)
+
+
+def test_final_chunks_flag_short_and_ocr_noisy_text_for_keyword_skip():
+    short = ChunkProcessor().process("Tiny.")[0]
+    noisy = ChunkProcessor().process("A b c d e f meaningful words remain here.")[0]
+
+    assert short.metadata["skip_keywords"] is True
+    assert short.metadata["skip_keywords_reason"] == "short_chunk"
+    assert noisy.metadata["skip_keywords"] is True
+    assert noisy.metadata["skip_keywords_reason"] == "ocr_single_character_noise"
