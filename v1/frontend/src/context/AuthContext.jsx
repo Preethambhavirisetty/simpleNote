@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { API_BASE_URL } from '../services/api';
+import { API_URL } from '../config';
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -15,11 +15,16 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
   const checkAuth = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/me`, {
-        credentials: 'include',
+      const response = await fetch(`${API_URL}/api/auth/me`, {
+        credentials: 'include'
       });
+
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
@@ -34,28 +39,21 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
   const logout = async () => {
     try {
-      await fetch(`${API_BASE_URL}/auth/logout`, {
+      await fetch(`${API_URL}/api/auth/logout`, {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'include'
       });
-
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
-      localStorage.removeItem('expiresAt');
-      setUser(null);
     } catch (error) {
       console.error('Logout failed:', error);
+    } finally {
+      setUser(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, logout, checkAuth }}>
+    <AuthContext.Provider value={{ user, loading, checkAuth, logout }}>
       {children}
     </AuthContext.Provider>
   );

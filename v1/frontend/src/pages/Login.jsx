@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { API_BASE_URL } from '../services/api';
-import Logo from '../components/Logo';
+import { API_URL } from '../config';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -18,7 +17,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -31,7 +30,6 @@ export default function Login() {
 
       if (response.ok) {
         navigate('/app');
-        window.location.reload(); // Reload to trigger auth check
       } else {
         setError(data.error || 'Login failed');
       }
@@ -44,25 +42,26 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-4">
+    <div className="min-h-screen bg-white flex items-center justify-center px-4 py-8">
       <div className="max-w-md w-full">
         {/* Logo */}
-        <div className="text-center mb-7">
-          <div className="flex items-center justify-center mb-1">
-            <Logo size="xl" showText={true} />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="flex items-center justify-center space-x-2 mb-2">
+            <span className="text-3xl sm:text-4xl">📝</span>
+            <h1 className="text-2xl sm:text-3xl font-bold">SimpleNote</h1>
           </div>
-          <p className="text-xl text-gray-600">Sign in to your account</p>
+          <p className="text-sm sm:text-base text-gray-600">Sign in to your account</p>
         </div>
 
         {/* Form */}
-        <div className="border border-gray-300 shadow-lg p-8 rounded-md">
+        <div className="border border-gray-200 p-6 sm:p-8">
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-md text-red-800 text-sm">
+            <div className="mb-6 p-4 bg-black text-white text-sm">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-6">
             <div>
               <label className="block text-sm font-medium mb-2">
                 Email
@@ -72,7 +71,7 @@ export default function Login() {
                 required
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900 rounded-md"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 focus:outline-none focus:border-black"
                 placeholder="you@example.com"
               />
             </div>
@@ -86,7 +85,7 @@ export default function Login() {
                 required
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 focus:outline-none focus:border-gray-900 rounded-md"
+                className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-gray-300 focus:outline-none focus:border-black"
                 placeholder="••••••••"
               />
             </div>
@@ -94,7 +93,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:bg-gray-400 rounded-md"
+              className="w-full py-3 bg-black text-white hover:bg-gray-800 transition-colors disabled:bg-gray-400"
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>

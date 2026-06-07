@@ -159,6 +159,14 @@ db-size: ## Show database size
 	@echo "$(BLUE)Database size:$(NC)"
 	@docker compose exec -T simplenote-db psql -U simplenote_user -d simplenote -c "SELECT pg_size_pretty(pg_database_size('simplenote'));"
 
+db-users: ## List all users
+	@echo "$(BLUE)Registered users:$(NC)"
+	@docker compose exec -T simplenote-db psql -U simplenote_user -d simplenote -c "SELECT id, name, email, created_at FROM users ORDER BY created_at DESC;"
+
+db-stats: ## Show user and document statistics
+	@echo "$(BLUE)User and Document Statistics:$(NC)"
+	@docker compose exec -T simplenote-db psql -U simplenote_user -d simplenote -c "SELECT u.name, u.email, COUNT(d.id) as document_count FROM users u LEFT JOIN documents d ON u.id = d.user_id GROUP BY u.id, u.name, u.email ORDER BY document_count DESC;"
+
 ports: ## Show port usage
 	@echo "$(BLUE)Port Allocation:$(NC)"
 	@echo "  Frontend:  3002"
@@ -179,6 +187,59 @@ prune: ## Clean up Docker system (remove unused data)
 	@docker system prune -f
 	@echo "$(GREEN)✓ Cleanup complete$(NC)"
 
+prune-all: ## Deep clean - remove ALL unused Docker data (WARNING: aggressive)
+	@echo "$(RED)⚠️  This will remove ALL unused containers, images, networks, and volumes!$(NC)"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "$(YELLOW)Stopping SimpleNote containers...$(NC)"; \
+		docker compose down; \
+		echo "$(YELLOW)Removing all stopped containers...$(NC)"; \
+		docker container prune -f; \
+		echo "$(YELLOW)Removing all unused images...$(NC)"; \
+		docker image prune -a -f; \
+		echo "$(YELLOW)Removing all unused volumes...$(NC)"; \
+		docker volume prune -f; \
+		echo "$(YELLOW)Removing all unused networks...$(NC)"; \
+		docker network prune -f; \
+		echo "$(YELLOW)Final system cleanup...$(NC)"; \
+		docker system prune -a -f --volumes; \
+		echo "$(GREEN)✓ Deep cleanup complete$(NC)"; \
+		echo "$(BLUE)Disk space reclaimed:$(NC)"; \
+		docker system df; \
+	else \
+		echo "$(YELLOW)Cancelled$(NC)"; \
+	fi
+
+cleanup-simplenote: ## Remove only SimpleNote containers and images (keeps data)
+	@echo "$(YELLOW)Cleaning up SimpleNote containers and images...$(NC)"
+	@docker compose down
+	@docker images | grep simplenote | awk '{print $$3}' | xargs -r docker rmi -f 2>/dev/null || true
+	@echo "$(GREEN)✓ SimpleNote images removed (volumes preserved)$(NC)"
+
+cleanup-dangling: ## Remove dangling images and containers
+	@echo "$(YELLOW)Removing dangling images...$(NC)"
+	@docker images -f "dangling=true" -q | xargs -r docker rmi 2>/dev/null || echo "No dangling images"
+	@echo "$(YELLOW)Removing stopped containers...$(NC)"
+	@docker container prune -f
+	@echo "$(GREEN)✓ Dangling cleanup complete$(NC)"
+
+docker-stats: ## Show Docker disk usage
+	@echo "$(BLUE)Docker Disk Usage:$(NC)"
+	@docker system df
+	@echo ""
+	@echo "$(BLUE)Detailed breakdown:$(NC)"
+	@docker system df -v
+
+free-space: ## Show available disk space before and after cleanup
+	@echo "$(BLUE)Current disk usage:$(NC)"
+	@df -h / | tail -1
+	@echo ""
+	@echo "$(YELLOW)Running cleanup...$(NC)"
+	@docker system prune -f > /dev/null 2>&1
+	@echo "$(BLUE)After cleanup:$(NC)"
+	@df -h / | tail -1
+
 test: ## Run basic connectivity tests
 	@echo "$(BLUE)Running tests...$(NC)"
 	@echo -n "Testing frontend (port 3002): "
@@ -188,8 +249,14 @@ test: ## Run basic connectivity tests
 	@echo -n "Testing database (port 5433): "
 	@docker compose exec -T simplenote-db pg_isready -U simplenote_user > /dev/null && echo "$(GREEN)✓ Pass$(NC)" || echo "$(RED)✗ Fail$(NC)"
 
-dev: ## Start services with live logs
+dev: ## Start services with live logs (Docker)
 	@docker compose up
+
+dev-local: ## Start development servers locally (no Docker)
+	@./start-dev.sh
+
+dev-stop: ## Stop local development servers
+	@./stop-dev.sh
 
 prod: ## Deploy in production mode
 	@./deploy-simplenote.sh
