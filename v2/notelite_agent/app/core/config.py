@@ -30,6 +30,10 @@ KEYWORD_MIN_CHUNK_TOKENS = int(require_env("KEYWORD_MIN_CHUNK_TOKENS", "5"))
 KEYWORD_EXTRACTION_MAX_CHUNKS = int(require_env("KEYWORD_EXTRACTION_MAX_CHUNKS", "10"))
 KEYWORD_EXTRACTION_MAX_TOKENS = int(require_env("KEYWORD_EXTRACTION_MAX_TOKENS", "3000"))
 KEYWORD_EXTRACTION_CONCURRENCY = int(require_env("KEYWORD_EXTRACTION_CONCURRENCY", "1"))
+INDEX_CODE_CHUNKS = require_env("INDEX_CODE_CHUNKS", "false").lower() == "true"
+INDEX_JSON_CHUNKS = require_env("INDEX_JSON_CHUNKS", "false").lower() == "true"
+MIN_INDEXABLE_TOKENS = int(require_env("MIN_INDEXABLE_TOKENS", "10"))
+MIN_SUMMARY_CHUNK_TOKENS = int(require_env("MIN_SUMMARY_CHUNK_TOKENS", "10"))
 
 
 # Embeddings — always served remotely from RunPod (no local GPU on EC2)

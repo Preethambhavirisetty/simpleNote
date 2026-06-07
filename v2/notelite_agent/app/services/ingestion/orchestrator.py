@@ -3,9 +3,8 @@ from typing import Optional
 
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
 from app.services.ingestion.processors.keywords import KeywordProcessor
-from app.services.ingestion.processors.summary.questions_generator import QuestionsGenerator
-from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
-from app.services.ingestion.processors.ingest.document_builder import DocumentBuilder
+from app.services.ingestion.processors.ingest import ChunkBuilder, SummaryBuilder
+from app.services.ingestion.processors.summary.summarization_pipeline import SummarizationPipeline
 from app.core.config import ACTIVE_SUMMARIZER_VERSION
 from app.logger import logger
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
@@ -16,9 +15,7 @@ class IngestionOrchestrator:
     def __init__(self, vector_store: Optional[QdrantVectorStore] = None):
         self.chunk_processor = ChunkProcessor()
         self.keyword_processor = KeywordProcessor()
-        self.summary_processor = SummaryProcessor()
-        self.questions_generator = QuestionsGenerator()
-        self.document_builder = DocumentBuilder()
+        self.summarization_pipeline = SummarizationPipeline()
         self._vector_store = vector_store
 
     def run(self, data: Optional[dict] = None, **kwargs) -> dict:
@@ -49,35 +46,29 @@ class IngestionOrchestrator:
         keywords_end = time.perf_counter()
         events.extend(self.keyword_processor.events)
 
-        # Step 3: Summarize all chunks
-        note_summary_obj = self.summary_processor.process(chunks)
-        summary_end = time.perf_counter()
-        events.extend(note_summary_obj.events)
-
-        # Step 4: Generate questions from the summary
-        questions = self.questions_generator.process(note_summary_obj.summary)
-        generate_questions_end = time.perf_counter()
-        events.extend(self.questions_generator.events)
-
-        # Step 5: Build summary and chunk documents
-        summary_document, chunk_documents = self.document_builder.build(
-            data=payload,
-            doc_id=doc_id,
-            chunk_objects=chunks_with_kw_ent,
-            top_kw=top_kw,
-            top_ent=top_ent,
-            questions=questions,
-            note_summary=note_summary_obj.summary,
-        )
+        # Step 3: Build final chunk artifacts
+        chunk_builder = ChunkBuilder(payload, doc_id)
+        index_chunks = chunk_builder.build(chunks_with_kw_ent)
         document_build_end = time.perf_counter()
-        events.extend(self.document_builder.events)
+        events.extend(chunk_builder.events)
 
-        # Step 6: Upsert into vector store
-        self.vector_store.replace_document(
-            doc_id,
-            summary=summary_document,
-            chunks=chunk_documents,
-        )
+        # Step 4: Replace and index chunk vectors before note-level summarization
+        self.vector_store.replace_index_chunks(doc_id, index_chunks)
+        chunk_ingestion_end = time.perf_counter()
+        events.extend(self.vector_store.events)
+        self.vector_store.events = []
+
+        # Step 5: Summarize enriched chunk text and generate questions
+        document_summary = self.summarization_pipeline.run(index_chunks)
+        summary_end = time.perf_counter()
+        events.extend(document_summary.events)
+
+        # Step 6: Build and index summary/question artifacts
+        summary_builder = SummaryBuilder(payload, doc_id, top_kw, top_ent)
+        summary_artifacts = summary_builder.build(document_summary)
+        events.extend(summary_builder.events)
+        summary_build_end = time.perf_counter()
+        self.vector_store.upsert_summary_artifacts(summary_artifacts)
         doc_ingestion_end = time.perf_counter()
         events.extend(self.vector_store.events)
 
@@ -91,28 +82,28 @@ class IngestionOrchestrator:
             "chunk_count": len(chunks),
             "top_keywords": len(top_kw),
             "entities": len(top_ent),
-            "questions": questions,
+            "questions": document_summary.questions,
             "api_calls": {
                 **self.keyword_processor.api_call_counts,
-                "summary": note_summary_obj.api_calls,
-                "questions": self.questions_generator.api_calls,
+                "summary": document_summary.summary_api_calls,
+                "questions": document_summary.question_api_calls,
                 "total": (
                     self.keyword_processor.api_calls
-                    + note_summary_obj.api_calls
-                    + self.questions_generator.api_calls
+                    + document_summary.summary_api_calls
+                    + document_summary.question_api_calls
                 ),
             },
             "events": events,
             "stages_ms": {
                 "chunking": round((chunking_end - start) * 1000, 2),
                 "keyword_extraction": round((keywords_end - chunking_end) * 1000, 2),
-                "summary": round((summary_end - keywords_end) * 1000, 2),
-                "questions": round((generate_questions_end - summary_end) * 1000, 2),
-                "document_build": round((document_build_end - generate_questions_end) * 1000, 2),
-                "document_ingestion": round((doc_ingestion_end - document_build_end) * 1000, 2),
+                "summary": self.summarization_pipeline.summary_ms,
+                "questions": self.summarization_pipeline.questions_ms,
+                "document_build": round(((document_build_end - keywords_end) + (summary_build_end - summary_end)) * 1000, 2),
+                "document_ingestion": round(((chunk_ingestion_end - document_build_end) + (doc_ingestion_end - summary_build_end)) * 1000, 2),
                 "total": round((doc_ingestion_end - start) * 1000, 2),
             },
-            "summary": note_summary_obj.summary
+            "summary": document_summary.summary
         }
         stages_ms = result["stages_ms"]
         api_calls = result["api_calls"]
@@ -122,7 +113,7 @@ class IngestionOrchestrator:
             summarizer_version=ACTIVE_SUMMARIZER_VERSION,
             text_tokens=text_tokens,
             chunk_count=result["chunk_count"],
-            summary_skipped=not bool(note_summary_obj.summary),
+            summary_skipped=not bool(document_summary.summary),
             llm_calls_total=api_calls["total"],
             keyword_extraction_calls=api_calls["keyword_extraction"],
             keyword_extraction_retries=api_calls["keyword_extraction_retries"],

@@ -26,7 +26,8 @@ The active pipeline is implemented in:
 - `chunk_processor.py`: semantic prose splitting, heading metadata, compatible merges, and final ordering.
 - `semantic_chunker.py`: bounded semantic splitting with a local fallback.
 - `window_chunker.py`: sentence-aware, table-aware, and token-window size normalization.
-- `document_builder.py`: index-ready artifact creation and embedding text preparation.
+- `chunk_builder.py`: vendor-neutral index chunk creation and embedding text preparation.
+- `summary_builder.py`: vendor-neutral summary and question artifact creation.
 - `vector_store.py`: embedding and Qdrant payload creation.
 
 Files under `chunking/deprecated/` are retained only for historical reference and are not part of the active strategy.
@@ -297,7 +298,7 @@ The keyword-quality threshold is configured with `KEYWORD_MIN_CHUNK_TOKENS`. All
 
 ## Index-Ready Artifact
 
-`DocumentBuilder` converts chunk and keyword results into index-ready artifacts. This stage owns document identity, embedding text, and adjacency because it has the full ordered chunk list and note payload.
+`ChunkBuilder` converts chunk and keyword results into vendor-neutral `IndexChunk` artifacts. This stage owns document identity, embedding text, skip decisions, and adjacency because it has the full ordered chunk list and note payload.
 
 The artifact shape is:
 
@@ -313,6 +314,8 @@ The artifact shape is:
   "embed_text": "Operations Guide > Configuration\n\nThe timeout is 30 seconds.",
   "skip_indexing": false,
   "skip_reason": "",
+  "prev_chunk_id": "3",
+  "next_chunk_id": "5",
   "keywords": [],
   "entities": [],
   "metadata": {
@@ -320,8 +323,7 @@ The artifact shape is:
     "has_heading_context": true,
     "token_count": 11,
     "char_count": 48,
-    "prev_chunk_id": "3",
-    "next_chunk_id": "5"
+    "embed_text_token_count": 14
   }
 }
 ```
@@ -330,34 +332,28 @@ The artifact shape is:
 
 `content` and `embed_text` serve different purposes:
 
-- `content` preserves the original final chunk for retrieval context, display, keyword extraction, and summarization.
+- `content` preserves the original final chunk for retrieval context, display, and document reconstruction.
 - `embed_text` is optimized for embedding and is the only text sent to the embedding service.
 
-For normal headed content, `embed_text` is:
+For headed content that does not already begin with Markdown headings, `embed_text` prepends `heading_context`. Content that already begins with a heading is used as-is to avoid duplicate context.
 
-```text
-heading_context
-
-body without duplicated leading Markdown headings
-```
-
-For tables, `embed_text` contains a natural-language table description followed by the original table. This improves semantic retrieval without replacing or mutating the source table.
+For tables, `embed_text` contains only the deterministic natural-language table description. If augmentation fails, normalized cell text is used as a fallback. Raw pipe-delimited table syntax remains only in `content`.
 
 Separating the fields keeps the embedding stage stateless. It reads `embed_text` without needing to know how to reconstruct context from chunk type or metadata.
 
 ### Skip fields
 
-The artifact contract includes `skip_indexing` and `skip_reason` for future structural or quality-based exclusions. There are currently no active skipped chunk types, so artifacts are presently indexable by default.
+The artifact contract includes `skip_indexing` and `skip_reason`. Code, JSON, heading-only, empty, OCR-flagged, and below-threshold chunks can be excluded from vector indexing without being removed from the ordered artifact list. Code/JSON behavior and minimum token thresholds are configurable.
 
 ### Adjacent chunk references
 
-`DocumentBuilder` assigns `prev_chunk_id` and `next_chunk_id` over the ordered indexable artifact list. Missing references are omitted for the first and last chunks.
+`ChunkBuilder` assigns `prev_chunk_id` and `next_chunk_id` over the complete ordered artifact list, including skipped chunks. Missing references are represented as `None` for the first and last chunks.
 
 These references support retrieval-time context expansion without performing another vector search. A retrieved chunk can directly identify its neighboring chunks in the same note.
 
 ## Vector Storage
 
-The vector store embeds `embed_text` and stores original `content` in the Qdrant payload. Retrieval reconstructs documents using original `content`, not embedding-specific text.
+The vector store embeds `embed_text` and stores original `content` in the Qdrant payload. Retrieval reconstructs documents using original `content`, not embedding-specific text. Summary and question artifacts are indexed separately in the summary and question collections. Summarization runs after chunk indexing and consumes eligible `IndexChunk.embed_text` values.
 
 Immediately before indexing, the vector store adds:
 

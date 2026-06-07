@@ -12,6 +12,7 @@ from llama_index.core import Settings
 from qdrant_client import models
 
 from app.core.config import QDRANT_COLLECTION
+from app.services.ingestion.processors.ingest.models import IndexChunk, QuestionDocument, SummaryArtifacts, SummaryDocument
 from app.db.qdrant import QdrantClientManager
 from app.core.embeddings import (
     EmbeddingBatch,
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 
 CHUNK_COLLECTION = QDRANT_COLLECTION
 SUMMARY_COLLECTION = f"{QDRANT_COLLECTION}_summaries"
+QUESTIONS_COLLECTION = f"{QDRANT_COLLECTION}_questions"
 
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "sparse"
@@ -43,7 +45,7 @@ class QdrantVectorStore:
         self.events = []
 
     def ensure_collections(self) -> None:
-        for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION):
+        for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION, QUESTIONS_COLLECTION):
             if not self._collection_exists(collection_name):
                 self._create_collection(collection_name)
             self._ensure_payload_indexes(collection_name)
@@ -157,7 +159,7 @@ class QdrantVectorStore:
         point_filter = self.build_filter({"doc_id": doc_id})
         selector = models.FilterSelector(filter=point_filter)
 
-        for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION):
+        for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION, QUESTIONS_COLLECTION):
             if not self._collection_exists(collection_name):
                 log.info("Skipping Qdrant delete; collection does not exist: %s", collection_name)
                 continue
@@ -166,6 +168,84 @@ class QdrantVectorStore:
                 points_selector=selector,
             )
         self.events.append(f"document vectors deleted: {doc_id}")
+
+    def upsert_index_chunks(self, chunks: Sequence[IndexChunk]) -> None:
+        """Embed and store application-owned index chunks."""
+        indexable = [chunk for chunk in chunks if not chunk.skip_indexing]
+        if not indexable:
+            self.events.append("chunk vector upsert skipped: no indexable chunks")
+            return
+
+        embeddings = self.embed_texts([chunk.embed_text for chunk in indexable])
+        indexed_at = datetime.now(timezone.utc).isoformat()
+        embedding_model = self.embedding_client.remote_service.model
+        points = []
+        for index, chunk in enumerate(indexable):
+            metadata = dict(chunk.metadata)
+            metadata.update({
+                "doc_id": chunk.document_id,
+                "prev_chunk_id": chunk.prev_chunk_id,
+                "next_chunk_id": chunk.next_chunk_id,
+                "embedding_model": embedding_model,
+                "embedding_dim": len(embeddings.dense[index]),
+                "indexed_at": indexed_at,
+            })
+            points.append(models.PointStruct(
+                id=self.point_id(f"{chunk.document_id}-{chunk.chunk_id}"),
+                vector={
+                    DENSE_VECTOR: embeddings.dense[index],
+                    SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[index]),
+                },
+                payload={
+                    "chunk_id": chunk.chunk_id, "note_id": metadata.get("note_id", ""),
+                    "folder_id": metadata.get("folder_id", ""), "chunk_index": chunk.chunk_index,
+                    "total_chunks": chunk.total_chunks, "chunk_type": chunk.chunk_type,
+                    "content": chunk.content, "embed_text": chunk.embed_text,
+                    "skip_indexing": False, "skip_reason": "",
+                    "keywords": chunk.keywords, "entities": chunk.entities,
+                    "text": chunk.content, "created_at": int(time.time()), "metadata": metadata,
+                },
+            ))
+        self.client.upsert(collection_name=CHUNK_COLLECTION, points=points)
+        self.events.append(f"chunk vectors upserted: {len(points)}")
+        skipped = len(chunks) - len(indexable)
+        if skipped:
+            self.events.append(f"chunk vectors skipped: {skipped}")
+
+    def upsert_summary_artifacts(self, artifacts: SummaryArtifacts) -> None:
+        """Embed and store application-owned summary and question artifacts."""
+        if artifacts.summary is not None:
+            summary = artifacts.summary
+            embeddings = self.embed_texts([summary.embed_text])
+            self.client.upsert(collection_name=SUMMARY_COLLECTION, points=[models.PointStruct(
+                id=self.point_id(summary.summary_id),
+                vector={DENSE_VECTOR: embeddings.dense[0], SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[0])},
+                payload={
+                    "text": summary.content, "content": summary.content, "embed_text": summary.embed_text,
+                    "keywords": summary.keywords, "entities": summary.entities,
+                    "created_at": int(time.time()), "metadata": summary.metadata,
+                },
+            )])
+            self.events.append("summary vector upserted")
+        if artifacts.questions:
+            embeddings = self.embed_texts([question.embed_text for question in artifacts.questions])
+            points = [models.PointStruct(
+                id=self.point_id(question.question_id),
+                vector={DENSE_VECTOR: embeddings.dense[index], SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[index])},
+                payload={
+                    "text": question.content, "content": question.content, "embed_text": question.embed_text,
+                    "created_at": int(time.time()), "metadata": question.metadata,
+                },
+            ) for index, question in enumerate(artifacts.questions)]
+            self.client.upsert(collection_name=QUESTIONS_COLLECTION, points=points)
+            self.events.append(f"question vectors upserted: {len(points)}")
+
+    def replace_index_chunks(self, doc_id: str, chunks: Sequence[IndexChunk]) -> None:
+        self.events = ["chunk vector ingestion started"]
+        self.ensure_collections()
+        self.delete_document(doc_id)
+        self.upsert_index_chunks(chunks)
+        self.events.append("chunk vector ingestion completed")
 
     def upsert_summary(self, summary: LlamaDocument) -> None:
         metadata = dict(summary.metadata or {})
@@ -326,6 +406,23 @@ class QdrantVectorStore:
             query_filter=self.build_filter(metadata_filter),
         ).points
 
+        return [self._point_to_document(point) for point in results]
+
+    def search_questions(
+        self,
+        query: str,
+        *,
+        limit: int = 10,
+        metadata_filter: Mapping[str, Any] | None = None,
+    ) -> list[tuple[LlamaDocument, float]]:
+        query_vector = self.embed_dense_queries([query])[0]
+        results = self.client.query_points(
+            collection_name=QUESTIONS_COLLECTION,
+            query=query_vector,
+            using=DENSE_VECTOR,
+            limit=limit,
+            query_filter=self.build_filter(metadata_filter),
+        ).points
         return [self._point_to_document(point) for point in results]
 
     def embed_texts(self, texts: Sequence[str]) -> EmbeddingBatch:

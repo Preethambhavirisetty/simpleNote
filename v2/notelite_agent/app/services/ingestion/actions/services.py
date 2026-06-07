@@ -4,7 +4,7 @@ from dataclasses import asdict
 from typing import Any
 
 from app.services.ingestion.processors.chunking import ChunkProcessor, TextChunk
-from app.services.ingestion.processors.ingest.document_builder import DocumentBuilder
+from app.services.ingestion.processors.ingest import ChunkBuilder, DocumentSummary, SummaryBuilder
 from app.services.ingestion.processors.keywords import ChunkKeywordResult, KeywordProcessor
 from app.services.ingestion.processors.summary.questions_generator import QuestionsGenerator
 from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
@@ -63,23 +63,22 @@ class IngestionActionServices:
         }
 
     def documents(self, payload: DocumentsPayload) -> dict[str, Any]:
-        builder = DocumentBuilder()
+        data = payload.model_dump(exclude={
+            "chunks", "top_keywords", "entities", "questions", "note_summary"
+        })
+        doc_id = self._doc_id(payload)
         chunk_objects = [self._keyword_chunk(chunk, index) for index, chunk in enumerate(payload.chunks)]
-        summary_doc, chunk_docs = builder.build(
-            data=payload.model_dump(exclude={
-                "chunks", "top_keywords", "entities", "questions", "note_summary"
-            }),
-            doc_id=self._doc_id(payload),
-            chunk_objects=chunk_objects,
-            top_kw=payload.top_keywords,
-            top_ent=payload.entities,
-            questions=payload.questions,
-            note_summary=payload.note_summary,
-        )
+        chunk_builder = ChunkBuilder(data, doc_id)
+        index_chunks = chunk_builder.build(chunk_objects)
+        summary_builder = SummaryBuilder(data, doc_id, payload.top_keywords, payload.entities)
+        summary_artifacts = summary_builder.build(DocumentSummary(
+            summary=payload.note_summary, questions=payload.questions
+        ))
         return {
-            "summary_document": self._document_payload(summary_doc) if summary_doc else None,
-            "chunk_documents": [self._document_payload(doc) for doc in chunk_docs],
-            "events": builder.events,
+            "chunks": [asdict(chunk) for chunk in index_chunks],
+            "summary": asdict(summary_artifacts.summary) if summary_artifacts.summary else None,
+            "questions": [asdict(question) for question in summary_artifacts.questions],
+            "events": [*chunk_builder.events, *summary_builder.events],
         }
 
     @staticmethod
@@ -112,23 +111,3 @@ class IngestionActionServices:
     @staticmethod
     def _doc_id(payload: DocumentsPayload) -> str:
         return f"{payload.user_id}-{payload.folder_id}-{payload.note_id}"
-
-    @staticmethod
-    def _document_payload(document: Any) -> dict[str, Any]:
-        metadata = dict(document.metadata or {})
-        if "content" not in metadata:
-            return {
-                "id": str(document.id_),
-                "text": document.text,
-                "metadata": metadata,
-            }
-
-        top_level_keys = (
-            "chunk_id", "note_id", "folder_id", "chunk_index", "total_chunks",
-            "chunk_type", "content", "embed_text", "skip_indexing", "skip_reason",
-            "keywords", "entities",
-        )
-        artifact = {"id": str(document.id_)}
-        artifact.update({key: metadata.pop(key) for key in top_level_keys})
-        artifact["metadata"] = metadata
-        return artifact
