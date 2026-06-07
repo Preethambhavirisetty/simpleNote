@@ -1,0 +1,73 @@
+import os
+
+from dotenv import load_dotenv
+
+from app.shared.utils import require_env
+
+
+APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BASE_DIR = os.path.abspath(os.path.join(APP_DIR, ".."))
+
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+
+# Core application
+SECRET_KEY = require_env("SECRET_KEY")
+BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
+AGENT_API_KEY = require_env("AGENT_API_KEY")
+
+
+# Prompt selection
+ACTIVE_CHAT_SYSTEM_VERSION = require_env("ACTIVE_CHAT_SYSTEM_VERSION")
+ACTIVE_SUMMARIZER_VERSION = require_env("ACTIVE_SUMMARIZER_VERSION")
+
+
+# Knowledge ingestion
+MAX_CHUNK_SIZE = int(require_env("MAX_CHUNK_SIZE"))
+CHUNK_OVERLAP = int(require_env("CHUNK_OVERLAP"))
+BREAKPOINT_PERCENTILE = int(require_env("BREAKPOINT_PERCENTILE"))
+KEYWORD_MIN_CHUNK_TOKENS = int(require_env("KEYWORD_MIN_CHUNK_TOKENS", "5"))
+KEYWORD_EXTRACTION_MAX_CHUNKS = int(require_env("KEYWORD_EXTRACTION_MAX_CHUNKS", "10"))
+KEYWORD_EXTRACTION_MAX_TOKENS = int(require_env("KEYWORD_EXTRACTION_MAX_TOKENS", "3000"))
+KEYWORD_EXTRACTION_CONCURRENCY = int(require_env("KEYWORD_EXTRACTION_CONCURRENCY", "1"))
+
+
+# Embeddings — always served remotely from RunPod (no local GPU on EC2)
+EMBEDDING_MODEL_BASE = require_env("EMBEDDING_MODEL_BASE", "").rstrip("/")
+EMBEDDING_MODEL = require_env("EMBEDDING_MODEL")
+EMBEDDING_API_KEY = require_env("EMBEDDING_API_KEY", "")
+EMBEDDING_TIMEOUT = float(require_env("EMBEDDING_TIMEOUT", "120"))
+SEMANTIC_CHUNKING_TIMEOUT = float(require_env("SEMANTIC_CHUNKING_TIMEOUT", "8"))
+SEMANTIC_CHUNKING_FAILURE_COOLDOWN = float(require_env("SEMANTIC_CHUNKING_FAILURE_COOLDOWN", "60"))
+
+
+# Vector database
+QDRANT_URL = require_env("QDRANT_URL")
+QDRANT_COLLECTION = require_env("QDRANT_COLLECTION")
+
+
+# LLM — served remotely from RunPod
+LLM_API_BASE = require_env("LLM_API_BASE")
+LLM_API_KEY = require_env("LLM_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL")  # Legacy fallback for existing deployments.
+LLM_REASONER_MODEL = require_env("LLM_REASONER_MODEL", LLM_MODEL)
+LLM_SUMMARIZER_MODEL = require_env("LLM_SUMMARIZER_MODEL", LLM_MODEL)
+LLM_CONTEXT_WINDOW = int(require_env("LLM_CONTEXT_WINDOW"))
+
+
+# Queues and workers
+MESSAGE_BROKER_URL = require_env("MESSAGE_BROKER_URL")
+CELERY_RESULT_BACKEND = require_env("CELERY_RESULT_BACKEND", MESSAGE_BROKER_URL)
+INGESTION_TASK_STRING = require_env("INGESTION_TASK_STRING")
+INGESTION_QUEUE = require_env("INGESTION_QUEUE", "ingestion")
+CONVERSATION_QUEUE = require_env("CONVERSATION_QUEUE", "conversation")
+
+
+# Database — read-only version guard checks, one query per upsert task
+POSTGRES_DB_URL = require_env("POSTGRES_DB_URL")
+
+
+# Reranker — optional remote cross-encoder (Cohere-compatible API).
+# Leave empty to skip reranking and rely on RRF scores from Qdrant.
+RERANKER_API_BASE = os.getenv("RERANKER_API_BASE", "").rstrip("/")
+RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")

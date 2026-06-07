@@ -1,0 +1,72 @@
+# Optional standalone observability stack. The main ../podman-compose.yml already includes
+# Loki and Grafana; do not run both compose files at once because their ports overlap.
+
+version: '3.8'
+
+networks:
+  logging:
+    driver: bridge
+
+volumes:
+  loki_data:
+  grafana_data:
+
+services:
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - logging
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O- http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+    networks:
+      - logging
+    restart: unless-stopped
+
+  # ── Fluent Bit (optional — for tailing Qdrant/Postgres logs) ──────
+  # Requires changing Podman log driver from journald to k8s-file.
+  # For backend/agent logs, the apps push directly to Loki via LOKI_URL.
+  #
+  # fluent-bit:
+  #   image: fluent/fluent-bit:2.2
+  #   container_name: fluent-bit
+  #   volumes:
+  #     - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+  #     - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+  #     - ./fluent-bit/set_service.lua:/fluent-bit/etc/set_service.lua:ro
+  #     - /var/log/containers:/var/log/containers:ro
+  #     - /var/log/pods:/var/log/pods:ro
+  #   depends_on:
+  #     loki:
+  #       condition: service_healthy
+  #   networks:
+  #     - logging
+  #   restart: unless-stopped
+  #   user: root
