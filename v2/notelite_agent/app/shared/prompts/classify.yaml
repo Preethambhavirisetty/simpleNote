@@ -1,14 +1,29 @@
 version: "1.0"
 name: classify
+keyword_extraction_system: |
+  For each supplied chunk, extract 8-10 retrieval-relevant keywords or concise keyphrases.
+
+  Use heading context to understand the subject, but do not return headings merely because they appear in the text. Prefer specific concepts, incidents, decisions, actions, products, systems, and outcomes that would help retrieve the chunk.
+
+  Rules:
+  - Return only a valid JSON array
+  - Return one object per supplied chunk using exactly: {"chunk_id": "...", "keywords": ["..."]}
+  - Preserve the supplied chunk_id exactly
+  - Return at most 10 keywords per chunk
+  - Do not return generic table headers, structural labels, or formatting artifacts
+  - Do not add facts absent from the chunk
+  - Use an empty keywords array when the chunk has no useful retrieval terms
+  - No explanations, markdown fences, or preamble
 keyword_dedup_system: |
   You are a keyword deduplication assistant. Given a list of keywords and phrases extracted from a document, return the most meaningful and unique terms.
 
-  Each input line includes an allowed term plus chunk_frequency, occurrences, and specificity metadata. Return only the term value, without metadata.
+  Each input line includes an allowed term plus section_frequency, occurrences, and specificity metadata. Return only the term value, without metadata.
 
   Ranking priority:
-  - Rank terms appearing across more distinct chunks above terms repeated only within one chunk
+  - Rank terms appearing across more distinct heading sections above terms repeated across semantic child chunks within one section
   - Within similar frequency, prefer more specific multi-word concepts over generic single words
   - Use occurrence count only as a secondary signal after cross-chunk frequency and specificity
+  - Ignore input order completely; it does not indicate importance
 
   Rules:
   - Preserve multi-word phrases exactly as given
@@ -18,6 +33,7 @@ keyword_dedup_system: |
   - Remove generic single words that carry no standalone retrieval value (examples: app, set, user, results, chain, cost, tool, type, value, item, thing)
   - Remove time expressions and calendar references (examples: Monday, this week, afternoon meeting, yesterday, last month)
   - Remove sentence fragments and prepositional phrases without a clear subject (examples: instance for auth, risk of context, based on results)
+  - Remove table-description boilerplate, table headers, heading fragments, and synthetic header-value phrases that are not meaningful document concepts
   - Remove physical household objects with no conceptual value (examples: cardboard boxes, coffee crystals, car seats, bedroom window)
   - Prefer specific named concepts, activities, life events, decisions, relationships, and domain terms over generic objects or vague descriptors
   - Return up to 15 terms, one per line
@@ -27,19 +43,18 @@ entity_dedup_system: |
   You are a named entity validation and deduplication assistant. Given a list of candidate named entities extracted from a document, return only the valid named entities.
 
   A valid named entity is one of:
-  - Person name (real individual, first or full name)
-  - Product, tool, technology, or software name
+  - Person name
   - Organization or company name
+  - Product, tool, technology, software, or service name
   - Specific named location, place, or geographic feature
-  - Named framework, library, protocol, or standard
-  - Named algorithm, method, or well-known concept
-  - Named creative work (book, film, article title)
 
-  Each input line includes an allowed entity plus chunk_frequency, occurrences, and specificity metadata. Return only the entity value, without metadata. Rank entities by cross-chunk frequency first, then specificity, then occurrence count.
+  Each input line includes an allowed entity plus chunk_frequency, occurrences, specificity, spaCy labels, and example source context. Use the label and context to validate what the term means. Return only the entity value, without metadata. Rank entities by cross-chunk frequency first, then semantic specificity, then occurrence count. Ignore input order completely.
 
   Rules:
   - Remove adjectives and demonyms mistakenly tagged as entities (examples: Italian, Romanian, Northern, Ancient)
-  - Remove common nouns, generic words, and document structure artifacts (examples: node, thread, entry, journal, note, section, chapter)
+  - Remove common nouns, generic words, document structure artifacts, measurements, times, and generic infrastructure abbreviations (examples: node, thread, entry, journal, note, section, chapter, RAM, GPU, UTC, API)
+  - Treat spaCy labels as evidence, not truth; reject a candidate when its example context shows it is not a valid named entity
+  - Remove table headers, table cell fusions, synthetic header-value phrases, heading fragments, and malformed OCR fragments
   - Remove conjunctions of multiple entities; split them into separate entries (example: 'X and Y' becomes two entries: X, Y)
   - Remove duplicates, keeping the most complete form (example: prefer the full name over a partial one)
   - Do not add entities not present in the input list

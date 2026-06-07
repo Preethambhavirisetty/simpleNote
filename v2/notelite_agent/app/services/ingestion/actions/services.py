@@ -40,7 +40,7 @@ class IngestionActionServices:
             "chunks": [asdict(chunk) for chunk in chunk_results],
             "top_keywords": top_keywords,
             "entities": entities,
-            "api_calls": processor.api_calls,
+            "api_calls": processor.api_call_counts,
             "events": processor.events,
         }
 

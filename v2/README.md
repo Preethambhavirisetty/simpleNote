@@ -335,6 +335,16 @@ is it too complicated? why couldn't you implement chat and stream feature proper
   - Transcript timestamp regex — high, full datetime format not recognized
   - Glossary entry atomicity — medium, entries split mid-definition
 
+DocumentBuilder should also compute adjacent chunk references:
+json"prev_chunk_id": "",
+"next_chunk_id": ""
+At query time, when you retrieve chunk N you often want to expand context by also fetching N-1 and N+1. If those IDs are in the index payload you can fetch them directly from Qdrant without a second vector search. DocumentBuilder knows the full ordered list of chunks for a document, so it's trivially cheap to compute these references there. 
+
+NOTE: The one thing most production apps do that you don't yet is document-level pre-processing — running a lightweight pass over the full document before chunking to extract the document type, primary language, estimated structure density, and overall topic. That global context improves chunking decisions, particularly for freeform notes where there are no structural signals to work from. Worth adding eventually but not blocking.
+
+
+also update keyword/entitity extractor documentation in [docs](v2/notelite_agent/docs/) 
+
 
 ### STARTUP STEPS
 - podman machine start

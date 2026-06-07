@@ -34,7 +34,10 @@ class IngestionQueuedData(BaseModel):
 
 
 class IngestionApiCalls(BaseModel):
+    keyword_extraction: int
+    keyword_extraction_retries: int
     keyword_dedup: int
+    entity_dedup: int
     summary: int
     questions: int
     total: int

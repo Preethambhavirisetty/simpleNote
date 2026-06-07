@@ -6,20 +6,31 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
 
-from app.shared.prompts.prompt import get_entity_dedup_system_prompt, get_keyword_dedup_system_prompt
+from app.core.config import (
+    KEYWORD_EXTRACTION_CONCURRENCY,
+    KEYWORD_EXTRACTION_MAX_CHUNKS,
+    KEYWORD_EXTRACTION_MAX_TOKENS,
+)
+from app.shared.prompts.prompt import (
+    get_entity_dedup_system_prompt,
+    get_keyword_dedup_system_prompt,
+    get_keyword_extraction_system_prompt,
+)
 from app.services.ingestion.processors.chunking import TextChunk
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType
-from app.services.ingestion.processors.keywords.extractor import extract_keywords
-from app.services.ingestion.processors.keywords.terms import prune_keywords
-from app.services.ingestion.processors.text_normalization import (
-    augment_markdown_table,
-    normalize_text_for_keyword_extraction,
+from app.services.ingestion.processors.keywords.entity_extractor import extract_entity_mentions_batch
+from app.services.ingestion.processors.keywords.keyword_batcher import (
+    KeywordBatchItem,
+    KeywordBatchResult,
+    extract_keywords_batched,
 )
+from app.services.ingestion.processors.keywords.terms import prune_keywords
+from app.services.ingestion.processors.text_normalization import normalize_text_for_keyword_extraction
 from app.shared.llm import llm_call_general
 from app.shared.utils import build_llm_messages
 
 
-TOP_N_KEYWORDS_PER_CHUNK = 15
+TOP_N_KEYWORDS_PER_CHUNK = 10
 MAX_GLOBAL_KEYWORD_CANDIDATES = 40
 MAX_TOP_KEYWORDS = 15
 TermKind = Literal["kw", "ent"]
@@ -39,6 +50,8 @@ class RankedCandidate:
     chunk_frequency: int
     occurrences: int
     specificity: int
+    labels: tuple[str, ...] = ()
+    contexts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,28 +91,89 @@ class KeywordProcessor:
         self.max_top_keywords = max_top_keywords
         self.use_llm_dedup = use_llm_dedup
         self.api_calls = 0
+        self.api_call_counts: dict[str, int] = {
+            "keyword_extraction": 0,
+            "keyword_extraction_retries": 0,
+            "keyword_dedup": 0,
+            "entity_dedup": 0,
+        }
         self.events: list[str] = []
 
     def process(self, chunks: Sequence[TextChunk | str]) -> tuple[list[ChunkKeywordResult], list[str], list[str]]:
         self.api_calls = 0
+        self.api_call_counts = {
+            "keyword_extraction": 0,
+            "keyword_extraction_retries": 0,
+            "keyword_dedup": 0,
+            "entity_dedup": 0,
+        }
         self.events = [f"keywords started: {len(chunks)} chunks"]
-        chunk_results = []
-        skipped_count = 0
+        prepared_chunks = []
+        keyword_items = []
+        entities_by_chunk: dict[str, list[str]] = {}
+        entity_items: list[tuple[str, str]] = []
+        entity_evidence: dict[str, dict[str, set[str] | list[str]]] = {}
 
         for index, chunk in enumerate(chunks):
             chunk_id, content, chunk_type, metadata = self._chunk_data(chunk, index)
             extraction_text = self._extraction_text(content, chunk_type, metadata)
-            if self._should_extract_terms(extraction_text, chunk_type, metadata):
-                keywords, entities = extract_keywords(extraction_text, self.top_n_per_chunk)
+            entities_by_chunk[chunk_id] = []
+            if self._should_extract_entities(extraction_text, chunk_type):
+                entity_items.append((chunk_id, extraction_text))
+
+            skip_reason = self._term_skip_reason(extraction_text, chunk_type, metadata)
+            if skip_reason:
+                self.events.append(f"keywords extraction skipped: chunk={chunk_id} reason={skip_reason}")
             else:
-                keywords, entities = [], []
-                skipped_count += 1
+                keyword_items.append(
+                    KeywordBatchItem(
+                        chunk_id=chunk_id,
+                        chunk_type=chunk_type,
+                        text=self._keyword_extraction_text(content, extraction_text, metadata),
+                    )
+                )
+            prepared_chunks.append((chunk, index, chunk_id, content, chunk_type, metadata))
+
+        entity_results = extract_entity_mentions_batch([text for _chunk_id, text in entity_items])
+        for (chunk_id, text), mentions in zip(entity_items, entity_results):
+            entities_by_chunk[chunk_id] = [mention.text for mention in mentions]
+            for mention in mentions:
+                key = mention.text.lower()
+                evidence = entity_evidence.setdefault(key, {"labels": set(), "contexts": []})
+                evidence["labels"].add(mention.label)
+                context = self._entity_context(text, mention.text)
+                if context and context not in evidence["contexts"] and len(evidence["contexts"]) < 2:
+                    evidence["contexts"].append(context)
+        self.events.append(f"entity extraction completed: {len(entity_items)} chunks")
+        try:
+            keyword_result = extract_keywords_batched(
+                keyword_items,
+                system_prompt=get_keyword_extraction_system_prompt(),
+                max_chunks=KEYWORD_EXTRACTION_MAX_CHUNKS,
+                max_tokens=KEYWORD_EXTRACTION_MAX_TOKENS,
+                concurrency=KEYWORD_EXTRACTION_CONCURRENCY,
+                keywords_per_chunk=self.top_n_per_chunk,
+            )
+        except Exception as exc:
+            log.warning("keyword extraction setup failed", exc_info=True)
+            keyword_result = KeywordBatchResult(
+                keywords_by_chunk={item.chunk_id: [] for item in keyword_items},
+                api_calls=0,
+                retries=0,
+                events=[f"keyword extraction failed: {type(exc).__name__}"],
+            )
+        self.events.extend(keyword_result.events)
+        self.api_call_counts["keyword_extraction"] = keyword_result.api_calls
+        self.api_call_counts["keyword_extraction_retries"] = keyword_result.retries
+
+        chunk_results = []
+        for chunk, index, chunk_id, content, chunk_type, metadata in prepared_chunks:
             chunk_results.append(
                 ChunkKeywordResult(
                     chunk_id=chunk_id,
                     content=content,
-                    keywords=keywords,
-                    entities=entities,
+                    keywords=keyword_result.keywords_by_chunk.get(chunk_id, []),
+                    entities=entities_by_chunk.get(chunk_id, []),
                     chunk_type=chunk_type,
                     metadata=metadata,
                     chunk_index=chunk.chunk_index if isinstance(chunk, TextChunk) else index,
@@ -107,45 +181,93 @@ class KeywordProcessor:
                 )
             )
 
-        chunk_keywords = [self.split_conjunctions(result.keywords) for result in chunk_results]
+        self.events.append(
+            f"keyword extraction completed: eligible={len(keyword_items)} "
+            f"with_keywords={sum(bool(result.keywords) for result in chunk_results)}"
+        )
+        chunk_keywords = [result.keywords for result in chunk_results]
         chunk_entities = [result.entities for result in chunk_results]
-        keyword_candidates = self._rank_candidates(chunk_keywords, kind="kw")
-        entity_candidates = self._rank_candidates(chunk_entities, kind="ent")
+        section_keys = [
+            result.metadata.get("heading_context") or f"chunk:{result.chunk_id}"
+            for result in chunk_results
+        ]
+        keyword_candidates = self._rank_candidates(
+            chunk_keywords, kind="kw", group_keys=section_keys
+        )
+        entity_candidates = self._rank_candidates(
+            chunk_entities, kind="ent", evidence=entity_evidence
+        )
+        self.events.append(f"keyword candidates ranked: {len(keyword_candidates)}")
+        self.events.append(f"entity candidates ranked: {len(entity_candidates)}")
         top_keywords = self._deduplicate_candidates(keyword_candidates, kind="kw")
         top_entities = self._deduplicate_candidates(entity_candidates, kind="ent")
 
-        if skipped_count:
-            self.events.append(f"keywords skipped: {skipped_count} chunks")
         self.events.append(
             f"keywords completed: {len(top_keywords)} top keywords, {len(top_entities)} entities"
+        )
+        self.api_calls = sum(
+            count
+            for key, count in self.api_call_counts.items()
+            if key != "keyword_extraction_retries"
         )
         return chunk_results, top_keywords, top_entities
 
     @staticmethod
     def _extraction_text(content: str, chunk_type: str, metadata: dict[str, Any]) -> str:
-        if chunk_type == ChunkType.TABLE.value:
-            augmented = augment_markdown_table(content, metadata.get("heading_context", ""))
-            return normalize_text_for_keyword_extraction(augmented or content)
         return normalize_text_for_keyword_extraction(content)
 
     @staticmethod
-    def _should_extract_terms(text: str, chunk_type: str, metadata: dict[str, Any]) -> bool:
-        return (
-            not metadata.get("skip_keywords", False)
-            and chunk_type not in NON_TEXT_TERM_TYPES
-            and any(char.isalpha() for char in text)
-        )
+    def _keyword_extraction_text(
+        content: str,
+        normalized_content: str,
+        metadata: dict[str, Any],
+    ) -> str:
+        if content.strip().startswith("#"):
+            return normalized_content
+        heading_context = metadata.get("heading_context", "")
+        if not heading_context or not metadata.get("has_heading_context"):
+            return normalized_content
+        return f"{heading_context}\n\n{normalized_content}".strip()
+
+    @staticmethod
+    def _should_extract_entities(text: str, chunk_type: str) -> bool:
+        return chunk_type not in NON_TEXT_TERM_TYPES and any(char.isalpha() for char in text)
+
+    @staticmethod
+    def _entity_context(text: str, entity: str, radius: int = 100) -> str:
+        lowered = text.lower()
+        position = lowered.find(entity.lower())
+        if position < 0:
+            return text[: radius * 2].replace("\n", " ").strip()
+        start = max(0, position - radius)
+        end = min(len(text), position + len(entity) + radius)
+        return text[start:end].replace("\n", " ").strip()
+
+    @staticmethod
+    def _term_skip_reason(text: str, chunk_type: str, metadata: dict[str, Any]) -> str:
+        if metadata.get("skip_keywords", False):
+            reason = metadata.get("skip_keywords_reason") or "quality_flag"
+            return f"quality:{reason}"
+        if chunk_type in NON_TEXT_TERM_TYPES:
+            return f"structural:{chunk_type}"
+        if not any(char.isalpha() for char in text):
+            return "non_lexical"
+        return ""
 
     def _rank_candidates(
         self,
         term_groups: Sequence[Sequence[str]],
         kind: TermKind,
+        group_keys: Sequence[str] | None = None,
+        evidence: dict[str, dict[str, set[str] | list[str]]] | None = None,
     ) -> list[RankedCandidate]:
         display_by_key: dict[str, str] = {}
         occurrences: Counter[str] = Counter()
         chunk_frequency: Counter[str] = Counter()
+        terms_by_group: dict[str, set[str]] = {}
+        group_keys = group_keys or [f"chunk:{index}" for index in range(len(term_groups))]
 
-        for terms in term_groups:
+        for group_key, terms in zip(group_keys, term_groups):
             seen_in_chunk = set()
             for term in terms:
                 if not isinstance(term, str) or not term.strip():
@@ -155,14 +277,20 @@ class KeywordProcessor:
                 display_by_key.setdefault(key, term)
                 occurrences[key] += 1
                 seen_in_chunk.add(key)
-            chunk_frequency.update(seen_in_chunk)
+            terms_by_group.setdefault(group_key, set()).update(seen_in_chunk)
 
+        for terms in terms_by_group.values():
+            chunk_frequency.update(terms)
+
+        evidence = evidence or {}
         candidates = [
             RankedCandidate(
                 term=display_by_key[key],
                 chunk_frequency=chunk_frequency[key],
                 occurrences=occurrences[key],
                 specificity=len(display_by_key[key].split()),
+                labels=tuple(sorted(evidence.get(key, {}).get("labels", set()))),
+                contexts=tuple(evidence.get(key, {}).get("contexts", [])),
             )
             for key in display_by_key
             if kind == "ent" or chunk_frequency[key] >= 2 or len(display_by_key[key].split()) >= 2
@@ -207,21 +335,6 @@ class KeywordProcessor:
                 keywords.append(allowed_keywords[key])
         return keywords
 
-    def _fill_keywords(self, parsed_keywords: list[str], fallback_keywords: list[str]) -> list[str]:
-        seen = {keyword.lower() for keyword in parsed_keywords}
-        filled = list(parsed_keywords)
-
-        for keyword in fallback_keywords:
-            key = keyword.lower()
-            if key in seen:
-                continue
-            filled.append(keyword)
-            seen.add(key)
-            if len(filled) >= self.max_top_keywords:
-                break
-
-        return filled[: self.max_top_keywords]
-
     def deduplicate_keywords(self, keywords: Sequence[str], kind: TermKind = "kw") -> list[str]:
         candidates = self._rank_candidates([[keyword] for keyword in keywords], kind)
         return self._deduplicate_candidates(candidates, kind)
@@ -232,7 +345,8 @@ class KeywordProcessor:
         ranked_terms = [candidate.term for candidate in candidates]
         if not self.use_llm_dedup:
             self.events.append(f"{self._kind_label(kind)} dedup completed: local")
-            return ranked_terms[: self.max_top_keywords]
+            selected = ranked_terms[: self.max_top_keywords]
+            return self._postprocess_entity_selection(selected, candidates) if kind == "ent" else selected
         return self.deduplicate_keywords_llm(list(candidates), kind)
 
     def deduplicate_keywords_llm(
@@ -244,34 +358,80 @@ class KeywordProcessor:
         ranked_terms = [candidate.term for candidate in candidates]
         allowed_keywords = {term.lower(): term for term in ranked_terms}
         keyword_text = "\n".join(
-            f"term: {candidate.term} | chunk_frequency: {candidate.chunk_frequency} | "
-            f"occurrences: {candidate.occurrences} | specificity: {candidate.specificity}"
+            self._candidate_prompt_line(candidate, kind)
             for candidate in candidates
         )
         try:
             label = self._kind_label(kind)
-            self.events.append(f"{label} dedup api call")
+            self.events.append(f"{label} dedup api call: {len(candidates)} ranked candidates")
             self.api_calls += 1
+            self.api_call_counts[f"{label}_dedup"] += 1
             prompt = get_keyword_dedup_system_prompt() if kind == "kw" else get_entity_dedup_system_prompt()
             result = llm_call_general(build_llm_messages(prompt, keyword_text))
             parsed_keywords = self._parse_llm_keyword_lines(result, allowed_keywords)
-            self.events.append(f"{label} dedup completed: llm")
-            return self._fill_keywords(parsed_keywords, ranked_terms)
+            selected = parsed_keywords[: self.max_top_keywords]
+            if kind == "ent":
+                selected = self._postprocess_entity_selection(selected, candidates)
+            self.events.append(
+                f"{label} dedup completed: llm selected={len(selected)} "
+                f"rejected={len(candidates) - len(selected)}"
+            )
+            return selected
         except Exception:
             log.warning("%s LLM dedup failed; using local dedup.", self._kind_label(kind), exc_info=True)
             self.events.append(f"{self._kind_label(kind)} dedup failed: using local fallback")
 
-        return ranked_terms[: self.max_top_keywords]
+        selected = ranked_terms[: self.max_top_keywords]
+        return self._postprocess_entity_selection(selected, candidates) if kind == "ent" else selected
+
+    @staticmethod
+    def _postprocess_entity_selection(
+        selected: Sequence[str],
+        candidates: Sequence[RankedCandidate],
+    ) -> list[str]:
+        person_candidates = [
+            candidate.term
+            for candidate in candidates
+            if "PERSON" in candidate.labels
+        ]
+        person_by_key = {candidate.lower(): candidate for candidate in person_candidates}
+        output = []
+        seen = set()
+
+        for term in selected:
+            key = term.lower()
+            if key in person_by_key:
+                token_set = KeywordProcessor._entity_name_tokens(term)
+                supersets = [
+                    candidate
+                    for candidate in person_candidates
+                    if token_set < KeywordProcessor._entity_name_tokens(candidate)
+                ]
+                if len(supersets) == 1:
+                    term = supersets[0]
+                    key = term.lower()
+            if key not in seen:
+                seen.add(key)
+                output.append(term)
+        return output
+
+    @staticmethod
+    def _entity_name_tokens(entity: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]+", entity.lower()))
+
+    @staticmethod
+    def _candidate_prompt_line(candidate: RankedCandidate, kind: TermKind) -> str:
+        frequency_label = "section_frequency" if kind == "kw" else "chunk_frequency"
+        line = (
+            f"term: {candidate.term} | {frequency_label}: {candidate.chunk_frequency} | "
+            f"occurrences: {candidate.occurrences} | specificity: {candidate.specificity}"
+        )
+        if kind == "ent":
+            labels = ", ".join(candidate.labels) or "unknown"
+            contexts = " || ".join(candidate.contexts) or "unavailable"
+            line += f" | spacy_labels: {labels} | example_context: {contexts}"
+        return line
 
     @staticmethod
     def _kind_label(kind: TermKind) -> str:
         return "keyword" if kind == "kw" else "entity"
-
-    def split_conjunctions(self, keywords: Sequence[str]) -> list[str]:
-        result = []
-        for keyword in keywords:
-            if not isinstance(keyword, str):
-                continue
-            parts = re.split(r'\s+or\s+|\s+and\s+', keyword)
-            result.extend(part.strip() for part in parts if part.strip())
-        return list(dict.fromkeys(result))  # dedup preserving order

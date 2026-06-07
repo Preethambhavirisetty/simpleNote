@@ -290,10 +290,10 @@ After all splitting and compatible merges, `ChunkProcessor` assigns stable docum
 - `has_heading_context`: Avoids repeated truthiness checks and distinguishes unheaded content explicitly.
 - `token_count`: Used for prompt, retrieval, and chunk-budget decisions.
 - `char_count`: Cheap diagnostic and operational metric.
-- `skip_keywords`: Prevents keyword/entity extraction for chunks that are too short or likely OCR noise.
-- `skip_keywords_reason`: Records `short_chunk` or `ocr_single_character_noise` when extraction is skipped.
+- `skip_keywords`: Prevents keyword/entity extraction for chunks that are too short.
+- `skip_keywords_reason`: Records `short_chunk` when extraction is skipped.
 
-Keyword-quality thresholds are configured with `KEYWORD_MIN_CHUNK_TOKENS`, `KEYWORD_OCR_MIN_TOKENS`, and `KEYWORD_OCR_SINGLE_CHAR_RATIO`. All counts and flags are calculated after final merges so they describe the actual emitted chunks.
+The keyword-quality threshold is configured with `KEYWORD_MIN_CHUNK_TOKENS`. All counts and flags are calculated after final merges so they describe the actual emitted chunks. OCR-like content is not automatically discarded because heuristic OCR detection can suppress valid numeric tables and terse structured content.
 
 ## Index-Ready Artifact
 
@@ -421,9 +421,9 @@ Conditional events are emitted only when the corresponding work occurs. These ev
 
 Primary coverage lives in:
 
-- `app/services/tests/test_chunking.py`
-- `app/services/tests/chunk_test_data_stress.py`
+- `app/services/tests/chunking/test_chunking.py`
+- `app/services/tests/chunking/chunk_test_data_stress.py`
 - `app/services/tests/test_index_artifacts.py`
-- `app/services/ingestion/processors/keywords/test_keywords.py`
+- `app/services/tests/keywords/test_keywords.py`
 
 Changes to structural boundaries, chunk type rules, semantic behavior, metadata, embedding text, or index artifacts should include general regression cases. Tests should describe reusable behavior rather than special-case fixture names or exact production document strings.

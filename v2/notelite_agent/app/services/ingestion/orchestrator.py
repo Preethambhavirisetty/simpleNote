@@ -93,7 +93,7 @@ class IngestionOrchestrator:
             "entities": len(top_ent),
             "questions": questions,
             "api_calls": {
-                "keyword_dedup": self.keyword_processor.api_calls,
+                **self.keyword_processor.api_call_counts,
                 "summary": note_summary_obj.api_calls,
                 "questions": self.questions_generator.api_calls,
                 "total": (
@@ -124,7 +124,10 @@ class IngestionOrchestrator:
             chunk_count=result["chunk_count"],
             summary_skipped=not bool(note_summary_obj.summary),
             llm_calls_total=api_calls["total"],
+            keyword_extraction_calls=api_calls["keyword_extraction"],
+            keyword_extraction_retries=api_calls["keyword_extraction_retries"],
             keyword_dedup_calls=api_calls["keyword_dedup"],
+            entity_dedup_calls=api_calls["entity_dedup"],
             summary_calls=api_calls["summary"],
             question_calls=api_calls["questions"],
             chunking_ms=stages_ms["chunking"],

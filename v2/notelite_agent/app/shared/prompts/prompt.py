@@ -24,6 +24,10 @@ def get_keyword_dedup_system_prompt() -> str:
     return prompt_manager.get_text("classify", "keyword_dedup_system")
 
 
+def get_keyword_extraction_system_prompt() -> str:
+    return prompt_manager.get_text("classify", "keyword_extraction_system")
+
+
 def get_entity_dedup_system_prompt() -> str:
     return prompt_manager.get_text("classify", "entity_dedup_system")
 

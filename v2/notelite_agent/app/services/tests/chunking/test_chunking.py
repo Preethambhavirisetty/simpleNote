@@ -3,7 +3,7 @@ import pytest
 from app.services.ingestion.actions.schema import ChunkPayload
 from app.services.ingestion.actions.services import IngestionActionServices
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
-from app.services.tests.chunk_test_data_stress import TEST_CASES
+from app.services.tests.chunking.chunk_test_data_stress import TEST_CASES
 
 
 def _case_id(case: dict) -> str:
@@ -163,11 +163,11 @@ def test_headed_document_keeps_footer_like_text_as_content_within_sections():
     assert not any("First body" in chunk.content and "Second body" in chunk.content for chunk in chunks)
 
 
-def test_final_chunks_flag_short_and_ocr_noisy_text_for_keyword_skip():
+def test_final_chunks_flag_only_short_text_for_keyword_skip():
     short = ChunkProcessor().process("Tiny.")[0]
     noisy = ChunkProcessor().process("A b c d e f meaningful words remain here.")[0]
 
     assert short.metadata["skip_keywords"] is True
     assert short.metadata["skip_keywords_reason"] == "short_chunk"
-    assert noisy.metadata["skip_keywords"] is True
-    assert noisy.metadata["skip_keywords_reason"] == "ocr_single_character_noise"
+    assert noisy.metadata["skip_keywords"] is False
+    assert noisy.metadata["skip_keywords_reason"] == ""

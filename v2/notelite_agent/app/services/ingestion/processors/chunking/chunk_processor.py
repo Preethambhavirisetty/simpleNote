@@ -4,11 +4,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.config import (
-    KEYWORD_MIN_CHUNK_TOKENS,
-    KEYWORD_OCR_MIN_TOKENS,
-    KEYWORD_OCR_SINGLE_CHAR_RATIO,
-)
+from app.core.config import KEYWORD_MIN_CHUNK_TOKENS
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType, classify_chunk_type
 from app.services.ingestion.processors.chunking.semantic_chunker import SemanticChunker
 from app.services.ingestion.processors.chunking.token_budget import token_count, within_chunk_budget
@@ -38,16 +34,8 @@ def _split_leading_heading_prefix(text: str) -> tuple[str, str]:
 
 
 def _keyword_skip_reason(content: str) -> str:
-    count = token_count(content)
-    if count < KEYWORD_MIN_CHUNK_TOKENS:
+    if token_count(content) < KEYWORD_MIN_CHUNK_TOKENS:
         return "short_chunk"
-
-    lexical_tokens = re.findall(r"\b[\w'-]+\b", content)
-    if len(lexical_tokens) < KEYWORD_OCR_MIN_TOKENS:
-        return ""
-    single_char_ratio = sum(len(token) == 1 for token in lexical_tokens) / len(lexical_tokens)
-    if single_char_ratio >= KEYWORD_OCR_SINGLE_CHAR_RATIO:
-        return "ocr_single_character_noise"
     return ""
 
 
