@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useAvatarStore } from '@/stores/avatarStore'
+import ProfileAvatar from '@/components/ProfileAvatar'
+import { CHARACTER_OPTIONS } from '@/lib/avatarOptions'
 
 // ---------- Section wrapper ----------
 function Section({ title, children }) {
@@ -57,6 +60,62 @@ function ThemeToggle() {
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+function AvatarChooser() {
+  const avatar = useAvatarStore((s) => s.avatar)
+  const setCharacter = useAvatarStore((s) => s.setCharacter)
+  const setImage = useAvatarStore((s) => s.setImage)
+  const inputRef = useRef(null)
+  const [error, setError] = useState('')
+
+  const handleImage = (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('Choose an image file.')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Image must be smaller than 2 MB.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => {
+      setImage(reader.result)
+      setError('')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-3">
+        <ProfileAvatar size="lg" />
+        <div>
+          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Choose your character</p>
+          <p className="mt-0.5 text-xs text-zinc-500">Synced across your workspace.</p>
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-6 gap-2">
+        {CHARACTER_OPTIONS.map((value) => (
+          <button
+            key={value}
+            onClick={() => setCharacter(value)}
+            className={`avatar-choice ${avatar.type === 'character' && avatar.value === value ? 'avatar-choice-active' : ''}`}
+            title={`Character ${value + 1}`}
+          >
+            <ProfileAvatar size="sm" previewValue={{ type: 'character', value }} />
+          </button>
+        ))}
+      </div>
+      <input ref={inputRef} onChange={handleImage} type="file" accept="image/*" className="hidden" />
+      <button onClick={() => inputRef.current?.click()} className="mt-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+        Upload your own image
+      </button>
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   )
 }
@@ -142,8 +201,6 @@ export default function SettingsPanel() {
   const panelRef = useRef(null)
   const [showChangePassword, setShowChangePassword] = useState(false)
 
-  const initials = user?.name?.[0]?.toUpperCase() ?? user?.email?.[0]?.toUpperCase() ?? '?'
-
   // Close on Escape
   useEffect(() => {
     if (!isOpen) return
@@ -197,9 +254,7 @@ export default function SettingsPanel() {
           {/* Profile */}
           <Section>
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm text-white font-semibold shrink-0">
-                {initials}
-              </div>
+              <ProfileAvatar size="lg" />
               <div className="min-w-0">
                 <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
                   {user?.name ?? 'Anonymous'}
@@ -207,6 +262,10 @@ export default function SettingsPanel() {
                 <p className="text-xs text-zinc-500 dark:text-zinc-500 truncate">{user?.email}</p>
               </div>
             </div>
+          </Section>
+
+          <Section title="Profile picture">
+            <AvatarChooser />
           </Section>
 
           {/* Appearance */}

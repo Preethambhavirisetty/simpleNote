@@ -2,10 +2,17 @@
 
 HTTP API for LLM inference and embeddings (llama.cpp, C++). Supports **summarization** (chat/completion) and **embedding** modes; optional API key and multi-turn conversation history for `/infer`. See **[DOCUMENTATION.md](DOCUMENTATION.md)** for architecture, features, improvements, and scalability.
 
-Note: Clone the official llama.cpp repo into the project before building:
+Quick setup (macOS + local llama.cpp build):
 ```bash
-git clone https://github.com/ggml-org/llama.cpp.git
+cd /Users/preethambhavirisetty/simpleNote/v2/notelite_inference
+chmod +x ./setup_llama.sh
+./setup_llama.sh
 ```
+This script:
+- installs `cmake` (via Homebrew) if missing
+- clones `llama.cpp`
+- builds `./build/inference_api`
+- creates `.env.llama` with `MODEL_PURPOSE_SUMMARIZATION` and `MODEL_PURPOSE_CHAT`
 
 ## Features
 
@@ -17,9 +24,9 @@ git clone https://github.com/ggml-org/llama.cpp.git
 ## Build and run
 
 ### Setup
+```bash
 git clone https://github.com/ggml-org/llama.cpp.git
-cd include && git clone https://github.com/yhirose/cpp-httplib.git
-cd include && git clone https://github.com/nlohmann/json.git
+```
 
 ### CPU only
 
@@ -72,7 +79,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=80
 - **Embedding**: `--mode=embedding` → loads embedding model, exposes `POST /embed` (body = text, response = `{"embedding":[...]}`).
 - **Summarization**: `--mode=summarization` (default) → loads LLM, exposes `POST /infer` (body = prompt text or JSON with `prompt` + `history`). Optional query param **`?purpose=summary`** or **`?purpose=query_parsing`** selects which model to use: `summary` → Mistral 7B (or `MODEL_PURPOSE_SUMMARY`), `query_parsing` → Phi 3.5 mini (or `MODEL_PURPOSE_QUERY_PARSING`). Omitted `purpose` uses `LLAMA_MODEL_PATH` or default.
 
-Set `LLAMA_MODEL_PATH` for the default model. Set `MODEL_PURPOSE_SUMMARY` and `MODEL_PURPOSE_QUERY_PARSING` to override paths per purpose. Set `SERVICE_MODE=embedding|summarization` to override `--mode`.
+Set `LLAMA_MODEL_PATH` for a single-model fallback. Set `MODEL_PURPOSE_SUMMARIZATION` and `MODEL_PURPOSE_CHAT` to pin different files for each purpose. Set `SERVICE_MODE=embedding|summarization` to override `--mode`.
 
 ## Docker
 

@@ -16,6 +16,11 @@ export const agentApi = {
  * Events: meta, delta, error, done.
  */
 export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
+  if (!AGENT_API_KEY) {
+    onError?.(new Error('Missing VITE_AGENT_API_KEY. Set it in frontend/.env and restart Vite.'))
+    return
+  }
+
   const url = AGENT_BASE_URL
     ? `${AGENT_BASE_URL}/api/chat/stream`
     : `${AGENT_PATH_PREFIX}/api/chat/stream`

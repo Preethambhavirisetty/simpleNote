@@ -44,50 +44,50 @@ podman exec -it mypostgres psql -U postgres -c "\l+" -> gives the size of db
 
 ### PODMAN COMMANDS
 podman system prune -a --volumes
-podman-compose up -d --build
+podman compose -f podman-compose.yml up -d --build
 
-podman-compose build --no-cache backend
-podman-compose up -d --force-recreate backend backend-celery
-podman-compose build agent
+podman compose -f podman-compose.yml build --no-cache backend
+podman compose -f podman-compose.yml up -d --force-recreate backend backend-celery
+podman compose -f podman-compose.yml build agent
 podman rm -f notelite-agent notelite-agent-celery
-podman-compose up -d agent agent-celery
+podman compose -f podman-compose.yml up -d agent agent-celery
 podman logs --tail 20 notelite-backend-celery
 ### Verify all 8 containers are up
 podman ps --format "table {{.Names}}\t{{.Status}}"
 
 # Fix backend-celery (separate image from backend)
-podman-compose build --no-cache backend-celery
+podman compose -f podman-compose.yml build --no-cache backend-celery
 podman rm -f notelite-backend-celery
-podman-compose up -d backend-celery
+podman compose -f podman-compose.yml up -d backend-celery
 
 # Fix inference (static build, no .so needed)
 podman rm -f notelite-inference
-podman-compose build inference
-podman-compose up -d inference
+podman compose -f podman-compose.yml build inference
+podman compose -f podman-compose.yml up -d inference
 
 ```bash
 podman ps -a --filter name=notelite-inference --format "table {{.Names}}\t{{.Status}}"
 podman ps -a --filter name=notelite-inference
 
 cd /Users/rbhaviri/Desktop/_others/simpleNote/v2
-podman-compose up -d redis postgres qdrant
+podman compose -f podman-compose.yml up -d redis postgres qdrant
 
 
 podman stop myredis mypostgres nl-qdrant
 podman stop notelite-backend notelite-backend-celery notelite-agent notelite-agent-celery
 
 podman rm -f notelite-backend notelite-backend-celery notelite-agent notelite-agent-celery
-podman-compose build --no-cache backend backend-celery agent agent-celery
-podman-compose up -d backend backend-celery agent agent-celery
+podman compose -f podman-compose.yml build --no-cache backend backend-celery agent agent-celery
+podman compose -f podman-compose.yml up -d backend backend-celery agent agent-celery
 
 
-podman-compose build --no-cache backend backend-celery
-podman-compose build --no-cache agent
-podman-compose build inference        # static build, skips cached broken layers
+podman compose -f podman-compose.yml build --no-cache backend backend-celery
+podman compose -f podman-compose.yml build --no-cache agent
+podman compose -f podman-compose.yml build inference        # static build, skips cached broken layers
 
 
 podman rm -f notelite-backend notelite-backend-celery notelite-agent notelite-agent-celery
-podman-compose up -d agent agent-celery
+podman compose -f podman-compose.yml up -d agent agent-celery
 
 
 > podman ps --format "table {{.Names}}\t{{.Status}}"
@@ -123,10 +123,13 @@ is it too complicated? why couldn't you implement chat and stream feature proper
 ### STARTUP STEPS
 - podman machine start
 - cd simpleNote/v2
-- podman-compose up -d
+- podman compose -f podman-compose.yml up -d
 - podman ps
 - npm run dev
-- cd notelite_inference && ./build/inference_api
+- cd notelite_inference
+- chmod +x ./setup_llama.sh && ./setup_llama.sh
+- Terminal 1: cd build && source ../.env.llama && ./inference_api --port=8081 --mode=summarization
+- Terminal 2: cd build && source ../.env.llama && ./inference_api --port=8082 --mode=summarization
 - podman logs -f --tail 20 notelite-backend -> note apis
 - podman logs -f --tail 20 notelite-agent-celery -> ingestion
 

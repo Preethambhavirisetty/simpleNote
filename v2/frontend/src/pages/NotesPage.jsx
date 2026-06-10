@@ -1,13 +1,26 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useNoteStore } from '@/stores/noteStore'
+import { useFolderStore } from '@/stores/folderStore'
 
-// ---------- helpers ----------
+const AUTOSAVE_MS = 1200
+
+const icons = {
+  search: <><circle cx="11" cy="11" r="6" /><path strokeLinecap="round" d="m16 16 4 4" /></>,
+  plus: <path strokeLinecap="round" d="M12 5v14m7-7H5" />,
+  pin: <path strokeLinecap="round" strokeLinejoin="round" d="M9 4h6l-1 6 3 3v1H7v-1l3-3-1-6zm3 10v6" />,
+  trash: <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.9 12a2 2 0 01-2 2H7.9a2 2 0 01-2-2L5 7m5 4v6m4-6v6m1-10V4h-6v3M4 7h16" />,
+  note: <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h8M8 10h8M8 14h5m5 7H6a2 2 0 01-2-2V5a2 2 0 012-2h8l4 4v10a2 2 0 01-2 2z" />,
+  back: <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />,
+}
+
+function Icon({ name, className = 'h-4 w-4' }) {
+  return <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">{icons[name]}</svg>
+}
 
 function parseContent(raw) {
   if (raw && typeof raw === 'object' && raw.type === 'doc') return raw
@@ -15,342 +28,38 @@ function parseContent(raw) {
     try {
       const parsed = JSON.parse(raw)
       if (parsed?.type === 'doc') return parsed
-    } catch { /* fall through */ }
-    // Plain-text fallback (old notes saved before TipTap)
-    return {
-      type: 'doc',
-      content: raw.split('\n').map((line) => ({
-        type: 'paragraph',
-        content: line ? [{ type: 'text', text: line }] : [],
-      })),
-    }
+    } catch { /* plain text fallback */ }
+    return { type: 'doc', content: raw.split('\n').map((line) => ({ type: 'paragraph', content: line ? [{ type: 'text', text: line }] : [] })) }
   }
   return { type: 'doc', content: [{ type: 'paragraph' }] }
 }
 
-// ---------- Icons ----------
-
-function ThreeDotsIcon() {
-  return (
-    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-      <circle cx="4" cy="10" r="1.5" />
-      <circle cx="10" cy="10" r="1.5" />
-      <circle cx="16" cy="10" r="1.5" />
-    </svg>
-  )
-}
-
-// ---------- Floating selection toolbar ----------
-
-function useSelectionRect(editor) {
-  const [rect, setRect] = useState(null)
-
-  useEffect(() => {
-    if (!editor) return
-
-    const update = () => {
-      // Wait one frame so the DOM selection is up to date
-      requestAnimationFrame(() => {
-        const { from, to } = editor.state.selection
-        if (from === to) { setRect(null); return }
-
-        const sel = window.getSelection()
-        if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { setRect(null); return }
-
-        const r = sel.getRangeAt(0).getBoundingClientRect()
-        setRect(r.width > 0 ? r : null)
-      })
-    }
-
-    editor.on('selectionUpdate', update)
-    editor.on('focus', update)
-    editor.on('blur', () => setRect(null))
-
-    return () => {
-      editor.off('selectionUpdate', update)
-      editor.off('focus', update)
-      editor.off('blur', () => setRect(null))
-    }
-  }, [editor])
-
-  return rect
-}
-
-function BubbleBtn({ onClick, isActive, title, children }) {
-  return (
-    <button
-      // preventDefault keeps editor focus when clicking the button
-      onMouseDown={(e) => { e.preventDefault(); onClick() }}
-      title={title}
-      className={`px-2.5 py-1.5 text-xs font-medium transition-colors ${
-        isActive
-          ? 'bg-zinc-200 dark:bg-zinc-700 text-indigo-600 dark:text-indigo-400'
-          : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-function BubbleDivider() {
-  return <span className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 shrink-0" />
-}
-
-function FloatingToolbar({ editor }) {
-  const rect = useSelectionRect(editor)
-
-  if (!rect || !editor) return null
-
-  return createPortal(
-    <div
-      style={{
-        position: 'fixed',
-        top: rect.top - 8,
-        left: rect.left + rect.width / 2,
-        transform: 'translateX(-50%) translateY(-100%)',
-        zIndex: 9999,
-      }}
-    >
-      <div className="flex items-center bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-2xl overflow-hidden">
-        <BubbleBtn onClick={() => editor.chain().focus().toggleBold().run()} isActive={editor.isActive('bold')} title="Bold (⌘B)">
-          <strong>B</strong>
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleItalic().run()} isActive={editor.isActive('italic')} title="Italic (⌘I)">
-          <em>I</em>
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleUnderline().run()} isActive={editor.isActive('underline')} title="Underline (⌘U)">
-          <span className="underline">U</span>
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleStrike().run()} isActive={editor.isActive('strike')} title="Strikethrough">
-          <span className="line-through">S</span>
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleCode().run()} isActive={editor.isActive('code')} title="Inline code">
-          {'</>'}
-        </BubbleBtn>
-
-        <BubbleDivider />
-
-        <BubbleBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} isActive={editor.isActive('heading', { level: 1 })} title="Heading 1">
-          H1
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} isActive={editor.isActive('heading', { level: 2 })} title="Heading 2">
-          H2
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} isActive={editor.isActive('heading', { level: 3 })} title="Heading 3">
-          H3
-        </BubbleBtn>
-
-        <BubbleDivider />
-
-        <BubbleBtn onClick={() => editor.chain().focus().toggleBulletList().run()} isActive={editor.isActive('bulletList')} title="Bullet list">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </BubbleBtn>
-        <BubbleBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} isActive={editor.isActive('orderedList')} title="Numbered list">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-          </svg>
-        </BubbleBtn>
-      </div>
-    </div>,
-    document.body,
-  )
-}
-
-// ---------- NoteList ----------
-
-function NoteList({ notes, activeId, isLoading, onSelect, onNew, onDelete }) {
-  const [openMenuId, setOpenMenuId] = useState(null)
-
-  useEffect(() => {
-    if (!openMenuId) return
-    const handler = (e) => {
-      if (!e.target.closest('[data-note-menu]')) setOpenMenuId(null)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [openMenuId])
-
-  return (
-    <div className="w-64 flex flex-col border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 shrink-0">
-      <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Notes</h2>
-        <button
-          onClick={onNew}
-          title="New note"
-          className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 w-6 h-6 flex items-center justify-center rounded transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {isLoading && (
-          <div className="flex justify-center mt-8">
-            <span className="w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
-
-        {!isLoading && notes.length === 0 && (
-          <p className="text-xs text-zinc-500 dark:text-zinc-600 text-center mt-10 px-4">
-            No notes yet — click + to create one
-          </p>
-        )}
-
-        {notes.map((note) => (
-          <div key={note.id} className="relative group border-b border-zinc-200/60 dark:border-zinc-800/50">
-            <button
-              onClick={() => note.id && onSelect(note.id)}
-              className={`w-full text-left px-4 py-3 pr-8 transition-colors ${
-                activeId === note.id
-                  ? 'bg-zinc-100 dark:bg-zinc-800'
-                  : 'hover:bg-zinc-100/70 dark:hover:bg-zinc-800/40'
-              }`}
-            >
-              <p className="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate">{note.title || 'Untitled'}</p>
-              {note.description && (
-                <p className="text-xs text-zinc-500 mt-0.5 truncate">{note.description}</p>
-              )}
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-600 mt-1">
-                {new Date(note.updated_at ?? note.created_at).toLocaleDateString()}
-              </p>
-            </button>
-
-            <button
-              data-note-menu
-              onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === note.id ? null : note.id) }}
-              className={`absolute right-2 top-3 w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
-                openMenuId === note.id ? 'opacity-100 text-zinc-600 dark:text-zinc-300' : 'opacity-0 group-hover:opacity-100 text-zinc-400 dark:text-zinc-500'
-              }`}
-            >
-              <ThreeDotsIcon />
-            </button>
-
-            {openMenuId === note.id && (
-              <div
-                data-note-menu
-                className="absolute right-2 top-8 z-50 mt-0.5 w-28 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl overflow-hidden"
-              >
-                <button
-                  onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); onDelete(note.id) }}
-                  className="w-full text-left px-3 py-2 text-xs text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ---------- NoteEditor ----------
-
-const AUTOSAVE_MS = 1200
-
-function NoteEditor({ note, onSave, isSaving }) {
-  const [title, setTitle] = useState('')
-  const [dirty, setDirty] = useState(false)
-  const timerRef = useRef(null)
-  const titleRef = useRef('')
-  const onSaveRef = useRef(onSave)
-  useEffect(() => { onSaveRef.current = onSave }, [onSave])
-
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
-      Underline,
-      Placeholder.configure({ placeholder: 'Start writing…' }),
-    ],
-    content: { type: 'doc', content: [{ type: 'paragraph' }] },
-    immediatelyRender: false,
-    editorProps: {
-      attributes: { class: 'tiptap-note focus:outline-none' },
-    },
-    onUpdate: ({ editor }) => {
-      setDirty(true)
-      clearTimeout(timerRef.current)
-      const json = editor.getJSON()
-      // console.log("SAMPLE JSON", json);
-      timerRef.current = setTimeout(() => {
-        onSaveRef.current({ title: titleRef.current, content: json })
-        setDirty(false)
-      }, AUTOSAVE_MS)
-    },
-  })
-
-  // Load content when switching notes
-  useEffect(() => {
-    if (!note || !editor || editor.isDestroyed) return
-    clearTimeout(timerRef.current)
-    setDirty(false)
-    const t = note.title ?? ''
-    setTitle(t)
-    titleRef.current = t
-    editor.commands.setContent(parseContent(note.content ?? note.content_json), false)
-  }, [note?.id, editor])
-
-  useEffect(() => { titleRef.current = title }, [title])
-  useEffect(() => () => clearTimeout(timerRef.current), [])
-
-  const handleTitleChange = (e) => {
-    const val = e.target.value
-    setTitle(val)
-    titleRef.current = val
-    setDirty(true)
-    clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => {
-      onSaveRef.current({ title: titleRef.current, content: editor?.getJSON() })
-      setDirty(false)
-    }, AUTOSAVE_MS)
+function textFromContent(content) {
+  if (typeof content === 'string') return content
+  const parts = []
+  const walk = (node) => {
+    if (node?.text) parts.push(node.text)
+    node?.content?.forEach(walk)
   }
-
-  if (!note) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-zinc-400 dark:text-zinc-600">Select a note or create a new one</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex-1 flex flex-col min-w-0">
-      {/* Title bar */}
-      <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-3 shrink-0">
-        <input
-          value={title}
-          onChange={handleTitleChange}
-          placeholder="Untitled"
-          className="flex-1 bg-transparent text-lg font-semibold text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none"
-        />
-        <span className="text-[11px] text-zinc-400 dark:text-zinc-600 shrink-0">
-          {isSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}
-        </span>
-      </div>
-
-      <FloatingToolbar editor={editor} />
-
-      {/* Editor content */}
-      <div className="flex-1 overflow-y-auto px-6 py-5">
-        <EditorContent editor={editor} />
-      </div>
-    </div>
-  )
+  walk(content)
+  return parts.join(' ')
 }
 
-// ---------- Page ----------
+function relativeTime(date) {
+  if (!date) return 'Just now'
+  const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
+  if (seconds < 60) return 'Just now'
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} hr`
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)} day`
+  return new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 export default function NotesPage() {
-  const { folderId: folderParam } = useParams()
+  const { folderId } = useParams()
   const [searchParams] = useSearchParams()
-  const raw = folderParam ?? searchParams.get('folder')
-  const folderId = raw && raw !== 'undefined' ? raw : null
+  const navigate = useNavigate()
+  const noteId = searchParams.get('note')
 
   const notes = useNoteStore((s) => s.notes)
   const activeNote = useNoteStore((s) => s.activeNote)
@@ -362,37 +71,247 @@ export default function NotesPage() {
   const updateNote = useNoteStore((s) => s.updateNote)
   const deleteNote = useNoteStore((s) => s.deleteNote)
   const clearActiveNote = useNoteStore((s) => s.clearActiveNote)
+  const folders = useFolderStore((s) => (Array.isArray(s.folders) ? s.folders : []))
+  const createFolder = useFolderStore((s) => s.createFolder)
 
+  const [search, setSearch] = useState('')
+  const currentFolder = folders.find((folder) => String(folder.id) === String(folderId))
+
+  useEffect(() => { fetchNotes() }, [fetchNotes])
   useEffect(() => {
-    clearActiveNote()
-    fetchNotes(folderId ? { folder_id: folderId } : {})
-  }, [folderId, fetchNotes, clearActiveNote])
+    if (noteId) openNote(noteId)
+    else clearActiveNote()
+  }, [noteId, openNote, clearActiveNote])
 
-  const handleNew = useCallback(async () => {
-    await createNote({ folder_id: folderId })
-  }, [folderId, createNote])
+  const visibleNotes = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return notes
+      .filter((note) => !folderId || String(note.folder_id) === String(folderId))
+      .filter((note) => !query || `${note.title} ${note.description ?? ''} ${note.content_text ?? textFromContent(note.content)}`.toLowerCase().includes(query))
+      .sort((a, b) => Number(Boolean(b.is_pinned)) - Number(Boolean(a.is_pinned)) || new Date(b.updated_at) - new Date(a.updated_at))
+  }, [folderId, notes, search])
 
-  const handleSave = useCallback(
-    (payload) => { if (activeNote?.id) updateNote(activeNote.id, payload) },
-    [activeNote, updateNote],
-  )
+  const openFromList = (id) => navigate(`${folderId ? `/folders/${folderId}` : '/notes'}?note=${id}`)
 
-  const handleDelete = useCallback(
-    async (noteId) => { await deleteNote(noteId) },
-    [deleteNote],
-  )
+  const handleNew = async () => {
+    let targetFolderId = folderId ?? folders[0]?.id
+    if (!targetFolderId) {
+      const result = await createFolder({ name: 'General' })
+      targetFolderId = result?.folder?.id
+    }
+    if (!targetFolderId) return
+    const result = await createNote({ folder_id: targetFolderId, title: 'Untitled note' })
+    if (result?.ok) navigate(`/folders/${targetFolderId}?note=${result.note.id}`)
+  }
+
+  const handleDelete = async (id) => {
+    await deleteNote(id)
+    if (String(id) === String(noteId)) navigate(folderId ? `/folders/${folderId}` : '/notes')
+  }
 
   return (
-    <div className="flex h-full">
-      <NoteList
-        notes={notes}
-        activeId={activeNote?.id}
+    <div className="notes-desk h-full">
+      <NoteBrowser
+        title={currentFolder?.name || 'All notes'}
+        notes={visibleNotes}
+        activeId={noteId}
+        search={search}
+        setSearch={setSearch}
         isLoading={isLoading}
-        onSelect={openNote}
+        onSelect={openFromList}
         onNew={handleNew}
         onDelete={handleDelete}
+        onPin={(note) => updateNote(note.id, { is_pinned: !note.is_pinned })}
       />
-      <NoteEditor note={activeNote} onSave={handleSave} isSaving={isSaving} />
+      <NoteEditor
+        note={activeNote}
+        isSaving={isSaving}
+        onSave={(payload) => activeNote?.id && updateNote(activeNote.id, payload)}
+        onBack={() => navigate(folderId ? `/folders/${folderId}` : '/notes')}
+        onDelete={() => activeNote?.id && handleDelete(activeNote.id)}
+      />
     </div>
+  )
+}
+
+function NoteBrowser({ title, notes, activeId, search, setSearch, isLoading, onSelect, onNew, onDelete, onPin }) {
+  return (
+    <section className={`notes-browser ${activeId ? 'notes-browser-has-selection' : ''}`}>
+      <div className="notes-browser-header">
+        <div>
+          <p className="workspace-faint text-[10px] font-semibold uppercase tracking-[0.16em]">Workspace</p>
+          <h1 className="workspace-primary mt-1 text-2xl font-semibold tracking-[-0.04em]">{title}</h1>
+        </div>
+        <button onClick={onNew} className="note-new-button" title="Create note"><Icon name="plus" /></button>
+      </div>
+
+      <label className="notes-search">
+        <Icon name="search" className="h-4 w-4 shrink-0" />
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search notes..." />
+        {search && <button onClick={() => setSearch('')} className="workspace-faint text-xs">Clear</button>}
+      </label>
+
+      <div className="workspace-scroll flex-1 overflow-y-auto px-4 pb-5">
+        {isLoading && notes.length === 0 && <div className="flex justify-center py-12"><span className="note-spinner" /></div>}
+        {!isLoading && notes.length === 0 && (
+          <button onClick={onNew} className="notes-empty-card">
+            <span className="notes-empty-icon"><Icon name="note" className="h-5 w-5" /></span>
+            <span className="workspace-primary text-sm font-medium">Start a fresh note</span>
+            <span className="workspace-faint mt-1 text-xs">Your ideas will appear here.</span>
+          </button>
+        )}
+        <div className="space-y-3">
+          {notes.map((note, index) => (
+            <NoteCard key={note.id} note={note} index={index} active={String(activeId) === String(note.id)} onSelect={onSelect} onDelete={onDelete} onPin={onPin} />
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function NoteCard({ note, index, active, onSelect, onDelete, onPin }) {
+  const preview = note.description || note.content_text || textFromContent(note.content) || 'Start writing to bring this note to life.'
+  return (
+    <article onClick={() => onSelect(note.id)} className={`note-card group ${active ? 'note-card-active' : ''}`} style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="workspace-primary truncate text-sm font-semibold">{note.title || 'Untitled note'}</h2>
+          <p className="workspace-muted mt-2 line-clamp-2 text-xs leading-5">{preview}</p>
+        </div>
+        <span className={`note-card-dot ${note.is_pinned ? 'note-card-dot-pinned' : ''}`} />
+      </div>
+      {note.tags?.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {note.tags.slice(0, 3).map((tag) => <span key={tag.id} className="note-tag">#{tag.name}</span>)}
+        </div>
+      )}
+      <div className="mt-4 flex items-center justify-between">
+        <span className="workspace-faint text-[10px]">{relativeTime(note.updated_at ?? note.created_at)}</span>
+        <div className="note-card-actions">
+          <button onClick={(event) => { event.stopPropagation(); onPin(note) }} className={note.is_pinned ? 'text-[var(--accent)]' : ''} title={note.is_pinned ? 'Unpin note' : 'Pin note'}><Icon name="pin" className="h-3.5 w-3.5" /></button>
+          <button onClick={(event) => { event.stopPropagation(); onDelete(note.id) }} className="hover:text-red-500" title="Delete note"><Icon name="trash" className="h-3.5 w-3.5" /></button>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
+  const [title, setTitle] = useState('')
+  const [dirty, setDirty] = useState(false)
+  const timerRef = useRef(null)
+  const titleRef = useRef('')
+  const noteSnapshotRef = useRef(note)
+  const onSaveRef = useRef(onSave)
+  useEffect(() => { noteSnapshotRef.current = note }, [note])
+  useEffect(() => { onSaveRef.current = onSave }, [onSave])
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      Underline,
+      Placeholder.configure({ placeholder: 'Start writing your idea...' }),
+    ],
+    content: { type: 'doc', content: [{ type: 'paragraph' }] },
+    immediatelyRender: false,
+    editorProps: { attributes: { class: 'tiptap-note note-writing-canvas focus:outline-none' } },
+    onUpdate: ({ editor: instance }) => {
+      setDirty(true)
+      clearTimeout(timerRef.current)
+      const content = instance.getJSON()
+      timerRef.current = setTimeout(() => {
+        onSaveRef.current({ title: titleRef.current, content })
+        setDirty(false)
+      }, AUTOSAVE_MS)
+    },
+  })
+
+  useEffect(() => {
+    const selectedNote = noteSnapshotRef.current
+    if (!selectedNote || !editor || editor.isDestroyed) return
+    clearTimeout(timerRef.current)
+    const nextTitle = selectedNote.title ?? ''
+    titleRef.current = nextTitle
+    editor.commands.setContent(parseContent(selectedNote.content), false)
+    queueMicrotask(() => {
+      setTitle(nextTitle)
+      setDirty(false)
+    })
+  }, [note?.id, editor])
+
+  useEffect(() => () => clearTimeout(timerRef.current), [])
+
+  const handleTitle = (event) => {
+    const value = event.target.value
+    setTitle(value)
+    titleRef.current = value
+    setDirty(true)
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      onSaveRef.current({ title: value, content: editor?.getJSON() })
+      setDirty(false)
+    }, AUTOSAVE_MS)
+  }
+
+  if (!note) return <EditorWelcome />
+
+  return (
+    <section className="note-editor-panel">
+      <div className="note-editor-topbar">
+        <button onClick={onBack} className="note-mobile-back" title="Back to notes"><Icon name="back" /></button>
+        <span className="save-status"><span className={`save-dot ${dirty || isSaving ? 'save-dot-working' : ''}`} />{isSaving ? 'Saving' : dirty ? 'Unsaved' : 'Saved'}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={onDelete} className="editor-icon-button hover:text-red-500" title="Delete note"><Icon name="trash" /></button>
+          <button className="editor-icon-button" title="More options">•••</button>
+        </div>
+      </div>
+
+      <EditorToolbar editor={editor} />
+
+      <div className="workspace-scroll flex-1 overflow-y-auto">
+        <div className="note-page">
+          <div className="mb-6 flex flex-wrap gap-2">
+            {note.tags?.map((tag) => <span key={tag.id} className="note-tag">#{tag.name}</span>)}
+            {note.tags?.length === 0 && <span className="workspace-faint text-[11px]">Tags will appear here</span>}
+          </div>
+          <input value={title} onChange={handleTitle} placeholder="Untitled note" className="note-title-input" />
+          <div className="workspace-faint mb-9 mt-3 flex items-center gap-2 text-[10px]">
+            <span>Last edited {relativeTime(note.updated_at)}</span><span>•</span><span>Autosaved</span>
+          </div>
+          <EditorContent editor={editor} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function EditorToolbar({ editor }) {
+  if (!editor) return null
+  const controls = [
+    ['B', 'Bold', () => editor.chain().focus().toggleBold().run(), editor.isActive('bold')],
+    ['I', 'Italic', () => editor.chain().focus().toggleItalic().run(), editor.isActive('italic')],
+    ['U', 'Underline', () => editor.chain().focus().toggleUnderline().run(), editor.isActive('underline')],
+    ['H1', 'Heading 1', () => editor.chain().focus().toggleHeading({ level: 1 }).run(), editor.isActive('heading', { level: 1 })],
+    ['H2', 'Heading 2', () => editor.chain().focus().toggleHeading({ level: 2 }).run(), editor.isActive('heading', { level: 2 })],
+    ['• List', 'Bullet list', () => editor.chain().focus().toggleBulletList().run(), editor.isActive('bulletList')],
+    ['1. List', 'Numbered list', () => editor.chain().focus().toggleOrderedList().run(), editor.isActive('orderedList')],
+    ['</>', 'Code', () => editor.chain().focus().toggleCodeBlock().run(), editor.isActive('codeBlock')],
+  ]
+  return (
+    <div className="editor-toolbar workspace-scroll">
+      {controls.map(([label, title, action, active]) => <button key={title} onClick={action} title={title} className={active ? 'editor-tool-active' : ''}>{label}</button>)}
+    </div>
+  )
+}
+
+function EditorWelcome() {
+  return (
+    <section className="note-editor-panel items-center justify-center text-center">
+      <div className="editor-welcome-icon">✦</div>
+      <p className="workspace-faint mt-6 text-[10px] font-semibold uppercase tracking-[0.18em]">A quiet place to think</p>
+      <h2 className="workspace-primary mt-3 text-3xl font-semibold tracking-[-0.04em]">Pick a note and start writing.</h2>
+      <p className="workspace-muted mt-3 max-w-sm text-sm leading-6">Select a card from the left or create a new note. Changes save automatically as you write.</p>
+    </section>
   )
 }

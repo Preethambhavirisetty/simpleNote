@@ -1,0 +1,164 @@
+import { Link } from 'react-router-dom'
+import noteliteIcon from '@/assets/notelite_icon.png'
+
+const features = [
+  {
+    title: 'Write without friction',
+    copy: 'A calm, flexible editor for quick thoughts, long-form notes, and everything between.',
+    icon: '✦',
+  },
+  {
+    title: 'Ask your notes',
+    copy: 'Turn your personal knowledge into clear answers with conversations grounded in your writing.',
+    icon: '⌁',
+  },
+  {
+    title: 'Keep ideas connected',
+    copy: 'Folders, tags, and intelligent retrieval keep the right context close when you need it.',
+    icon: '◎',
+  },
+]
+
+export default function HomePage() {
+  return (
+    <div className="landing-page min-h-screen overflow-hidden bg-[#070807] text-white">
+      <div className="landing-glow landing-glow-one" />
+      <div className="landing-glow landing-glow-two" />
+
+      <header className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-10">
+        <Link to="/" className="flex items-center gap-2.5">
+          <img src={noteliteIcon} alt="" className="h-10 w-10 rounded-xl" />
+          <span className="text-lg font-semibold tracking-tight">NoteLite</span>
+        </Link>
+
+        <nav className="hidden items-center gap-8 text-sm text-zinc-400 md:flex">
+          <a href="#features" className="hover:text-white">Features</a>
+          <a href="#workflow" className="hover:text-white">How it works</a>
+          <a href="#about" className="hover:text-white">About</a>
+        </nav>
+
+        <div className="flex items-center gap-2">
+          <Link to="/login" className="rounded-full px-4 py-2 text-sm text-zinc-300 hover:bg-white/5 hover:text-white">
+            Sign in
+          </Link>
+          <Link to="/register" className="rounded-full bg-[#b8ff67] px-5 py-2.5 text-sm font-semibold text-[#10140d] hover:bg-[#ccff8f]">
+            Get started
+          </Link>
+        </div>
+      </header>
+
+      <main className="relative z-10">
+        <section className="mx-auto grid min-h-[76vh] max-w-7xl items-center gap-14 px-6 pb-20 pt-14 lg:grid-cols-[1.02fr_0.98fr] lg:px-10 lg:pt-20">
+          <div className="max-w-2xl">
+            <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#b8ff67]/20 bg-[#b8ff67]/10 px-3 py-1.5 text-xs font-medium text-[#caff8c]">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#b8ff67]" />
+              Your notes, now more useful
+            </div>
+            <h1 className="text-5xl font-semibold leading-[1.02] tracking-[-0.055em] sm:text-6xl lg:text-7xl">
+              Think clearly.
+              <span className="block text-zinc-500">Remember everything.</span>
+            </h1>
+            <p className="mt-7 max-w-xl text-base leading-7 text-zinc-400 sm:text-lg">
+              NoteLite brings focused writing and intelligent conversation into one private workspace,
+              so your best ideas never get buried.
+            </p>
+            <div className="mt-9 flex flex-wrap items-center gap-3">
+              <Link to="/register" className="rounded-full bg-[#b8ff67] px-6 py-3 text-sm font-semibold text-[#10140d] shadow-[0_0_40px_rgba(184,255,103,0.18)] hover:bg-[#ccff8f]">
+                Start writing free
+              </Link>
+              <Link to="/login" className="rounded-full border border-white/10 bg-white/[0.04] px-6 py-3 text-sm font-medium text-zinc-200 hover:bg-white/[0.08]">
+                Open your workspace
+              </Link>
+            </div>
+            <div className="mt-10 flex items-center gap-5 text-xs text-zinc-500">
+              <span>No credit card</span>
+              <span className="h-1 w-1 rounded-full bg-zinc-700" />
+              <span>Built for focused thinking</span>
+              <span className="h-1 w-1 rounded-full bg-zinc-700" />
+              <span>AI grounded in your notes</span>
+            </div>
+          </div>
+
+          <WorkspacePreview />
+        </section>
+
+        <section id="features" className="mx-auto max-w-7xl px-6 pb-24 lg:px-10">
+          <div className="grid gap-4 md:grid-cols-3">
+            {features.map((feature) => (
+              <article key={feature.title} className="rounded-[28px] border border-white/[0.07] bg-white/[0.035] p-6 backdrop-blur">
+                <div className="mb-8 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#b8ff67]/10 text-lg text-[#b8ff67]">
+                  {feature.icon}
+                </div>
+                <h2 className="text-lg font-medium">{feature.title}</h2>
+                <p className="mt-2 text-sm leading-6 text-zinc-500">{feature.copy}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
+
+function WorkspacePreview() {
+  return (
+    <div className="relative mx-auto w-full max-w-xl">
+      <div className="absolute -inset-6 rounded-[40px] bg-[#b8ff67]/[0.045] blur-2xl" />
+      <div className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[#111311] p-3 shadow-2xl shadow-black/50">
+        <div className="flex min-h-[480px] overflow-hidden rounded-[22px] border border-white/[0.06] bg-[#171917]">
+          <div className="hidden w-36 shrink-0 border-r border-white/[0.06] bg-[#0c0d0c] p-3 sm:block">
+            <div className="mb-8 flex items-center gap-2 text-[10px] font-semibold">
+              <div className="h-5 w-5 rounded-lg bg-[#b8ff67]" />
+              NoteLite
+            </div>
+            <div className="rounded-lg bg-[#b8ff67] px-3 py-2 text-[8px] font-semibold text-black">+ New chat</div>
+            <div className="mt-6 space-y-3 text-[8px] text-zinc-500">
+              <p className="text-zinc-300">Explore notes</p>
+              <p>All notes</p>
+              <p>Favorites</p>
+              <p>Settings</p>
+            </div>
+            <p className="mb-3 mt-8 text-[7px] uppercase tracking-widest text-zinc-700">Recent chats</p>
+            <div className="space-y-3 text-[7px] text-zinc-500">
+              <p className="truncate text-[#b8ff67]">Plan the product launch</p>
+              <p className="truncate">Summarize research ideas</p>
+              <p className="truncate">Weekly reflections</p>
+            </div>
+          </div>
+          <div className="flex flex-1 flex-col p-5">
+            <div className="flex items-center justify-between border-b border-white/[0.06] pb-4">
+              <div>
+                <p className="text-[9px] text-zinc-600">Conversation</p>
+                <p className="mt-1 text-xs">Plan the product launch</p>
+              </div>
+              <div className="h-7 w-7 rounded-full bg-[#b8ff67]/20" />
+            </div>
+            <div className="flex-1 space-y-5 pt-6">
+              <div className="ml-auto max-w-[78%] rounded-2xl rounded-br-sm bg-white/[0.07] px-3 py-2.5 text-[8px] leading-4 text-zinc-300">
+                Pull together the strongest launch ideas from my notes.
+              </div>
+              <div className="max-w-[88%] text-[8px] leading-4 text-zinc-400">
+                <p className="mb-2 text-zinc-200">Here is a focused launch plan based on your notes:</p>
+                <div className="space-y-2 rounded-xl border border-white/[0.06] bg-black/20 p-3">
+                  <p><span className="text-[#b8ff67]">01</span> Lead with the personal knowledge story.</p>
+                  <p><span className="text-[#b8ff67]">02</span> Show the writing-to-answer workflow.</p>
+                  <p><span className="text-[#b8ff67]">03</span> Invite early users into a focused beta.</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/[0.07] bg-white/[0.04] p-3">
+              <p className="text-[8px] text-zinc-600">Ask anything about your notes...</p>
+              <div className="mt-3 flex justify-between">
+                <div className="flex gap-1.5">
+                  <span className="rounded-full bg-white/[0.05] px-2 py-1 text-[6px] text-zinc-500">Brainstorm</span>
+                  <span className="rounded-full bg-white/[0.05] px-2 py-1 text-[6px] text-zinc-500">Summarize</span>
+                </div>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#b8ff67] text-[7px] text-black">↑</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

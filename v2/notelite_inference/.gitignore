@@ -1,6 +1,9 @@
 .env
+.env.llama
 models/
 build/
 _others/
 llama.cpp/
+include/cpp-httplib/
+include/json/
 docs/

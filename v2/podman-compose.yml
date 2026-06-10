@@ -1,9 +1,9 @@
 # notelite v2 — full-stack compose
 #
 # Usage:
-#   podman-compose up -d               # start everything
-#   podman-compose logs -f backend     # tail logs for one service
-#   podman-compose down                # stop and remove containers
+#   podman compose -f podman-compose.yml up -d               # start everything
+#   podman compose -f podman-compose.yml logs -f backend     # tail logs for one service
+#   podman compose -f podman-compose.yml down                # stop and remove containers
 #
 # Inference: run natively on the host (uses Metal, loads models in ~30s):
 #   cd notelite_inference/build && ./inference_api
@@ -11,7 +11,7 @@
 # Frontend: run on the host (Vite HMR doesn't work well in containers):
 #   cd frontend && npm install && npm run dev
 #
-# NOTE: depends_on is intentionally omitted — podman-compose blocks forever
+# NOTE: depends_on is intentionally omitted — podman compose blocks forever
 # waiting for service_started/service_healthy conditions. Services use
 # restart: unless-stopped to recover if a dependency isn't ready yet.
 #
@@ -104,8 +104,11 @@ services:
     command: ["python", "-m", "celery", "-A", "app.core.celery.celery_app", "worker",
               "--loglevel=info", "-Q", "note_size", "-c", "2", "-n", "backend-celery@%h",
               "--include", "app.tasks.notes"]
+    healthcheck:
+      disable: true
     environment:
       SECRET_KEY:             ${SECRET_KEY}
+      AGENT_API_KEY:          ${AGENT_API_KEY}
       POSTGRES_DB_URL:        *pg-url
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
@@ -137,7 +140,7 @@ services:
       BACKEND_API_URL:        http://backend:8000
       QDRANT_COLLECTION:      knowledge
       VECTOR_DB:              qdrant
-      EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
+      EMBEDDING_MODEL:        sentence-transformers/all-MiniLM-L6-v2
       SPARSE_EMBEDDING_MODEL: Qdrant/bm42-all-minilm-l6-v2-attentions
       EMBEDDING_DEVICE:       cpu
       RERANKER_MODEL:         cross-encoder/ms-marco-MiniLM-L-6-v2
@@ -182,7 +185,7 @@ services:
       BACKEND_API_URL:        http://backend:8000
       QDRANT_COLLECTION:      knowledge
       VECTOR_DB:              qdrant
-      EMBEDDING_MODEL:        BAAI/bge-large-en-v1.5
+      EMBEDDING_MODEL:        sentence-transformers/all-MiniLM-L6-v2
       SPARSE_EMBEDDING_MODEL: Qdrant/bm42-all-minilm-l6-v2-attentions
       EMBEDDING_DEVICE:       cpu
       RERANKER_MODEL:         cross-encoder/ms-marco-MiniLM-L-6-v2

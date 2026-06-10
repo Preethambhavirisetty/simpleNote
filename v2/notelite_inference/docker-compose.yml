@@ -8,8 +8,8 @@
 #   LLAMA_N_THREADS    – CPU threads (default: auto-detect)
 #
 # Usage:
-#   podman-compose up -d
-#   podman-compose logs -f summarization
+#   podman compose up -d
+#   podman compose logs -f summarization
 #
 # Model-to-purpose mapping:
 #   Mistral 7B  → summarization (summaries, query parsing, question generation)
