@@ -3,10 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.chat import retriever
+from app.services.chat.intent_classification import classify_intent
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.prompts import prompt
 
-from .schema import PromptPayload, RetrievalPayload
+from .schema import IntentPayload, PromptPayload, RetrievalPayload
 
 
 class RetrievalActionServices:
@@ -14,6 +15,17 @@ class RetrievalActionServices:
 
     def __init__(self, vector_store: QdrantVectorStore):
         self.vector_store = vector_store
+
+    def intent(self, payload: IntentPayload) -> dict[str, Any]:
+        """Classify a query without performing retrieval."""
+        result = classify_intent(payload.query)
+        return {
+            "intent": result.intent,
+            "confidence": result.confidence,
+            "raw_intent": result.raw_intent,
+            "used_fallback": result.used_fallback,
+            "reason": result.reason,
+        }
 
     def context(self, payload: RetrievalPayload) -> dict[str, Any]:
         history = [message.model_dump() for message in payload.history]
