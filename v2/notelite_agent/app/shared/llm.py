@@ -48,6 +48,8 @@ def llm_call_general(
     data = response.json()
 
     usage = data.get("usage") or {}
+    choices = data.get("choices") or []
+    finish_reason = (choices[0] or {}).get("finish_reason") if choices else None
     if usage:
         log.debug(
             "llm_usage",
@@ -55,6 +57,16 @@ def llm_call_general(
                 "prompt_tokens": usage.get("prompt_tokens"),
                 "completion_tokens": usage.get("completion_tokens"),
                 "total_tokens": usage.get("total_tokens"),
+                "finish_reason": finish_reason,
+            },
+        )
+    if finish_reason == "length":
+        log.warning(
+            "LLM completion reached max_tokens",
+            extra={
+                "model": model,
+                "max_tokens": max_tokens,
+                "completion_tokens": usage.get("completion_tokens"),
             },
         )
 

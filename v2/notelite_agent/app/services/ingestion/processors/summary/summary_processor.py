@@ -81,7 +81,10 @@ class SummaryProcessor:
         # Use a direct call only when both the document and estimated request fit safely.
         if total_tokens <= DIRECT_SUMMARY_THRESHOLD and direct_prompt_tokens <= direct_prompt_limit:
             try:
-                events.append(f"summary api call: direct, estimated prompt tokens: {direct_prompt_tokens}")
+                events.append(
+                    f"summary api call: direct, estimated prompt tokens: {direct_prompt_tokens}, "
+                    f"max output tokens: {FINAL_SUMMARY_MAX_TOKENS}"
+                )
                 summary = llm_call_general(
                     build_llm_messages(final_prompt, text),
                     max_tokens=FINAL_SUMMARY_MAX_TOKENS,
@@ -131,7 +134,10 @@ class SummaryProcessor:
             text = "\n\n".join(chunk_text(chunk) for chunk in group)
             prompt_tokens = estimate_summary_request_tokens(group_prompt, text)
             try:
-                events.append(f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}")
+                events.append(
+                    f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}, "
+                    f"max output tokens: {GROUP_SUMMARY_MAX_TOKENS}"
+                )
                 summary = llm_call_general(
                     build_llm_messages(group_prompt, text),
                     max_tokens=GROUP_SUMMARY_MAX_TOKENS,
@@ -167,7 +173,10 @@ class SummaryProcessor:
             return SummaryResult(summary=fallback_final_summary(summaries), api_calls=api_calls, events=events)
 
         try:
-            events.append(f"summary api call: final merge, estimated prompt tokens: {prompt_tokens}")
+            events.append(
+                f"summary api call: final merge, estimated prompt tokens: {prompt_tokens}, "
+                f"max output tokens: {FINAL_SUMMARY_MAX_TOKENS}"
+            )
             final_summary = llm_call_general(
                 build_llm_messages(final_prompt, llm_text),
                 max_tokens=FINAL_SUMMARY_MAX_TOKENS,
@@ -213,7 +222,10 @@ class SummaryProcessor:
             return SummaryResult(summary="", api_calls=0, events=events)
 
         try:
-            events.append(f"summary api call: chunk, estimated prompt tokens: {prompt_tokens}")
+            events.append(
+                f"summary api call: chunk, estimated prompt tokens: {prompt_tokens}, "
+                f"max output tokens: {GROUP_SUMMARY_MAX_TOKENS}"
+            )
             summary = llm_call_general(
                 build_llm_messages(group_prompt, stripped),
                 max_tokens=GROUP_SUMMARY_MAX_TOKENS,

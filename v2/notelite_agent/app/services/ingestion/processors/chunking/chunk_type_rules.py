@@ -218,6 +218,17 @@ def is_glossary_type(text: str, body: str) -> bool:
     if is_faq_type(text, body):
         return False
 
+    headings = [
+        line.strip()
+        for line in _lines(text)
+        if re.match(r"^#{1,6}\s+\S", line.strip())
+    ]
+    if headings and not any(
+        re.search(r"\b(?:glossary|definitions?|terms?)\b", heading, re.IGNORECASE)
+        for heading in headings
+    ):
+        return False
+
     lines = _non_empty_lines(text)
     if len(lines) < 2:
         return False

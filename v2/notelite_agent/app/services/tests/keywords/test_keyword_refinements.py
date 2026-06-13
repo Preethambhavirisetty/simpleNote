@@ -106,3 +106,12 @@ def test_entity_postprocessing_keeps_ambiguous_partial_person_name():
     )
 
     assert processor._postprocess_entity_selection(["Morgan"], candidates) == ["Morgan"]
+
+
+def test_table_headers_are_removed_from_chunk_terms():
+    processor = KeywordProcessor(use_llm_dedup=False)
+    content = "| Field | Value |\n| --- | --- |\n| Timeout | 30 |"
+
+    assert processor._filter_table_header_terms(
+        ["Field", "Timeout", "Value"], content, "table"
+    ) == ["Timeout"]

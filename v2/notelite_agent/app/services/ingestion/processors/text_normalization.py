@@ -67,6 +67,25 @@ def normalize_text_for_keyword_extraction(text: str) -> str:
     return clean
 
 
+def markdown_table_headers(text: str) -> list[str]:
+    """Return the first valid Markdown table row as its column headers."""
+    lines = [line for line in text.splitlines() if _is_markdown_table_line(line)]
+    rows = [
+        _split_table_cells(line)
+        for line in lines
+        if not MARKDOWN_TABLE_SEPARATOR_PATTERN.match(line.strip())
+    ]
+    return rows[0] if len(rows) >= 2 else []
+
+
+def without_markdown_heading_lines(text: str) -> str:
+    """Remove structural Markdown heading lines while preserving body text."""
+    return "\n".join(
+        line for line in text.splitlines()
+        if not _is_markdown_heading(line.strip())
+    ).strip()
+
+
 def _is_markdown_table_line(line: str) -> bool:
     clean = line.strip()
     return clean.count("|") >= 2 or bool(MARKDOWN_TABLE_SEPARATOR_PATTERN.match(clean))

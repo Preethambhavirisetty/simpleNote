@@ -1,4 +1,5 @@
 from app.services.ingestion.processors.summary.summary_processor import SummaryProcessor
+from app.services.ingestion.processors.summary.summary_helpers import repair_summary_format
 
 
 def test_direct_summary_repairs_useful_list_output(monkeypatch):
@@ -30,3 +31,9 @@ def test_direct_summary_still_rejects_useless_output(monkeypatch):
 
     assert result.summary == ""
     assert "summary discarded: low quality" in result.events
+
+
+def test_summary_format_repair_drops_incomplete_trailing_clause():
+    assert repair_summary_format(
+        "The release completed successfully. The team assigned follow-up work, and draft"
+    ) == "The release completed successfully."
