@@ -30,6 +30,10 @@ KEYWORD_MIN_CHUNK_TOKENS = int(require_env("KEYWORD_MIN_CHUNK_TOKENS", "5"))
 KEYWORD_EXTRACTION_MAX_CHUNKS = int(require_env("KEYWORD_EXTRACTION_MAX_CHUNKS", "10"))
 KEYWORD_EXTRACTION_MAX_TOKENS = int(require_env("KEYWORD_EXTRACTION_MAX_TOKENS", "3000"))
 KEYWORD_EXTRACTION_CONCURRENCY = int(require_env("KEYWORD_EXTRACTION_CONCURRENCY", "1"))
+INDEX_CODE_CHUNKS = require_env("INDEX_CODE_CHUNKS", "false").lower() == "true"
+INDEX_JSON_CHUNKS = require_env("INDEX_JSON_CHUNKS", "false").lower() == "true"
+MIN_INDEXABLE_TOKENS = int(require_env("MIN_INDEXABLE_TOKENS", "10"))
+MIN_SUMMARY_CHUNK_TOKENS = int(require_env("MIN_SUMMARY_CHUNK_TOKENS", "10"))
 
 
 # Embeddings — always served remotely from RunPod (no local GPU on EC2)
@@ -53,6 +57,17 @@ LLM_MODEL = os.getenv("LLM_MODEL")  # Legacy fallback for existing deployments.
 LLM_REASONER_MODEL = require_env("LLM_REASONER_MODEL", LLM_MODEL)
 LLM_SUMMARIZER_MODEL = require_env("LLM_SUMMARIZER_MODEL", LLM_MODEL)
 LLM_CONTEXT_WINDOW = int(require_env("LLM_CONTEXT_WINDOW"))
+
+# Summarization budgets
+DIRECT_SUMMARY_THRESHOLD = int(require_env("DIRECT_SUMMARY_THRESHOLD", "3000"))
+SUMMARY_GROUP_TOKEN_LIMIT = min(
+    int(require_env("SUMMARY_GROUP_TOKEN_LIMIT", str(int(LLM_CONTEXT_WINDOW * 0.75)))),
+    LLM_CONTEXT_WINDOW,
+)
+SUMMARY_GROUP_TOKEN_BUFFER = int(require_env("SUMMARY_GROUP_TOKEN_BUFFER", "128"))
+GROUP_SUMMARY_MAX_TOKENS = int(require_env("GROUP_SUMMARY_MAX_TOKENS", "150"))
+FINAL_SUMMARY_MAX_TOKENS = int(require_env("FINAL_SUMMARY_MAX_TOKENS", "384"))
+FALLBACK_SUMMARY_CHAR_CAP = int(require_env("FALLBACK_SUMMARY_CHAR_CAP", "1400"))
 
 
 # Queues and workers

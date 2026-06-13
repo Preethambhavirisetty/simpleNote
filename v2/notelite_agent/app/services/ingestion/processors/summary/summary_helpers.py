@@ -3,19 +3,20 @@ from __future__ import annotations
 import logging
 import re
 
-from app.core.config import LLM_CONTEXT_WINDOW
+from app.core.config import (
+    DIRECT_SUMMARY_THRESHOLD,
+    FALLBACK_SUMMARY_CHAR_CAP,
+    FINAL_SUMMARY_MAX_TOKENS,
+    GROUP_SUMMARY_MAX_TOKENS,
+    SUMMARY_GROUP_TOKEN_BUFFER,
+    SUMMARY_GROUP_TOKEN_LIMIT,
+)
 from app.services.ingestion.processors.chunking import TextChunk
 from app.shared.utils import count_tokens
 
 
 MIN_SUMMARY_WORDS = 5
 MIN_CHUNK_CHARS_FOR_SUMMARY = 30
-DIRECT_SUMMARY_THRESHOLD = 3000
-SUMMARY_GROUP_TOKEN_LIMIT = LLM_CONTEXT_WINDOW
-SUMMARY_GROUP_TOKEN_BUFFER = 128  # safety reserve for overhead and estimation error
-GROUP_SUMMARY_MAX_TOKENS = 150
-FINAL_SUMMARY_MAX_TOKENS = 260
-FALLBACK_SUMMARY_CHAR_CAP = 1400
 GENERIC_FALLBACK_SUMMARY = (
     "This document contains multi-topic journal entries covering software architecture, "
     "infrastructure, personal productivity, finance, health, home systems, technical hobbies, "
@@ -71,6 +72,26 @@ def is_bad_summary_format(text: str) -> bool:
     if stripped and stripped[-1] not in ".!?":
         return True
     return False
+
+
+def repair_summary_format(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        clean = re.sub(r"^\s*(?:[-*•·]|\d+[.)])\s*", "", clean).strip()
+        if clean:
+            lines.append(clean)
+
+    repaired = re.sub(r"\s+", " ", " ".join(lines)).strip()
+    if repaired and repaired[-1] not in ".!?":
+        completed = list(re.finditer(r"[.!?](?=\s|$)", repaired))
+        if completed:
+            repaired = repaired[: completed[-1].end()].strip()
+        else:
+            repaired += "."
+    return repaired
 
 def valid_summary(
     summary: str,

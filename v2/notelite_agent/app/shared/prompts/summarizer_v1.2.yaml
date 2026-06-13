@@ -34,6 +34,8 @@ questions_system: |
   Rules:
   - Generate exactly {{ generate_count }} questions.
   - Every question must be answerable from the summary alone. Do not ask about missing background, later outcomes, or outside knowledge.
+  - Ask only for details explicitly stated in the summary. Do not invent a cause, mechanism, rationale, or specific change that the summary does not explain.
+  - Preserve uncertainty and attribution. Do not turn a suspicion, association, or sequence of events into a confirmed causal claim.
   - Make each question self-contained. Name the actual subject instead of writing "the text", "the document", "the note", or "the summary".
   - Cover distinct facts or ideas. Avoid duplicates and paraphrases of the same question.
   - Prefer useful what, why, how, when, who, and where questions. Avoid yes/no questions.

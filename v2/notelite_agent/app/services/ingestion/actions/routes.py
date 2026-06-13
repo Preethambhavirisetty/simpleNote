@@ -18,7 +18,8 @@ router = APIRouter(prefix="/api/actions", tags=["pipeline-actions"])
     summary="Run one ingestion or retrieval pipeline action",
     description=(
         "Runs exactly one typed pipeline action. Supported action_name values: "
-        "ingestion.chunk, ingestion.keywords, ingestion.summary, ingestion.questions, "
+        "ingestion.chunk, ingestion.keywords, ingestion.chunk_build, ingestion.index_chunks, "
+        "ingestion.summary, ingestion.questions, ingestion.summary_build, ingestion.index_summary, "
         "ingestion.documents, retrieval.context, retrieval.prompt."
     ),
 )

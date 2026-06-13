@@ -25,7 +25,11 @@ from app.services.ingestion.processors.keywords.keyword_batcher import (
     extract_keywords_batched,
 )
 from app.services.ingestion.processors.keywords.terms import prune_keywords
-from app.services.ingestion.processors.text_normalization import normalize_text_for_keyword_extraction
+from app.services.ingestion.processors.text_normalization import (
+    markdown_table_headers,
+    normalize_text_for_keyword_extraction,
+    without_markdown_heading_lines,
+)
 from app.shared.llm import llm_call_general
 from app.shared.utils import build_llm_messages
 
@@ -111,7 +115,7 @@ class KeywordProcessor:
         prepared_chunks = []
         keyword_items = []
         entities_by_chunk: dict[str, list[str]] = {}
-        entity_items: list[tuple[str, str]] = []
+        entity_items: list[tuple[str, str, str, str]] = []
         entity_evidence: dict[str, dict[str, set[str] | list[str]]] = {}
 
         for index, chunk in enumerate(chunks):
@@ -119,7 +123,12 @@ class KeywordProcessor:
             extraction_text = self._extraction_text(content, chunk_type, metadata)
             entities_by_chunk[chunk_id] = []
             if self._should_extract_entities(extraction_text, chunk_type):
-                entity_items.append((chunk_id, extraction_text))
+                entity_items.append((
+                    chunk_id,
+                    without_markdown_heading_lines(extraction_text),
+                    content,
+                    chunk_type,
+                ))
 
             skip_reason = self._term_skip_reason(extraction_text, chunk_type, metadata)
             if skip_reason:
@@ -134,8 +143,11 @@ class KeywordProcessor:
                 )
             prepared_chunks.append((chunk, index, chunk_id, content, chunk_type, metadata))
 
-        entity_results = extract_entity_mentions_batch([text for _chunk_id, text in entity_items])
-        for (chunk_id, text), mentions in zip(entity_items, entity_results):
+        entity_results = extract_entity_mentions_batch(
+            [text for _chunk_id, text, _content, _type in entity_items]
+        )
+        for (chunk_id, text, content, chunk_type), mentions in zip(entity_items, entity_results):
+            mentions = self._filter_table_header_mentions(mentions, content, chunk_type)
             entities_by_chunk[chunk_id] = [mention.text for mention in mentions]
             for mention in mentions:
                 key = mention.text.lower()
@@ -168,11 +180,16 @@ class KeywordProcessor:
 
         chunk_results = []
         for chunk, index, chunk_id, content, chunk_type, metadata in prepared_chunks:
+            keywords = self._filter_table_header_terms(
+                keyword_result.keywords_by_chunk.get(chunk_id, []),
+                content,
+                chunk_type,
+            )
             chunk_results.append(
                 ChunkKeywordResult(
                     chunk_id=chunk_id,
                     content=content,
-                    keywords=keyword_result.keywords_by_chunk.get(chunk_id, []),
+                    keywords=keywords,
                     entities=entities_by_chunk.get(chunk_id, []),
                     chunk_type=chunk_type,
                     metadata=metadata,
@@ -242,6 +259,24 @@ class KeywordProcessor:
         start = max(0, position - radius)
         end = min(len(text), position + len(entity) + radius)
         return text[start:end].replace("\n", " ").strip()
+
+    @staticmethod
+    def _filter_table_header_terms(
+        terms: Sequence[str],
+        content: str,
+        chunk_type: str,
+    ) -> list[str]:
+        if chunk_type != ChunkType.TABLE.value:
+            return list(terms)
+        headers = {header.casefold() for header in markdown_table_headers(content)}
+        return [term for term in terms if term.casefold() not in headers]
+
+    @staticmethod
+    def _filter_table_header_mentions(mentions, content: str, chunk_type: str):
+        if chunk_type != ChunkType.TABLE.value:
+            return mentions
+        headers = {header.casefold() for header in markdown_table_headers(content)}
+        return [mention for mention in mentions if mention.text.casefold() not in headers]
 
     @staticmethod
     def _term_skip_reason(text: str, chunk_type: str, metadata: dict[str, Any]) -> str:

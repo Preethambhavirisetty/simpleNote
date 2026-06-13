@@ -10,3 +10,4 @@ decisions/
 _backup
 certs/
 v2_/
+*.txt

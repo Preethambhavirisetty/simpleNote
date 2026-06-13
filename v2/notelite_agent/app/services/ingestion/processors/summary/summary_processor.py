@@ -16,6 +16,7 @@ from app.services.ingestion.processors.summary.summary_helpers import (
     chunk_text,
     estimate_summary_request_tokens,
     fallback_final_summary,
+    repair_summary_format,
     summary_request_token_limit,
     valid_summary,
 )
@@ -80,7 +81,10 @@ class SummaryProcessor:
         # Use a direct call only when both the document and estimated request fit safely.
         if total_tokens <= DIRECT_SUMMARY_THRESHOLD and direct_prompt_tokens <= direct_prompt_limit:
             try:
-                events.append(f"summary api call: direct, estimated prompt tokens: {direct_prompt_tokens}")
+                events.append(
+                    f"summary api call: direct, estimated prompt tokens: {direct_prompt_tokens}, "
+                    f"max output tokens: {FINAL_SUMMARY_MAX_TOKENS}"
+                )
                 summary = llm_call_general(
                     build_llm_messages(final_prompt, text),
                     max_tokens=FINAL_SUMMARY_MAX_TOKENS,
@@ -90,11 +94,20 @@ class SummaryProcessor:
                 events.append(f"summary failed: direct ({self._failure_label(exc)})")
                 return SummaryResult(summary="", api_calls=1, events=events)
 
+            raw_summary = summary
             summary = valid_summary(
-                summary,
+                raw_summary,
                 reject_list_format=True,
                 require_complete_sentence=True,
             )
+            if not summary:
+                summary = valid_summary(
+                    repair_summary_format(raw_summary),
+                    reject_list_format=True,
+                    require_complete_sentence=True,
+                )
+                if summary:
+                    events.append("summary fallback: direct format repaired")
             events.append("summary completed: direct" if summary else "summary discarded: low quality")
             return SummaryResult(summary=summary, api_calls=1, events=events)
 
@@ -121,7 +134,10 @@ class SummaryProcessor:
             text = "\n\n".join(chunk_text(chunk) for chunk in group)
             prompt_tokens = estimate_summary_request_tokens(group_prompt, text)
             try:
-                events.append(f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}")
+                events.append(
+                    f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}, "
+                    f"max output tokens: {GROUP_SUMMARY_MAX_TOKENS}"
+                )
                 summary = llm_call_general(
                     build_llm_messages(group_prompt, text),
                     max_tokens=GROUP_SUMMARY_MAX_TOKENS,
@@ -157,7 +173,10 @@ class SummaryProcessor:
             return SummaryResult(summary=fallback_final_summary(summaries), api_calls=api_calls, events=events)
 
         try:
-            events.append(f"summary api call: final merge, estimated prompt tokens: {prompt_tokens}")
+            events.append(
+                f"summary api call: final merge, estimated prompt tokens: {prompt_tokens}, "
+                f"max output tokens: {FINAL_SUMMARY_MAX_TOKENS}"
+            )
             final_summary = llm_call_general(
                 build_llm_messages(final_prompt, llm_text),
                 max_tokens=FINAL_SUMMARY_MAX_TOKENS,
@@ -169,13 +188,20 @@ class SummaryProcessor:
             events.append(f"summary failed: final merge ({self._failure_label(exc)})")
             return SummaryResult(summary=summaries[0], api_calls=api_calls, events=events)
 
+        raw_final_summary = final_summary
         final_summary = valid_summary(
-            final_summary,
+            raw_final_summary,
             reject_list_format=True,
             require_complete_sentence=True,
         )
         if not final_summary:
-            events.append("summary fallback: final merge rejected")
+            final_summary = valid_summary(
+                repair_summary_format(raw_final_summary),
+                reject_list_format=True,
+                require_complete_sentence=True,
+            )
+            events.append("summary fallback: final merge format repaired" if final_summary else "summary fallback: final merge rejected")
+        if not final_summary:
             final_summary = fallback_final_summary(summaries)
         events.append("summary completed: hierarchical")
         return SummaryResult(summary=final_summary, api_calls=api_calls, events=events)
@@ -196,7 +222,10 @@ class SummaryProcessor:
             return SummaryResult(summary="", api_calls=0, events=events)
 
         try:
-            events.append(f"summary api call: chunk, estimated prompt tokens: {prompt_tokens}")
+            events.append(
+                f"summary api call: chunk, estimated prompt tokens: {prompt_tokens}, "
+                f"max output tokens: {GROUP_SUMMARY_MAX_TOKENS}"
+            )
             summary = llm_call_general(
                 build_llm_messages(group_prompt, stripped),
                 max_tokens=GROUP_SUMMARY_MAX_TOKENS,

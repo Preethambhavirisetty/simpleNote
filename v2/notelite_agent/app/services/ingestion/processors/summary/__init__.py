@@ -5,3 +5,5 @@ from app.services.ingestion.processors.summary.summary_processor import (
 )
 
 __all__ = ["QuestionsGenerator", "SummaryProcessor", "SummaryResult"]
+
+from app.services.ingestion.processors.summary.summarization_pipeline import SummarizationPipeline
