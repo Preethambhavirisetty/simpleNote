@@ -15,13 +15,17 @@ from .services import IngestionActionServices
 class IngestionActionController:
     """Dispatch ingestion pipeline test actions by name while keeping payloads typed."""
 
-    def __init__(self):
-        services = IngestionActionServices()
+    def __init__(self, vector_store: QdrantVectorStore | None = None):
+        services = IngestionActionServices(vector_store)
         self.handlers: dict[str, Callable[[Any], dict[str, Any]]] = {
             "ingestion.chunk": services.chunk,
             "ingestion.keywords": services.keywords,
+            "ingestion.chunk_build": services.chunk_build,
+            "ingestion.index_chunks": services.index_chunks,
             "ingestion.summary": services.summary,
             "ingestion.questions": services.questions,
+            "ingestion.summary_build": services.summary_build,
+            "ingestion.index_summary": services.index_summary,
             "ingestion.documents": services.documents,
         }
 
@@ -43,7 +47,7 @@ class PipelineActionController:
 
     def __init__(self, vector_store: QdrantVectorStore):
         self._controllers = {
-            "ingestion": IngestionActionController(),
+            "ingestion": IngestionActionController(vector_store),
             "retrieval": RetrievalActionController(vector_store),
         }
 

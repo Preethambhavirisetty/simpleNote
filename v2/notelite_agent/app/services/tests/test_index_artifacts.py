@@ -143,3 +143,82 @@ def test_vector_store_converts_internal_artifacts_at_boundary():
 
     assert SUMMARY_COLLECTION in store.client.upserts
     assert QUESTIONS_COLLECTION in store.client.upserts
+
+
+def test_ingestion_actions_replay_stage_three_contracts(monkeypatch):
+    from app.services.ingestion.actions.schema import (
+        ActionIndexChunk, ChunkBuildPayload, IndexChunksPayload, IndexSummaryPayload,
+        SummaryBuildPayload, SummaryPayload,
+    )
+    from app.services.ingestion.actions.services import IngestionActionServices
+
+    chunk_build = IngestionActionServices().chunk_build(ChunkBuildPayload(
+        user_id="u", folder_id="f", note_id="n",
+        chunks=[{
+            "chunk_id": "0", "content": "Body text with enough words for indexing.",
+            "chunk_type": "content", "keywords": ["Body"], "entities": [],
+            "metadata": {"heading_context": "Root", "has_heading_context": True, "token_count": 20},
+        }],
+    ))
+    index_chunk = chunk_build["chunks"][0]
+    assert index_chunk["embed_text"] == "Root\n\nBody text with enough words for indexing."
+
+    captured = {}
+    def fake_process(texts):
+        captured["texts"] = texts
+        return SummaryResult(summary="A useful summary.", api_calls=1, events=["summary done"])
+
+    monkeypatch.setattr(
+        "app.services.ingestion.processors.summary.summary_processor.SummaryProcessor.process",
+        lambda self, texts: fake_process(texts),
+    )
+    monkeypatch.setattr(
+        "app.services.ingestion.processors.summary.questions_generator.QuestionsGenerator.process",
+        lambda self, summary: ["What is summarized?"],
+    )
+
+    summary = IngestionActionServices().summary(SummaryPayload(
+        chunks=[ActionIndexChunk(**index_chunk)]
+    ))
+    assert captured["texts"] == [index_chunk["embed_text"]]
+    assert summary["summary"] == "A useful summary."
+    assert summary["questions"] == ["What is summarized?"]
+
+    artifacts = IngestionActionServices().summary_build(SummaryBuildPayload(
+        user_id="u", folder_id="f", note_id="n",
+        summary=summary["summary"], questions=summary["questions"],
+        top_keywords=["Body"], entities=[],
+    ))
+    assert artifacts["summary"]["embed_text"] == "A useful summary."
+    assert artifacts["questions"][0]["embed_text"] == "What is summarized?"
+
+    class FakeStore:
+        def __init__(self):
+            self.events = []
+            self.indexed_chunks = None
+            self.indexed_summary = None
+        def replace_index_chunks(self, doc_id, chunks):
+            self.indexed_chunks = (doc_id, chunks)
+            self.events = ["chunk vector ingestion completed"]
+        def ensure_collections(self):
+            self.events.append("collections ensured")
+        def upsert_summary_artifacts(self, artifacts):
+            self.indexed_summary = artifacts
+            self.events.extend(["summary vector upserted", "question vectors upserted: 1"])
+
+    store = FakeStore()
+    services = IngestionActionServices(store)
+    assert services.index_chunks(IndexChunksPayload(document_id="u-f-n", chunks=[ActionIndexChunk(**index_chunk)]))["events"] == [
+        "chunk vector ingestion completed"
+    ]
+    assert store.indexed_chunks[0] == "u-f-n"
+
+    index_summary = services.index_summary(IndexSummaryPayload(
+        summary=artifacts["summary"], questions=artifacts["questions"]
+    ))
+    assert index_summary["events"] == [
+        "summary vector ingestion started", "collections ensured",
+        "summary vector upserted", "question vectors upserted: 1",
+        "summary vector ingestion completed",
+    ]
+    assert store.indexed_summary.summary.content == "A useful summary."

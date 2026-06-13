@@ -72,6 +72,22 @@ def is_bad_summary_format(text: str) -> bool:
         return True
     return False
 
+
+def repair_summary_format(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        clean = line.strip()
+        if not clean:
+            continue
+        clean = re.sub(r"^\s*(?:[-*•·]|\d+[.)])\s*", "", clean).strip()
+        if clean:
+            lines.append(clean)
+
+    repaired = re.sub(r"\s+", " ", " ".join(lines)).strip()
+    if repaired and repaired[-1] not in ".!?":
+        repaired += "."
+    return repaired
+
 def valid_summary(
     summary: str,
     *,

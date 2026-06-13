@@ -2,6 +2,8 @@
 
 ## 1. ChunkProcessor
 
+- **Action:** `ingestion.chunk`
+
 - **Input:** Raw note text
 - **Output:** `list[TextChunk]`
 - **Next:** `KeywordProcessor.process()`
@@ -13,6 +15,8 @@ chunks = chunk_processor.process(text)
 
 ## 2. KeywordProcessor
 
+- **Action:** `ingestion.keywords`
+
 - **Input:** `list[TextChunk]`
 - **Output:** `list[ChunkKeywordResult]`, top keywords, and entities
 - **Next:** `ChunkBuilder.build()`
@@ -23,6 +27,8 @@ chunks_with_terms, top_keywords, entities = keyword_processor.process(chunks)
 ```
 
 ## 3. ChunkBuilder
+
+- **Action:** `ingestion.chunk_build`
 
 - **Input:** `list[ChunkKeywordResult]`
 - **Output:** `list[IndexChunk]`
@@ -40,6 +46,8 @@ Tables embed only deterministic natural-language descriptions. Code, JSON, headi
 
 ## 4. Chunk Embedding and Indexing
 
+- **Action:** `ingestion.index_chunks`
+
 - **Input:** Indexable `list[IndexChunk]`
 - **Output:** Chunk vectors in `QDRANT_COLLECTION`
 - **Next:** `SummarizationPipeline.run()`
@@ -50,6 +58,8 @@ vector_store.replace_index_chunks(document_id, index_chunks)
 ```
 
 ## 5. SummarizationPipeline
+
+- **Action:** `ingestion.summary`
 
 - **Input:** Complete `list[IndexChunk]`
 - **Output:** `DocumentSummary`
@@ -63,6 +73,8 @@ document_summary = summarization_pipeline.run(index_chunks)
 
 ## 6. SummaryBuilder
 
+- **Action:** `ingestion.summary_build`
+
 - **Input:** `DocumentSummary` plus document keywords/entities
 - **Output:** `SummaryArtifacts` containing one optional `SummaryDocument` and multiple `QuestionDocument` objects
 - **Next:** `QdrantVectorStore.upsert_summary_artifacts()`
@@ -73,6 +85,8 @@ summary_artifacts = summary_builder.build(document_summary)
 ```
 
 ## 7. Summary and Question Indexing
+
+- **Action:** `ingestion.index_summary`
 
 - **Input:** `SummaryArtifacts`
 - **Output:** Summary and question vectors

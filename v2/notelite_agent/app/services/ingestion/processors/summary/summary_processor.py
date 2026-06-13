@@ -16,6 +16,7 @@ from app.services.ingestion.processors.summary.summary_helpers import (
     chunk_text,
     estimate_summary_request_tokens,
     fallback_final_summary,
+    repair_summary_format,
     summary_request_token_limit,
     valid_summary,
 )
@@ -90,11 +91,20 @@ class SummaryProcessor:
                 events.append(f"summary failed: direct ({self._failure_label(exc)})")
                 return SummaryResult(summary="", api_calls=1, events=events)
 
+            raw_summary = summary
             summary = valid_summary(
-                summary,
+                raw_summary,
                 reject_list_format=True,
                 require_complete_sentence=True,
             )
+            if not summary:
+                summary = valid_summary(
+                    repair_summary_format(raw_summary),
+                    reject_list_format=True,
+                    require_complete_sentence=True,
+                )
+                if summary:
+                    events.append("summary fallback: direct format repaired")
             events.append("summary completed: direct" if summary else "summary discarded: low quality")
             return SummaryResult(summary=summary, api_calls=1, events=events)
 
@@ -169,13 +179,20 @@ class SummaryProcessor:
             events.append(f"summary failed: final merge ({self._failure_label(exc)})")
             return SummaryResult(summary=summaries[0], api_calls=api_calls, events=events)
 
+        raw_final_summary = final_summary
         final_summary = valid_summary(
-            final_summary,
+            raw_final_summary,
             reject_list_format=True,
             require_complete_sentence=True,
         )
         if not final_summary:
-            events.append("summary fallback: final merge rejected")
+            final_summary = valid_summary(
+                repair_summary_format(raw_final_summary),
+                reject_list_format=True,
+                require_complete_sentence=True,
+            )
+            events.append("summary fallback: final merge format repaired" if final_summary else "summary fallback: final merge rejected")
+        if not final_summary:
             final_summary = fallback_final_summary(summaries)
         events.append("summary completed: hierarchical")
         return SummaryResult(summary=final_summary, api_calls=api_calls, events=events)
