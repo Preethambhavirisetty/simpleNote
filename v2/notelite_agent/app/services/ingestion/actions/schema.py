@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.services.chat.actions.schema import PromptActionRequest, RetrievalActionRequest
+from app.services.chat.actions.schema import IntentActionRequest, PromptActionRequest, RetrievalActionRequest
 
 
 class ActionChunk(BaseModel):
@@ -167,7 +167,7 @@ PipelineActionRequest = Annotated[
         ChunkActionRequest, KeywordsActionRequest, ChunkBuildActionRequest,
         IndexChunksActionRequest, SummaryActionRequest, QuestionsActionRequest,
         SummaryBuildActionRequest, IndexSummaryActionRequest, DocumentsActionRequest,
-        RetrievalActionRequest, PromptActionRequest,
+        IntentActionRequest, RetrievalActionRequest, PromptActionRequest,
     ],
     Field(discriminator="action_name"),
 ]

@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.services.chat.schema import ChatHistoryMessage
 
 
+class IntentPayload(BaseModel):
+    query: str = Field(..., min_length=1)
+
+
 class RetrievalPayload(BaseModel):
     query: str = Field(..., min_length=1)
     user_id: str = Field(..., min_length=1)
@@ -17,6 +21,18 @@ class RetrievalPayload(BaseModel):
 
 class PromptPayload(RetrievalPayload):
     context_texts: list[str] | None = None
+
+
+class IntentActionRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "action_name": "retrieval.intent",
+            "payload": {"query": "compare my January and March notes"},
+        }
+    })
+
+    action_name: Literal["retrieval.intent"]
+    payload: IntentPayload
 
 
 class RetrievalActionRequest(BaseModel):

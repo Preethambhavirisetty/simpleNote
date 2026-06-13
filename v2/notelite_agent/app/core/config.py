@@ -15,6 +15,10 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 SECRET_KEY = require_env("SECRET_KEY")
 BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
+INTENTS_FILE_PATH = os.path.join(APP_DIR, "core", "intents.yaml")
+INTENT_CONFIDENCE_THRESHOLD = float(require_env("INTENT_CONFIDENCE_THRESHOLD", "0.6"))
+INTENT_CLASSIFICATION_TIMEOUT = float(require_env("INTENT_CLASSIFICATION_TIMEOUT", "15"))
+INTENT_CLASSIFICATION_MAX_TOKENS = int(require_env("INTENT_CLASSIFICATION_MAX_TOKENS", "80"))
 
 
 # Prompt selection

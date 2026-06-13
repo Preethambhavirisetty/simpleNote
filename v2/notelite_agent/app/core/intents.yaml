@@ -1,0 +1,78 @@
+precedence:
+  - comparison
+  - summary
+  - timeline
+  - navigation
+  - lookup
+  - search
+  - conversation
+
+decision_rules:
+  - "Classify by the user's requested action, not merely by words or entities appearing in the query."
+  - "For compound requests, choose the intent that determines the final response shape."
+  - "Use comparison when the user asks to contrast two or more targets."
+  - "Use summary when the user asks for a condensed account, even if they also say find or show."
+  - "Use timeline only when the user requests multiple events, chronological ordering, history, evolution, or change over time."
+  - "A when-question asking for one date or time is lookup, even when answering it requires finding a matching note first."
+  - "Use navigation only when the user wants to open, locate, or preview a particular note without asking about its contents."
+  - "Use lookup for a specific fact or answer, including when something was written; use search when the requested result is matching notes or passages."
+  - "The need to search notes internally does not make a request search intent; classify by the answer the user wants."
+  - "Use conversation when the request does not require searching the user's notes."
+
+intents:
+  lookup:
+    description: "Answer a specific factual question using note content."
+    examples:
+      - "what did Ananya say about the promotion"
+      - "what was the Qdrant p99 latency last quarter"
+      - "what time is the next sync"
+      - "when did I write about database replication"
+    fallback: false
+
+  search:
+    description: "Find notes or passages matching a broad theme, topic, person, or concept."
+    examples:
+      - "find all notes about career stress"
+      - "anything I wrote about the EV startup"
+      - "notes where I mentioned Rohan"
+    fallback: true
+
+  timeline:
+    description: "Retrieve information across time or produce a chronological view of notes or a topic."
+    examples:
+      - "what was I writing about in January"
+      - "how has my thinking changed over the year"
+      - "show my project notes from January through March"
+    fallback: false
+
+  summary:
+    description: "Produce a condensed account of a particular note or a defined set of notes."
+    examples:
+      - "summarize my Goa trip notes"
+      - "TL;DR of yesterday's meeting"
+      - "find and summarize my weekly sync note"
+    fallback: false
+
+  comparison:
+    description: "Compare or contrast two or more people, topics, decisions, notes, or time periods."
+    examples:
+      - "what did Rohan think versus what Appa thought"
+      - "compare January mood to March"
+      - "how do the last two Qdrant benchmarks differ"
+    fallback: false
+
+  navigation:
+    description: "Open, locate, or preview a particular note by title, date, or other identifier."
+    examples:
+      - "open June 6 meeting notes"
+      - "find the note called Weekly Sync"
+      - "show me last Thursday's journal entry"
+    fallback: false
+
+  conversation:
+    description: "Handle greetings, thanks, capability questions, writing requests, or other requests that do not require retrieving notes."
+    examples:
+      - "hello"
+      - "thanks, that helped"
+      - "rewrite this sentence to sound friendlier"
+    fallback: false
