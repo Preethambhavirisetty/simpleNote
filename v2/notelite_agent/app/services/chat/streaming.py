@@ -89,11 +89,14 @@ class StreamingService:
         if vector_store is not None:
             retrieval_started = time.perf_counter()
             try:
-                context_texts, references = retriever.retrieve_context(
+                retrieval_result = retriever.retrieve_context_result(
                     vector_store, query, request.user_id, request.k, request.role, history,
                 )
+                context_texts = retrieval_result.context_texts
+                references = retrieval_result.references
+                history = retrieval_result.bounded_history
+                events.extend(retrieval_result.events)
                 latencies_ms["retrieval_ms"] = _elapsed_ms(retrieval_started)
-                events.append(f"retrieval.completed chunks={len(context_texts)}")
             except Exception:
                 latencies_ms["retrieval_ms"] = _elapsed_ms(retrieval_started)
                 events.append("retrieval.failed")

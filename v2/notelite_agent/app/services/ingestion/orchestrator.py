@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.services.ingestion.processors.chunking.chunk_processor import ChunkProcessor
@@ -9,6 +10,8 @@ from app.core.config import ACTIVE_SUMMARIZER_VERSION
 from app.logger import logger
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.utils import count_tokens
+from app.services.ingestion.processors.date_extractor import DateExtractor
+from app.services.ingestion.storage.postgres_store import PostgresArtifactStore
 
 
 class IngestionOrchestrator:
@@ -17,6 +20,7 @@ class IngestionOrchestrator:
         self.keyword_processor = KeywordProcessor()
         self.summarization_pipeline = SummarizationPipeline()
         self._vector_store = vector_store
+        self.postgres_store = PostgresArtifactStore()
 
     def run(self, data: Optional[dict] = None, **kwargs) -> dict:
         payload = self._payload(data, **kwargs)
@@ -69,6 +73,13 @@ class IngestionOrchestrator:
         events.extend(summary_builder.events)
         summary_build_end = time.perf_counter()
         self.vector_store.upsert_summary_artifacts(summary_artifacts)
+        created_at = payload.get("created_at") or datetime.now(timezone.utc)
+        timezone_name = self.postgres_store.user_timezone(str(payload.get("user_id")))
+        date_extractor = DateExtractor()
+        dates = date_extractor.extract(index_chunks, created_at, timezone_name)
+        self.postgres_store.replace_document(payload, doc_id, index_chunks, document_summary.summary, dates)
+        events.extend(date_extractor.events)
+        events.append("postgres retrieval artifacts replaced")
         doc_ingestion_end = time.perf_counter()
         events.extend(self.vector_store.events)
 
@@ -135,6 +146,7 @@ class IngestionOrchestrator:
     def delete_action(self, payload: dict) -> dict:
         doc_id = self._doc_id(payload)
         self.vector_store.delete_document(doc_id)
+        self.postgres_store.delete_document(doc_id)
         result = {
             "action": "delete",
             "status": "deleted",

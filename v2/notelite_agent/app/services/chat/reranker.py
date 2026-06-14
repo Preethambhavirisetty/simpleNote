@@ -6,7 +6,11 @@ from typing import Any
 import httpx
 from llama_index.core import Document as LlamaDocument
 
-from app.core.config import RERANKER_API_BASE, RERANKER_API_KEY
+from app.core.config import (
+    RERANKER_API_BASE,
+    RERANKER_API_KEY,
+    RERANKER_MIN_RELEVANCE_SCORE,
+)
 
 
 log = logging.getLogger(__name__)
@@ -24,9 +28,11 @@ def rerank(
 
     POST {RERANKER_API_BASE}/rerank
         body:     {"query": str, "documents": [str, ...], "top_n": int}
-        response: {"results": [{"index": int, "relevance_score": float}, ...]}
+        response: {"results": [{"index": int, "relevance_score" | "score": float}, ...]}
 
-    Falls back to the original RRF order when unconfigured or on failure.
+    Results below the configured relevance threshold are discarded. Falls back
+    to the original RRF order when unconfigured, on failure, or when no result
+    meets the threshold.
     """
     if not RERANKER_API_BASE or len(chunks) <= 1:
         return chunks[:top_k]
@@ -40,9 +46,44 @@ def rerank(
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
-        results: list[dict[str, Any]] = resp.json().get("results", [])
-        ranked = sorted(results, key=lambda r: r["relevance_score"], reverse=True)
-        return [(chunks[r["index"]][0], r["relevance_score"]) for r in ranked[:top_k]]
+        results = _valid_results(resp.json().get("results", []), len(chunks))
+        relevant = [
+            result
+            for result in results
+            if result["score"] >= RERANKER_MIN_RELEVANCE_SCORE
+        ]
+        if not relevant:
+            log.info(
+                "reranker found no candidates above relevance threshold; using RRF ranking"
+            )
+            return chunks[:top_k]
+
+        ranked = sorted(relevant, key=lambda result: result["score"], reverse=True)
+        return [
+            (chunks[result["index"]][0], result["score"])
+            for result in ranked[:top_k]
+        ]
     except Exception:
         log.warning("reranker failed, using RRF ranking", exc_info=True)
         return chunks[:top_k]
+
+
+def _valid_results(results: Any, chunk_count: int) -> list[dict[str, int | float]]:
+    valid: list[dict[str, int | float]] = []
+    if not isinstance(results, list):
+        return valid
+
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+
+        index = result.get("index")
+        score = result.get("relevance_score", result.get("score"))
+        if (
+            isinstance(index, int)
+            and 0 <= index < chunk_count
+            and isinstance(score, (int, float))
+        ):
+            valid.append({"index": index, "score": float(score)})
+
+    return valid

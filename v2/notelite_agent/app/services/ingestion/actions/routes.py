@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api/actions", tags=["pipeline-actions"])
         "Runs exactly one typed pipeline action. Supported action_name values: "
         "ingestion.chunk, ingestion.keywords, ingestion.chunk_build, ingestion.index_chunks, "
         "ingestion.summary, ingestion.questions, ingestion.summary_build, ingestion.index_summary, "
-        "ingestion.documents, retrieval.context, retrieval.prompt."
+        "ingestion.documents, retrieval.preprocess, retrieval.hyde, retrieval.embed, retrieval.search, retrieval.rrf, retrieval.rerank, retrieval.context, retrieval.pipeline, retrieval.prompt."
     ),
 )
 def run_pipeline_action(

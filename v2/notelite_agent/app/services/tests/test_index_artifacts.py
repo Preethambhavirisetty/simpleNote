@@ -133,6 +133,8 @@ def test_vector_store_converts_internal_artifacts_at_boundary():
 
     point = store.client.upserts[CHUNK_COLLECTION][0]
     assert store.embedding_client.texts == ["Enriched content"]
+    assert point.payload["doc_id"] == "doc"
+    assert point.payload["chunk_id"] == "0"
     assert point.payload["content"] == "Original content"
     assert point.payload["embed_text"] == "Enriched content"
 

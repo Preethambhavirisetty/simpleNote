@@ -13,6 +13,7 @@ from app.services.ingestion.actions.routes import router as actions_router
 from app.services.chat.routes import router as chat_router
 from app.core.openapi import OPENAPI_TAGS, configure_openapi
 from app.core.settings import init_llama_index_settings
+from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.api_models import HealthData
 from app.shared.routes import router as shared_router
 from app.shared.schema import ApiResponse
@@ -26,6 +27,7 @@ log = logger
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_llama_index_settings()
+    QdrantVectorStore().validate_collection_dimensions()
     yield
 
 

@@ -16,7 +16,14 @@ class RetrievalActionController:
     def __init__(self, vector_store: QdrantVectorStore):
         services = RetrievalActionServices(vector_store)
         self.handlers: dict[str, Callable[[Any], dict[str, Any]]] = {
+            "retrieval.preprocess": services.preprocess,
+            "retrieval.hyde": services.hyde,
+            "retrieval.embed": services.embed,
+            "retrieval.search": services.search,
+            "retrieval.rrf": services.rrf,
+            "retrieval.rerank": services.rerank,
             "retrieval.context": services.context,
+            "retrieval.pipeline": services.pipeline,
             "retrieval.prompt": services.prompt,
         }
 
