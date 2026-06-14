@@ -86,3 +86,26 @@ POSTGRES_DB_URL = require_env("POSTGRES_DB_URL")
 # Leave empty to skip reranking and rely on RRF scores from Qdrant.
 RERANKER_API_BASE = os.getenv("RERANKER_API_BASE", "").rstrip("/")
 RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
+RERANKER_MIN_RELEVANCE_SCORE = float(
+    require_env("RERANKER_MIN_RELEVANCE_SCORE", "0.0")
+)
+
+# Retrieval pipeline
+HYDE_TIMEOUT = float(require_env("HYDE_TIMEOUT", "2"))
+HYDE_MAX_TOKENS = int(require_env("HYDE_MAX_TOKENS", "150"))
+RETRIEVAL_SEARCH_WORKERS = int(require_env("RETRIEVAL_SEARCH_WORKERS", "5"))
+RETRIEVAL_RRF_K = int(require_env("RETRIEVAL_RRF_K", "60"))
+RETRIEVAL_RRF_TOP_K = int(require_env("RETRIEVAL_RRF_TOP_K", "30"))
+RETRIEVAL_CHUNK_BUDGET = int(require_env("RETRIEVAL_CHUNK_BUDGET", "2000"))
+RETRIEVAL_CONTEXT_SEED_LIMIT = int(require_env("RETRIEVAL_CONTEXT_SEED_LIMIT", "2"))
+RETRIEVAL_NEIGHBOR_SEED_LIMIT = int(require_env("RETRIEVAL_NEIGHBOR_SEED_LIMIT", "1"))
+RETRIEVAL_SUMMARY_BUDGET = int(require_env("RETRIEVAL_SUMMARY_BUDGET", "600"))
+RETRIEVAL_HISTORY_BUDGET = int(require_env("RETRIEVAL_HISTORY_BUDGET", "400"))
+RETRIEVAL_MAX_SUMMARIES = int(require_env("RETRIEVAL_MAX_SUMMARIES", "2"))
+RETRIEVAL_RRF_WEIGHTS = {
+    "chunk_dense_original": float(require_env("RRF_WEIGHT_CHUNK_DENSE_ORIGINAL", "1.0")),
+    "chunk_dense_hyde": float(require_env("RRF_WEIGHT_CHUNK_DENSE_HYDE", "0.8")),
+    "chunk_sparse_bm25": float(require_env("RRF_WEIGHT_CHUNK_SPARSE_BM25", "0.9")),
+    "chunk_filtered_dense": float(require_env("RRF_WEIGHT_CHUNK_FILTERED_DENSE", "0.7")),
+    "chunk_filtered_sparse": float(require_env("RRF_WEIGHT_CHUNK_FILTERED_SPARSE", "0.6")),
+}

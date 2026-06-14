@@ -31,6 +31,8 @@ SPARSE_VECTOR = "sparse"
 QUESTIONS_VECTOR = "questions"
 
 PAYLOAD_INDEXES = (
+    ("doc_id", models.PayloadSchemaType.KEYWORD),
+    ("chunk_id", models.PayloadSchemaType.KEYWORD),
     ("metadata.user_id", models.PayloadSchemaType.KEYWORD),
     ("metadata.doc_id", models.PayloadSchemaType.KEYWORD),
 )
@@ -49,6 +51,16 @@ class QdrantVectorStore:
             if not self._collection_exists(collection_name):
                 self._create_collection(collection_name)
             self._ensure_payload_indexes(collection_name)
+
+    def validate_collection_dimensions(self) -> None:
+        expected = self._embedding_dimension()
+        for name in (CHUNK_COLLECTION, SUMMARY_COLLECTION, QUESTIONS_COLLECTION):
+            if not self._collection_exists(name): continue
+            info = self.client.get_collection(name)
+            vectors = info.config.params.vectors
+            dense = vectors.get(DENSE_VECTOR) if isinstance(vectors, dict) else vectors
+            if dense.size != expected:
+                raise RuntimeError(f"Qdrant collection {name} dimension {dense.size} does not match embedding dimension {expected}")
 
     def get_collections(self) -> List[str]:
         return self.client.get_collections()
@@ -199,7 +211,7 @@ class QdrantVectorStore:
                     SPARSE_VECTOR: self.sparse_vector(embeddings.sparse[index]),
                 },
                 payload={
-                    "chunk_id": chunk.chunk_id, "note_id": metadata.get("note_id", ""),
+                    "doc_id": chunk.document_id, "chunk_id": chunk.chunk_id, "note_id": metadata.get("note_id", ""),
                     "folder_id": metadata.get("folder_id", ""), "chunk_index": chunk.chunk_index,
                     "total_chunks": chunk.total_chunks, "chunk_type": chunk.chunk_type,
                     "content": chunk.content, "embed_text": chunk.embed_text,
@@ -367,6 +379,105 @@ class QdrantVectorStore:
         self.upsert_chunks(chunks or [])
         self.events.append("vector ingestion completed")
 
+    @staticmethod
+    def build_identity_filter(
+        identities: Sequence[tuple[str, str]] | None,
+    ) -> models.Filter | None:
+        if not identities:
+            return None
+
+        identity_filters = []
+        for doc_id, chunk_id in identities:
+            conditions = [
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchValue(value=doc_id),
+                )
+            ]
+            if chunk_id != "*":
+                conditions.append(
+                    models.FieldCondition(
+                        key="chunk_id",
+                        match=models.MatchValue(value=chunk_id),
+                    )
+                )
+            identity_filters.append(models.Filter(must=conditions))
+        return models.Filter(should=identity_filters)
+
+    def _search_vector(
+        self,
+        collection_name: str,
+        vector: Any,
+        vector_name: str,
+        *,
+        limit: int,
+        metadata_filter: Mapping[str, Any] | None = None,
+        doc_ids: Sequence[str] | None = None,
+        identities: Sequence[tuple[str, str]] | None = None,
+    ) -> list[tuple[LlamaDocument, float]]:
+        metadata_query_filter = self.build_filter(metadata_filter, doc_ids)
+        identity_query_filter = self.build_identity_filter(identities)
+        query_filter = self._combine_filters(metadata_query_filter, identity_query_filter)
+
+        points = self.client.query_points(
+            collection_name=collection_name,
+            query=vector,
+            using=vector_name,
+            limit=limit,
+            query_filter=query_filter,
+        ).points
+        return [self._point_to_document(point) for point in points]
+
+    @staticmethod
+    def _combine_filters(*filters: models.Filter | None) -> models.Filter | None:
+        active_filters = [query_filter for query_filter in filters if query_filter is not None]
+        if not active_filters:
+            return None
+        if len(active_filters) == 1:
+            return active_filters[0]
+        return models.Filter(must=active_filters)
+
+    def search_chunk_dense(self, vector: list[float], **kwargs) -> list[tuple[LlamaDocument, float]]:
+        return self._search_vector(CHUNK_COLLECTION, vector, DENSE_VECTOR, **kwargs)
+
+    def search_chunk_sparse(self, vector: Any, **kwargs) -> list[tuple[LlamaDocument, float]]:
+        return self._search_vector(
+            CHUNK_COLLECTION,
+            self.sparse_vector(vector),
+            SPARSE_VECTOR,
+            **kwargs,
+        )
+
+    def search_summary_dense(self, vector: list[float], **kwargs) -> list[tuple[LlamaDocument, float]]:
+        return self._search_vector(SUMMARY_COLLECTION, vector, DENSE_VECTOR, **kwargs)
+
+    def search_question_dense(self, vector: list[float], **kwargs) -> list[tuple[LlamaDocument, float]]:
+        return self._search_vector(QUESTIONS_COLLECTION, vector, DENSE_VECTOR, **kwargs)
+
+    def fetch_neighbor(self, doc_id: str | None, chunk_id: str | None) -> LlamaDocument | None:
+        if not doc_id or not chunk_id:
+            return None
+
+        points, _next_page = self.client.scroll(
+            collection_name=CHUNK_COLLECTION,
+            scroll_filter=models.Filter(must=[
+                models.FieldCondition(
+                    key="doc_id",
+                    match=models.MatchValue(value=str(doc_id)),
+                ),
+                models.FieldCondition(
+                    key="chunk_id",
+                    match=models.MatchValue(value=str(chunk_id)),
+                ),
+            ]),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if not points:
+            return None
+        return self._point_to_document(points[0])[0]
+
     def search_chunks(
         self,
         query: str,
@@ -457,7 +568,10 @@ class QdrantVectorStore:
         metadata = dict(payload.get("metadata") or {})
         metadata.update(
             {
+                "doc_id": payload.get("doc_id", metadata.get("doc_id")),
                 "chunk_id": payload.get("chunk_id", metadata.get("chunk_id")),
+                "prev_chunk_id": payload.get("prev_chunk_id", metadata.get("prev_chunk_id")),
+                "next_chunk_id": payload.get("next_chunk_id", metadata.get("next_chunk_id")),
                 "note_id": payload.get("note_id", metadata.get("note_id")),
                 "folder_id": payload.get("folder_id", metadata.get("folder_id")),
                 "chunk_index": payload.get("chunk_index", metadata.get("chunk_index")),
@@ -474,7 +588,7 @@ class QdrantVectorStore:
                 text=payload.get("content", payload.get("text", "")),
                 metadata=metadata,
             ),
-            point.score,
+            float(getattr(point, "score", 0.0)),
         )
 
     def scroll_chunks(self, collection_name:str, limit:int=10) -> list[LlamaDocument]:

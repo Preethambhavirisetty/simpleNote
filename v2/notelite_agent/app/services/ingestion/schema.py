@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -15,11 +16,17 @@ class IngestionRequest(BaseModel):
     note_id: str = Field(..., min_length=1)
     action: Literal["upsert", "delete"] = "upsert"
     text: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     @model_validator(mode="after")
     def require_text_for_upsert(self):
         if self.action == "upsert" and not self.text.strip():
             raise ValueError("text is required for upsert")
+        for field_name in ("created_at", "updated_at"):
+            value = getattr(self, field_name)
+            if value is not None and value.tzinfo is None:
+                raise ValueError(f"{field_name} must include timezone information")
         return self
 
 

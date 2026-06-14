@@ -1,7 +1,7 @@
 from app.services.ingestion.processors.chunking import TextChunk
+from app.services.ingestion.processors.keywords.entity_extractor import EntityMention
 from app.services.ingestion.processors.keywords.keyword_batcher import KeywordBatchResult
 from app.services.ingestion.processors.keywords.keyword_processor import KeywordProcessor
-
 
 def test_keyword_ranking_counts_repeated_semantic_children_as_one_section():
     processor = KeywordProcessor(use_llm_dedup=False)
@@ -21,7 +21,6 @@ def test_keyword_ranking_counts_repeated_semantic_children_as_one_section():
     assert by_term["incident heading"].chunk_frequency == 1
     assert by_term["incident heading"].occurrences == 3
     assert by_term["hybrid search"].chunk_frequency == 2
-
 
 def test_llm_keyword_phrases_are_preserved_without_conjunction_splitting(monkeypatch):
     monkeypatch.setattr(
@@ -47,7 +46,6 @@ def test_llm_keyword_phrases_are_preserved_without_conjunction_splitting(monkeyp
 
     assert results[0].keywords == ["keyword and entity extraction"]
     assert top_keywords == ["keyword and entity extraction"]
-
 
 def test_entity_dedup_input_includes_spacy_label_and_context(monkeypatch):
     captured = {}
@@ -76,7 +74,6 @@ def test_entity_dedup_input_includes_spacy_label_and_context(monkeypatch):
     assert "spacy_labels: PRODUCT" in captured["content"]
     assert "example_context: Qdrant stores vectors" in captured["content"]
 
-
 def test_entity_postprocessing_prefers_unique_full_person_name():
     processor = KeywordProcessor(use_llm_dedup=False)
     candidates = processor._rank_candidates(
@@ -92,7 +89,6 @@ def test_entity_postprocessing_prefers_unique_full_person_name():
         ["Morgan", "Alice Morgan"], candidates
     ) == ["Alice Morgan"]
 
-
 def test_entity_postprocessing_keeps_ambiguous_partial_person_name():
     processor = KeywordProcessor(use_llm_dedup=False)
     candidates = processor._rank_candidates(
@@ -107,7 +103,6 @@ def test_entity_postprocessing_keeps_ambiguous_partial_person_name():
 
     assert processor._postprocess_entity_selection(["Morgan"], candidates) == ["Morgan"]
 
-
 def test_table_headers_are_removed_from_chunk_terms():
     processor = KeywordProcessor(use_llm_dedup=False)
     content = "| Field | Value |\n| --- | --- |\n| Timeout | 30 |"
@@ -115,3 +110,24 @@ def test_table_headers_are_removed_from_chunk_terms():
     assert processor._filter_table_header_terms(
         ["Field", "Timeout", "Value"], content, "table"
     ) == ["Timeout"]
+
+def test_table_entity_filter_removes_header_fusions_but_keeps_cells():
+    processor = KeywordProcessor(use_llm_dedup=False)
+    content = (
+        "| Metric | Source | Date |\n"
+        "| --- | --- | --- |\n"
+        "| Commercial EV fleet size | NITI Aayog | April 2026 |"
+    )
+    mentions = [
+        EntityMention("Source NITI Aayog Date", "ORG"),
+        EntityMention("Metric Commercial EV", "PRODUCT"),
+        EntityMention("NITI Aayog", "ORG"),
+        EntityMention("Commercial EV fleet size", "PRODUCT"),
+    ]
+
+    filtered = processor._filter_table_header_mentions(mentions, content, "table")
+
+    assert [mention.text for mention in filtered] == [
+        "NITI Aayog",
+        "Commercial EV fleet size",
+    ]

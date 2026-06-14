@@ -26,6 +26,7 @@ from app.services.ingestion.processors.keywords.keyword_batcher import (
 )
 from app.services.ingestion.processors.keywords.terms import prune_keywords
 from app.services.ingestion.processors.text_normalization import (
+    markdown_table_cells,
     markdown_table_headers,
     normalize_text_for_keyword_extraction,
     without_markdown_heading_lines,
@@ -276,7 +277,21 @@ class KeywordProcessor:
         if chunk_type != ChunkType.TABLE.value:
             return mentions
         headers = {header.casefold() for header in markdown_table_headers(content)}
-        return [mention for mention in mentions if mention.text.casefold() not in headers]
+        cells = {cell.casefold() for cell in markdown_table_cells(content)}
+        header_tokens = {
+            token
+            for header in headers
+            for token in re.findall(r"[a-z0-9]+", header)
+        }
+        return [
+            mention
+            for mention in mentions
+            if mention.text.casefold() in cells
+            or not (
+                set(re.findall(r"[a-z0-9]+", mention.text.casefold()))
+                & header_tokens
+            )
+        ]
 
     @staticmethod
     def _term_skip_reason(text: str, chunk_type: str, metadata: dict[str, Any]) -> str:
