@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import noteliteIcon from '@/assets/notelite_icon.png'
 import { useAuthStore } from '@/stores/authStore'
 
 export default function RegisterPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [error, setError] = useState(null)
+  const [showPassword, setShowPassword] = useState(false)
   const register = useAuthStore((s) => s.register)
   const isLoading = useAuthStore((s) => s.isLoading)
   const navigate = useNavigate()
 
-  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
+  const set = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const handleSubmit = async (event) => {
+    event.preventDefault()
     setError(null)
     const result = await register(form)
     if (result.ok) {
@@ -23,83 +25,181 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-semibold text-zinc-100 mb-1">Create account</h1>
-        <p className="text-sm text-zinc-500 mb-8">Get started with notelite</p>
+    <main className="auth-page">
+      <div className="auth-glow auth-glow-top" />
+      <div className="auth-glow auth-glow-bottom" />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Name">
-            <input
-              type="text"
-              required
-              autoFocus
-              value={form.name}
-              onChange={set('name')}
-              placeholder="Jane Doe"
-              className={inputCls}
-            />
-          </Field>
+      <header className="auth-header">
+        <Link to="/" className="auth-brand" aria-label="NoteLite home">
+          <img src={noteliteIcon} alt="" />
+          <span>NoteLite</span>
+        </Link>
 
-          <Field label="Email">
-            <input
-              type="email"
-              required
-              value={form.email}
-              onChange={set('email')}
-              placeholder="you@example.com"
-              className={inputCls}
-            />
-          </Field>
+        <Link to="/" className="auth-home-link">
+          Back to home
+          <ArrowUpRightIcon />
+        </Link>
+      </header>
 
-          <Field label="Password">
-            <input
-              type="password"
-              required
-              value={form.password}
-              onChange={set('password')}
-              placeholder="••••••••"
-              className={inputCls}
-            />
-          </Field>
+      <section className="auth-stage">
+        <NoteIllustration />
 
-          {error && <ErrorBanner>{error}</ErrorBanner>}
+        <div className="auth-card-wrap">
+          <div className="auth-card-accent" />
+          <div className="auth-card">
+            <div className="auth-card-heading">
+              <span className="auth-eyebrow">
+                <span />
+                A clearer workspace awaits
+              </span>
+              <h1>Start thinking.</h1>
+              <p>Create your private space for notes, ideas, and conversations.</p>
+            </div>
 
-          <button type="submit" disabled={isLoading} className={btnCls}>
-            {isLoading ? 'Creating account…' : 'Create account'}
-          </button>
-        </form>
+            <form onSubmit={handleSubmit} className="auth-form">
+              <label className="auth-field">
+                <span className="sr-only">Your name</span>
+                <UserIcon />
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  autoComplete="name"
+                  value={form.name}
+                  onChange={set('name')}
+                  placeholder="Your name"
+                />
+              </label>
 
-        <p className="mt-6 text-sm text-zinc-500 text-center">
-          Already have an account?{' '}
-          <Link to="/login" className="text-indigo-400 hover:text-indigo-300">
-            Sign in
-          </Link>
-        </p>
+              <label className="auth-field">
+                <span className="sr-only">Email address</span>
+                <MailIcon />
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={form.email}
+                  onChange={set('email')}
+                  placeholder="Email address"
+                />
+              </label>
+
+              <label className="auth-field">
+                <span className="sr-only">Password</span>
+                <LockIcon />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={set('password')}
+                  placeholder="Create a password"
+                />
+                <button
+                  type="button"
+                  className="auth-password-toggle"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </label>
+
+              {error && (
+                <p className="auth-error" role="alert">
+                  {error}
+                </p>
+              )}
+
+              <button type="submit" disabled={isLoading} className="auth-submit">
+                <span>{isLoading ? 'Creating your workspace...' : 'Create your workspace'}</span>
+                {!isLoading && <ArrowRightIcon />}
+              </button>
+            </form>
+
+            <p className="auth-register">
+              Already have an account? <Link to="/login">Sign in</Link>
+            </p>
+          </div>
+        </div>
+
+        <IdeasIllustration />
+      </section>
+
+      <footer className="auth-footer">
+        <span>Private by design</span>
+        <span className="auth-footer-dot" />
+        <span>Built for focused thinking</span>
+      </footer>
+    </main>
+  )
+}
+
+function NoteIllustration() {
+  return (
+    <div className="auth-illustration auth-notes" aria-hidden="true">
+      <div className="auth-mini-note auth-mini-note-back">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="auth-mini-note auth-mini-note-front">
+        <div className="auth-note-header">
+          <span />
+          <i />
+        </div>
+        <strong>Your first great idea</strong>
+        <span />
+        <span />
+        <span className="short" />
+      </div>
+      <div className="auth-pencil" />
+    </div>
+  )
+}
+
+function IdeasIllustration() {
+  return (
+    <div className="auth-illustration auth-ideas" aria-hidden="true">
+      <div className="auth-idea-orbit orbit-one" />
+      <div className="auth-idea-orbit orbit-two" />
+      <div className="auth-idea-core">✦</div>
+      <span className="auth-spark spark-one">✦</span>
+      <span className="auth-spark spark-two">+</span>
+      <span className="auth-spark spark-three">✦</span>
+      <div className="auth-idea-base">
+        <span />
+        <span />
+        <span />
       </div>
     </div>
   )
 }
 
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block text-sm text-zinc-400 mb-1">{label}</label>
-      {children}
-    </div>
-  )
+function UserIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.25" /><path d="M5.5 19c.6-3.2 2.75-5 6.5-5s5.9 1.8 6.5 5" /></svg>
 }
 
-function ErrorBanner({ children }) {
-  return (
-    <p className="text-sm text-red-400 bg-red-950/40 border border-red-900/40 rounded-lg px-3 py-2">
-      {children}
-    </p>
-  )
+function MailIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.75h16v10.5H4zM4.5 7.5l7.5 6 7.5-6" /></svg>
 }
 
-const inputCls =
-  'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors'
+function LockIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3" /><path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10M12 14v2.5" /></svg>
+}
 
-const btnCls =
-  'w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors'
+function EyeIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.25-5 9-5 9 5 9 5-3.25 5-9 5-9-5-9-5Z" /><circle cx="12" cy="12" r="2.25" /></svg>
+}
+
+function EyeOffIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 16 16M10.4 7.15A8.8 8.8 0 0 1 12 7c5.75 0 9 5 9 5a13.7 13.7 0 0 1-2.2 2.65M14.1 16.75A8.8 8.8 0 0 1 12 17c-5.75 0-9-5-9-5a13.8 13.8 0 0 1 2.35-2.8" /></svg>
+}
+
+function ArrowRightIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg>
+}
+
+function ArrowUpRightIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9" /></svg>
+}

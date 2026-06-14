@@ -3,13 +3,13 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const currentDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(currentDir, './src'),
     },
   },
   server: {
@@ -18,12 +18,6 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3001',
         changeOrigin: true,
-      },
-      // /agent/* requests → Agent (rewrites path: /agent/api/chat → /api/chat)
-      '/agent': {
-        target: 'http://localhost:3002',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/agent/, ''),
       },
     },
   },

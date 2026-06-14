@@ -11,13 +11,12 @@ lsof -ti :8081 | xargs kill -9
 src/
 ├── api/
 │   ├── client.js          axios → BE (localhost:3001, withCredentials)
-│   ├── agentClient.js     axios → Agent (localhost:3002, X-API-Key header)
 │   ├── auth.js            login · register · logout · changePassword
 │   ├── users.js           getMe · updateMe · admin CRUD
 │   ├── folders.js         list · create · get · update · delete
 │   ├── notes.js           list · create · get · update · move · delete · tags
 │   ├── tags.js            list · create · get · update · delete
-│   └── agent.js           chat · getContext · ingest · streamChatCompletions()
+│   └── agent.js           authenticated SSE chat through the backend proxy
 ├── stores/
 │   ├── authStore.js       user · init (cookie restore) · login · register · logout
 │   ├── folderStore.js     folders · CRUD actions

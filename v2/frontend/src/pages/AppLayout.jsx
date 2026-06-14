@@ -15,9 +15,9 @@ export default function AppLayout() {
   }, [fetchFolders, fetchTags])
 
   return (
-    <div className="flex h-screen bg-white dark:bg-zinc-950 overflow-hidden">
+    <div className="workspace-shell flex h-screen overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-hidden">
+      <main className="workspace-main relative flex-1 overflow-hidden">
         <Outlet />
       </main>
       <SettingsPanel />

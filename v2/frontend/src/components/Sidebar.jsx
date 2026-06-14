@@ -1,227 +1,210 @@
-import { useState, useEffect } from 'react'
-import { NavLink, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
+import { useChatStore } from '@/stores/chatStore'
 import { useFolderStore } from '@/stores/folderStore'
+import { useNoteStore } from '@/stores/noteStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useFeatureFlagStore } from '@/stores/featureFlagStore'
-import notelite_logo from '../assets/notelite_icon.png'
+import noteliteIcon from '@/assets/notelite_icon.png'
+import ProfileAvatar from '@/components/ProfileAvatar'
 
-const navCls = ({ isActive }) =>
-  `flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-    isActive
-      ? 'bg-indigo-600/10 dark:bg-indigo-600/20 text-indigo-600 dark:text-indigo-300'
-      : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-  }`
-
-function ThreeDotsIcon() {
-  return (
-    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-      <circle cx="4" cy="10" r="1.5" />
-      <circle cx="10" cy="10" r="1.5" />
-      <circle cx="16" cy="10" r="1.5" />
-    </svg>
-  )
+const icons = {
+  notes: <path strokeLinecap="round" strokeLinejoin="round" d="M8 6h8M8 10h8M8 14h5m5 7H6a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2z" />,
+  chat: <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.4-4 8-9 8a10 10 0 01-4.3-.9L3 20l1.4-3.7A7 7 0 013 12c0-4.4 4-8 9-8s9 3.6 9 8z" />,
+  folder: <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />,
+  file: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z" />,
+  chevron: <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />,
+  plus: <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />,
+  trash: <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.9 12.1a2 2 0 01-2 1.9H7.9a2 2 0 01-2-1.9L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />,
 }
+
+function Icon({ name, className = 'h-[18px] w-[18px]' }) {
+  return <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.7} viewBox="0 0 24 24">{icons[name]}</svg>
+}
+
+const navCls = ({ isActive }) => `workspace-nav-item ${isActive ? 'workspace-nav-active' : ''}`
 
 export default function Sidebar() {
   const user = useAuthStore((s) => s.user)
   const folders = useFolderStore((s) => (Array.isArray(s.folders) ? s.folders : []))
-  const createFolder = useFolderStore((s) => s.createFolder)
-  const updateFolder = useFolderStore((s) => s.updateFolder)
   const deleteFolder = useFolderStore((s) => s.deleteFolder)
+  const notes = useNoteStore((s) => s.notes)
+  const fetchNotes = useNoteStore((s) => s.fetchNotes)
+  const createNote = useNoteStore((s) => s.createNote)
+  const deleteNote = useNoteStore((s) => s.deleteNote)
   const openSettings = useSettingsStore((s) => s.open)
   const isChatEnabled = useFeatureFlagStore((s) => s.isEnabled)('chat')
-  const navigate = useNavigate()
-  const { folderId: activeFolderId } = useParams()
+  const conversations = useChatStore((s) => s.conversations)
+  const fetchConversations = useChatStore((s) => s.fetchConversations)
+  const deleteConversation = useChatStore((s) => s.deleteConversation)
 
-  const [newFolderName, setNewFolderName] = useState('')
-  const [showNewFolder, setShowNewFolder] = useState(false)
-  const [openMenuId, setOpenMenuId] = useState(null)
-  const [renamingId, setRenamingId] = useState(null)
-  const [renameValue, setRenameValue] = useState('')
+  const { folderId } = useParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [expandedFolders, setExpandedFolders] = useState({})
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  const isChatPage = location.pathname.startsWith('/chat')
+  const activeConversationId = isChatPage ? location.pathname.split('/')[2] : null
+  const activeNoteId = new URLSearchParams(location.search).get('note')
 
   useEffect(() => {
-    if (!openMenuId) return
-    const handler = (e) => {
-      if (!e.target.closest('[data-folder-menu]')) setOpenMenuId(null)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [openMenuId])
+    if (isChatPage) fetchConversations()
+    else fetchNotes()
+  }, [fetchConversations, fetchNotes, isChatPage])
 
-  const handleCreateFolder = async (e) => {
-    e.preventDefault()
-    const name = newFolderName.trim()
-    if (!name) return
-    await createFolder({ name })
-    setNewFolderName('')
-    setShowNewFolder(false)
+  const handleNewNote = async (event, folder) => {
+    event.stopPropagation()
+    const result = await createNote({ folder_id: folder.id })
+    if (!result?.ok) return
+    setExpandedFolders((current) => ({ ...current, [folder.id]: true }))
+    navigate(`/folders/${folder.id}?note=${result.note.id}`)
   }
 
-  const startRename = (folder) => {
-    setRenamingId(folder.id)
-    setRenameValue(folder.name)
-    setOpenMenuId(null)
+  const handleDeleteConversation = async (event, id) => {
+    event.stopPropagation()
+    await deleteConversation(id)
+    if (activeConversationId === String(id)) navigate('/chat')
   }
-
-  const commitRename = async (folderId) => {
-    const name = renameValue.trim()
-    if (name) await updateFolder(folderId, { name })
-    setRenamingId(null)
-    setRenameValue('')
-  }
-
-  const handleDeleteFolder = async (folderId) => {
-    setOpenMenuId(null)
-    await deleteFolder(folderId)
-    if (activeFolderId === String(folderId)) navigate('/notes', { replace: true })
-  }
-
-  const initials = user?.name?.[0]?.toUpperCase() ?? user?.email?.[0]?.toUpperCase() ?? '?'
 
   return (
-    <aside className="w-56 flex flex-col bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 h-full select-none shrink-0">
-      {/* Brand */}
-      <div className="flex items-center px-4 py-2 border-b border-zinc-200 dark:border-zinc-800 gap-1">
-        <img alt="notelite logo" src={notelite_logo} className="w-12 h-12" />
-        <span className="text-zinc-800 dark:text-zinc-200 text-xl font-semibold leading-7 tracking-wide">
-          NoteLite
-        </span>
-      </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-        <NavLink to="/notes" className={navCls} end>
-          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-          All Notes
-        </NavLink>
-
-        {isChatEnabled && (
-          <NavLink to="/chat" className={navCls}>
-            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            Chat
-          </NavLink>
-        )}
-
-        {/* Folders */}
-        <div className="pt-3">
-          <div className="flex items-center justify-between px-3 py-1 mb-0.5">
-            <span className="text-label font-medium text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
-              Folders
-            </span>
-            <button
-              onClick={() => setShowNewFolder((v) => !v)}
-              className="text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 w-5 h-5 flex items-center justify-center rounded transition-colors"
-              title="New folder"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-          </div>
-
-          {showNewFolder && (
-            <form onSubmit={handleCreateFolder} className="px-2 mb-1">
-              <input
-                autoFocus
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Escape' && setShowNewFolder(false)}
-                placeholder="Folder name"
-                className="w-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded px-2 py-1 text-xs text-zinc-900 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
-              />
-            </form>
-          )}
-
-          {folders.map((folder) => (
-            <div key={folder.id} className="relative group">
-              {renamingId === folder.id ? (
-                <div className="px-2 py-1">
-                  <input
-                    autoFocus
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') commitRename(folder.id)
-                      if (e.key === 'Escape') { setRenamingId(null); setRenameValue('') }
-                    }}
-                    onBlur={() => commitRename(folder.id)}
-                    className="w-full bg-white dark:bg-zinc-800 border border-indigo-500 rounded px-2 py-1 text-xs text-zinc-900 dark:text-zinc-200 focus:outline-none"
-                  />
-                </div>
-              ) : (
-                <NavLink to={`/folders/${folder.id}`} className={navCls}>
-                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                  </svg>
-                  <span className="truncate flex-1">{folder.name}</span>
-                  {folder.is_pinned && <span className="text-caption text-indigo-500 dark:text-indigo-400">●</span>}
-                  <button
-                    data-folder-menu
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setOpenMenuId(openMenuId === folder.id ? null : folder.id)
-                    }}
-                    className={`shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors ${
-                      openMenuId === folder.id
-                        ? 'opacity-100 text-zinc-600 dark:text-zinc-300'
-                        : 'opacity-0 group-hover:opacity-100 text-zinc-400 dark:text-zinc-500'
-                    }`}
-                    title="Folder options"
-                  >
-                    <ThreeDotsIcon />
-                  </button>
-                </NavLink>
-              )}
-
-              {openMenuId === folder.id && (
-                <div
-                  data-folder-menu
-                  className="absolute right-2 top-full z-50 mt-0.5 w-32 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl overflow-hidden"
-                >
-                  <button
-                    onClick={() => startRename(folder)}
-                    className="w-full text-left px-3 py-2 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    onClick={() => handleDeleteFolder(folder.id)}
-                    className="w-full text-left px-3 py-2 text-xs text-red-500 dark:text-red-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
+    <aside className={`workspace-sidebar ${isCollapsed ? 'workspace-sidebar-collapsed' : ''}`}>
+      <div className={`flex items-center pb-5 pt-4 ${isCollapsed ? 'flex-col gap-3 px-2' : 'justify-between px-4'}`}>
+        <div className="flex items-center gap-2.5">
+          <img src={noteliteIcon} alt="" className="h-9 w-9 rounded-xl" />
+          {!isCollapsed && <span className="workspace-primary text-[15px] font-semibold tracking-tight">NoteLite</span>}
         </div>
-      </nav>
-
-      {/* User row — click to open settings */}
-      <div className="px-2 py-3 border-t border-zinc-200 dark:border-zinc-800">
         <button
-          onClick={openSettings}
-          className="w-full flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors group"
-          title="Settings"
+          onClick={() => setIsCollapsed((value) => !value)}
+          className="workspace-icon-button"
+          aria-label={isCollapsed ? 'Expand menu' : 'Collapse menu'}
+          title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-label text-white font-semibold shrink-0">
-            {initials}
-          </div>
-          <span className="text-xs text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-200 truncate flex-1 text-left transition-colors">
-            {user?.name ?? user?.email}
-          </span>
-          <svg className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-600 group-hover:text-zinc-600 dark:group-hover:text-zinc-400 shrink-0 transition-colors" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+            <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
       </div>
+
+      <nav className={`space-y-1 ${isCollapsed ? 'px-2' : 'px-3'}`}>
+        <NavLink to="/notes" className={navCls} title="All notes"><Icon name="notes" />{!isCollapsed && 'All notes'}</NavLink>
+        {isChatEnabled && <NavLink to="/chat" className={navCls} title="Ask NoteLite"><Icon name="chat" />{!isCollapsed && 'Ask NoteLite'}</NavLink>}
+      </nav>
+
+      <div className={`workspace-sidebar-body flex min-h-0 flex-1 flex-col ${isCollapsed ? 'mt-4' : 'mt-6'}`}>
+        {isChatPage ? (
+          <>
+            {!isCollapsed && <SectionHeader label="Recent conversations" />}
+            <div className={`workspace-scroll flex-1 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-2'}`}>
+              {!isCollapsed && conversations.length === 0 && <p className="workspace-faint px-3 py-3 text-xs">Your conversations will appear here.</p>}
+              {conversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  onClick={() => navigate(`/chat/${conversation.id}`)}
+                  title={conversation.title || 'Untitled conversation'}
+                  className={`conversation-row group ${isCollapsed ? 'conversation-row-collapsed' : ''} ${String(conversation.id) === activeConversationId ? 'conversation-row-active' : ''}`}
+                >
+                  <Icon name="chat" className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && (
+                    <>
+                      <span className="truncate flex-1">{conversation.title || 'Untitled conversation'}</span>
+                      <span role="button" tabIndex={0} onClick={(event) => handleDeleteConversation(event, conversation.id)} className="opacity-0 group-hover:opacity-100 hover:text-red-400">
+                        <Icon name="trash" className="h-3.5 w-3.5" />
+                      </span>
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            {!isCollapsed && <SectionHeader label="Workspace" />}
+            <div className={`workspace-folder-scroll workspace-scroll min-h-0 flex-1 overflow-y-auto pb-3 ${isCollapsed ? 'px-2' : 'px-3'}`}>
+              {folders.map((folder) => {
+                const folderNotes = notes.filter((note) => String(note.folder_id) === String(folder.id))
+                const isActiveFolder = String(folder.id) === String(folderId)
+                const isExpanded = expandedFolders[folder.id] ?? isActiveFolder
+                return (
+                  <div key={folder.id} className="mb-0.5">
+                    <div className={`folder-tree-row group ${isCollapsed ? 'folder-tree-row-collapsed' : ''} ${isActiveFolder ? 'workspace-nav-active' : ''}`}>
+                      <button
+                        onClick={() => {
+                          if (isCollapsed) {
+                            navigate(`/folders/${folder.id}`)
+                            return
+                          }
+                          setExpandedFolders((current) => ({ ...current, [folder.id]: !(current[folder.id] ?? isActiveFolder) }))
+                          navigate(`/folders/${folder.id}`)
+                        }}
+                        title={folder.name}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                      >
+                        {!isCollapsed && <Icon name="chevron" className={`h-3 w-3 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />}
+                        <Icon name="folder" className="h-4 w-4 shrink-0" />
+                        {!isCollapsed && <span className="truncate">{folder.name}</span>}
+                      </button>
+                      {!isCollapsed && <button onClick={(event) => handleNewNote(event, folder)} className="folder-tree-action" title="New note"><Icon name="plus" className="h-3.5 w-3.5" /></button>}
+                      {!isCollapsed && <button onClick={() => deleteFolder(folder.id).then(() => String(folder.id) === String(folderId) && navigate('/notes'))} className="folder-tree-action hover:text-red-400" title="Delete folder"><Icon name="trash" className="h-3.5 w-3.5" /></button>}
+                    </div>
+                    {!isCollapsed && isExpanded && (
+                      <div className="workspace-tree-border ml-4 border-l pl-2">
+                        {folderNotes.map((note) => (
+                          <div key={note.id} className={`folder-note-row group ${String(note.id) === String(activeNoteId) ? 'folder-note-active' : ''}`}>
+                            <button onClick={() => navigate(`/folders/${folder.id}?note=${note.id}`)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                              <Icon name="file" className="h-3.5 w-3.5 shrink-0" />
+                              <span className="truncate">{note.title || 'Untitled'}</span>
+                            </button>
+                            <button
+                              onClick={async (event) => {
+                                event.stopPropagation()
+                                await deleteNote(note.id)
+                                if (String(note.id) === String(activeNoteId)) navigate(`/folders/${folder.id}`)
+                              }}
+                              className="folder-note-delete"
+                              title={`Delete ${note.title || 'Untitled'}`}
+                            >
+                              <Icon name="trash" className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                        {folderNotes.length === 0 && <p className="workspace-faint px-2 py-1.5 text-[10px]">Empty folder</p>}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      <button
+        onClick={openSettings}
+        className={`workspace-profile flex items-center rounded-2xl text-left ${isCollapsed ? 'mx-auto mb-3 h-10 w-10 justify-center p-1' : 'm-3 gap-3 p-2.5'}`}
+        title="Profile and settings"
+      >
+        <ProfileAvatar />
+        {!isCollapsed && (
+          <>
+            <span className="min-w-0 flex-1">
+              <span className="workspace-primary block truncate text-xs font-medium">{user?.name || 'Your profile'}</span>
+              <span className="workspace-faint block truncate text-[10px]">{user?.email}</span>
+            </span>
+            <span className="workspace-faint">•••</span>
+          </>
+        )}
+      </button>
     </aside>
+  )
+}
+
+function SectionHeader({ label, action }) {
+  return (
+    <div className="mb-2 flex items-center justify-between px-5">
+      <span className="workspace-faint text-[10px] font-semibold uppercase tracking-[0.16em]">{label}</span>
+      {action && <button onClick={action} className="workspace-faint hover:text-[#7aa83a]"><Icon name="plus" className="h-3.5 w-3.5" /></button>}
+    </div>
   )
 }
