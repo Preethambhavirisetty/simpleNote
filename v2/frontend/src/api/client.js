@@ -2,9 +2,9 @@ import axios from 'axios'
 import { useAuthStore } from '@/stores/authStore'
 
 // In dev the Vite proxy rewrites /api/* → localhost:3001/api/* so baseURL stays relative.
-// In prod set VITE_BE_URL to your backend origin (e.g. https://api.yourapp.com).
+// Keep support for the older VITE_BE_URL name while using the documented env variable.
 const client = axios.create({
-  baseURL: import.meta.env.VITE_BE_URL ?? '',
+  baseURL: import.meta.env.VITE_API_BASE_URL ?? import.meta.env.VITE_BE_URL ?? '',
   withCredentials: true, // session cookie
 })
 

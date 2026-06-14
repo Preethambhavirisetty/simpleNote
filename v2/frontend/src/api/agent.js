@@ -1,36 +1,26 @@
-import agentClient, { AGENT_BASE_URL, AGENT_PATH_PREFIX, AGENT_API_KEY } from './agentClient'
-
-// In dev: AGENT_PATH_PREFIX = '/agent' and Vite proxies to the local agent.
-// In prod: AGENT_BASE_URL is the agent origin and paths begin with /api.
-const p = (path) => `${AGENT_PATH_PREFIX}${path}`
-
-export const agentApi = {
-  getStatus: (taskId) => agentClient.get(p(`/api/ingest/status/${taskId}`)),
-  ingest: (data) => agentClient.post(p('/api/ingest'), data),
-  getContext: (data) => agentClient.post(p('/api/chat/stream'), data),
-  chat: (data) => agentClient.post(p('/api/chat/completions'), data),
-}
-
-/** Stream SSE chat events until completion or until the caller aborts the request. */
-export async function streamChat({ body, signal, onMeta, onDelta, onDone, onError }) {
-  if (!AGENT_API_KEY) {
-    onError?.(new Error("Missing VITE_AGENT_API_KEY. Set it in frontend/.env and restart Vite."))
-    return
-  }
-
-  const url = AGENT_BASE_URL ? `${AGENT_BASE_URL}/api/chat/stream` : `${AGENT_PATH_PREFIX}/api/chat/stream`
+/**
+ * SSE streaming through the cookie-authenticated backend proxy.
+ * Events: meta, delta, error, done.
+ */
+export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
   let reader
   let doneFired = false
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch('/api/chat/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': AGENT_API_KEY },
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
       body: JSON.stringify(body),
       signal,
     })
-    if (!response.ok) throw new Error(`Agent responded with ${response.status}`)
-    if (!response.body) throw new Error('Agent response did not include a stream')
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null)
+      throw new Error(payload?.message ?? `Chat request failed with ${response.status}`)
+    }
 
     reader = response.body.getReader()
     const decoder = new TextDecoder()

@@ -22,10 +22,12 @@ export default function ChatPage() {
   const fetchConversations = useChatStore((s) => s.fetchConversations)
   const selectConversation = useChatStore((s) => s.selectConversation)
   const newConversation = useChatStore((s) => s.newConversation)
+  const deleteConversation = useChatStore((s) => s.deleteConversation)
   const sendMessage = useChatStore((s) => s.sendMessage)
-  const cancelStream = useChatStore((s) => s.cancelStream)
+  const retryLastMessage = useChatStore((s) => s.retryLastMessage)
 
   const [input, setInput] = useState('')
+  const [linkCopied, setLinkCopied] = useState(false)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const activeConversation = conversations.find((item) => String(item.id) === String(activeConvId))
@@ -58,6 +60,22 @@ export default function ChatPage() {
     textareaRef.current?.focus()
   }
 
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+      setLinkCopied(true)
+      window.setTimeout(() => setLinkCopied(false), 1500)
+    } catch {
+      setLinkCopied(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!activeConvId || !window.confirm('Delete this conversation?')) return
+    await deleteConversation(activeConvId)
+    navigate('/chat', { replace: true })
+  }
+
   return (
     <div className="chat-workspace flex h-full min-w-0 flex-col overflow-hidden">
       <header className="workspace-border flex h-[74px] shrink-0 items-center justify-between border-b px-6 lg:px-8">
@@ -68,8 +86,10 @@ export default function ChatPage() {
           </h1>
         </div>
         <div className="flex items-center gap-2">
-          <button className="chat-header-button">Share</button>
-          <button className="chat-header-icon" aria-label="More options">•••</button>
+          <button onClick={handleCopyLink} className="chat-header-button">{linkCopied ? 'Copied' : 'Copy link'}</button>
+          <button onClick={handleDelete} disabled={!activeConvId} className="chat-header-icon disabled:opacity-30" aria-label="Delete conversation" title="Delete conversation">
+            <TrashIcon />
+          </button>
         </div>
       </header>
 
@@ -82,7 +102,7 @@ export default function ChatPage() {
           <EmptyState user={user} onPrompt={handleSend} />
         ) : (
           <div className="mx-auto max-w-4xl px-5 pb-32 pt-8 sm:px-8">
-            {messages.map((message) => <Message key={message.id} message={message} user={user} />)}
+            {messages.map((message) => <Message key={message.id} message={message} user={user} onRetry={retryLastMessage} />)}
             <div ref={bottomRef} />
           </div>
         )}
@@ -95,7 +115,7 @@ export default function ChatPage() {
           textareaRef={textareaRef}
           isStreaming={isStreaming}
           onSend={() => handleSend()}
-          onCancel={cancelStream}
+          onPrompt={handleSend}
         />
       </div>
     </div>
@@ -126,9 +146,21 @@ function EmptyState({ user, onPrompt }) {
   )
 }
 
-function Message({ message, user }) {
+function Message({ message, user, onRetry }) {
   const isUser = message.role === 'user'
   const initials = user?.name?.[0]?.toUpperCase() ?? user?.email?.[0]?.toUpperCase() ?? 'Y'
+  const [copied, setCopied] = useState(false)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied(false)
+    }
+  }
 
   if (isUser) {
     return (
@@ -153,10 +185,30 @@ function Message({ message, user }) {
           <div className="chat-markdown"><ReactMarkdown>{message.content}</ReactMarkdown></div>
         )}
         {message.isStreaming && message.content && <span className="animate-pulse text-[#b8ff67]">▋</span>}
-        {!message.isStreaming && !message.isError && (
-          <div className="workspace-faint mt-3 flex gap-2 text-[10px]">
-            <button className="workspace-pill rounded-full px-2.5 py-1">Copy</button>
-            {message.sources?.length > 0 && <span className="workspace-pill rounded-full px-2.5 py-1">{message.sources.length} sources</span>}
+        {!message.isStreaming && (
+          <div className="workspace-faint mt-3 flex flex-wrap items-center gap-2 text-[10px]">
+            {!message.isError && <button onClick={handleCopy} className="workspace-pill rounded-full px-2.5 py-1">{copied ? 'Copied' : 'Copy'}</button>}
+            {!message.isError && message.sources?.length > 0 && (
+              <button onClick={() => setSourcesOpen((open) => !open)} className="workspace-pill rounded-full px-2.5 py-1">
+                {message.sources.length} {message.sources.length === 1 ? 'source' : 'sources'}
+              </button>
+            )}
+            {message.isError && <button onClick={onRetry} className="workspace-pill rounded-full px-2.5 py-1">Retry</button>}
+            <time title={formatTimestamp(message.timestamp)}>{shortTimestamp(message.timestamp)}</time>
+          </div>
+        )}
+        {sourcesOpen && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {message.sources.map((source, index) => (
+              <button
+                key={source}
+                onClick={() => window.open(`/notes?note=${source}`, '_blank', 'noopener,noreferrer')}
+                className="workspace-pill workspace-muted rounded-lg px-2.5 py-1.5 text-[10px]"
+                title={String(source)}
+              >
+                Source {index + 1}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -164,7 +216,7 @@ function Message({ message, user }) {
   )
 }
 
-function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel }) {
+function Composer({ input, setInput, textareaRef, isStreaming, onSend, onPrompt }) {
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -185,7 +237,16 @@ function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel 
       />
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-1.5 overflow-x-auto">
-          {['Brainstorm', 'Summarize', 'Plan'].map((item) => <span key={item} className="workspace-pill workspace-muted whitespace-nowrap rounded-full px-3 py-1.5 text-[10px]">{item}</span>)}
+          {prompts.map(([title, prompt]) => (
+            <button
+              key={title}
+              onClick={() => onPrompt(prompt)}
+              disabled={isStreaming}
+              className="workspace-pill workspace-muted whitespace-nowrap rounded-full px-3 py-1.5 text-[10px] disabled:opacity-40"
+            >
+              {title}
+            </button>
+          ))}
         </div>
         <button onClick={isStreaming ? onCancel : onSend} disabled={!isStreaming && !input.trim()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#b8ff67] text-sm font-semibold text-[#10140d] hover:bg-[#ccff8f] disabled:opacity-30">
           {isStreaming ? "Stop" : "↑"}
@@ -193,4 +254,25 @@ function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel 
       </div>
     </div>
   )
+}
+
+function TrashIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.9 12.1a2 2 0 01-2 1.9H7.9a2 2 0 01-2-1.9L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+  )
+}
+
+function shortTimestamp(timestamp) {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function formatTimestamp(timestamp) {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString()
 }

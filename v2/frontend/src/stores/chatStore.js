@@ -18,6 +18,7 @@ export const useChatStore = create(
       isLoadingConvs: false,
       isLoadingMessages: false,
       error: null,
+      lastQuery: null,
 
       // ── Conversation list ──────────────────────────────────────────
 
@@ -34,50 +35,28 @@ export const useChatStore = create(
       },
 
       selectConversation: async (convId) => {
-        if (!convId) return null
-        if (get().activeConvId === convId && !get().isLoadingMessages) return null
-        requestedConversationId = convId
-        if (get().activeConvId !== convId) {
-          _cancelActiveStream(set)
-          set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
+        if (get().activeConvId === convId) return
+        set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
+        try {
+          const conv = await conversationsApi.get(convId)
+          const msgs = (conv.messages ?? []).map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.status === 'error' ? _friendlyErrorMessage(new Error(m.error_message)) : m.content,
+            timestamp: m.created_at,
+            sources: m.sources_used,
+            isError: m.status === 'error',
+          }))
+          const lastUserMessage = [...msgs].reverse().find((message) => message.role === 'user')
+          set({ messages: msgs, lastQuery: lastUserMessage?.content ?? null, isLoadingMessages: false })
+        } catch (err) {
+          console.error('[chatStore] selectConversation failed:', err)
+          set({ isLoadingMessages: false, error: 'Failed to load conversation' })
         }
-
-        // Route effects can request the same conversation more than once in
-        // development. Share one GET and ignore responses for stale routes.
-        const pending = pendingConversationLoads.get(convId)
-        if (pending) return pending
-
-        const request = conversationsApi.get(convId)
-          .then((conv) => {
-            const msgs = (conv.messages ?? []).map((m) => {
-              const references = _normalizeReferences(m.sources_used)
-              return {
-                id: m.id,
-                role: m.role,
-                content: m.content,
-                timestamp: m.created_at,
-                sources: references.map((reference) => reference.note_id),
-                references,
-              }
-            })
-            if (requestedConversationId === convId) set({ messages: msgs, isLoadingMessages: false })
-            return conv
-          })
-          .catch((err) => {
-            console.error('[chatStore] selectConversation failed:', err)
-            if (requestedConversationId === convId) set({ isLoadingMessages: false, error: 'Failed to load conversation' })
-            return null
-          })
-          .finally(() => pendingConversationLoads.delete(convId))
-
-        pendingConversationLoads.set(convId, request)
-        return request
       },
 
       newConversation: () => {
-        requestedConversationId = null
-        _cancelActiveStream(set)
-        set({ activeConvId: null, messages: [], isLoadingMessages: false, error: null })
+        set({ activeConvId: null, messages: [], lastQuery: null, error: null })
       },
 
       deleteConversation: async (convId) => {
@@ -111,14 +90,12 @@ export const useChatStore = create(
           messages: [...s.messages, userMsg, assistantMsg],
           isStreaming: true,
           error: null,
+          lastQuery: query,
         }))
 
         const body = {
           query,
-          k: 20,
-          user_id: user.id,
-          role: user.roles?.includes('admin') ? 'admin' : 'user',
-          tenant_id: user.id,
+          k: 5,
           conversation_id: activeConvId || undefined,
           conversation_title: !activeConvId && messages.length === 0 ? query.slice(0, 100) : undefined,
         }
@@ -194,16 +171,21 @@ export const useChatStore = create(
           },
 
           onError: (err) => {
+            console.error('[chatStore] sendMessage failed:', err)
             _updateLastMsg(set, {
-              content: `Error: ${err.message}`,
+              content: _friendlyErrorMessage(err),
               isStreaming: false,
               isError: true,
             })
             set({ isStreaming: false, error: err.message })
           },
         })
+      },
 
-        if (activeStreamController === streamController) activeStreamController = null
+      retryLastMessage: async () => {
+        const { lastQuery, isStreaming } = get()
+        if (!lastQuery || isStreaming) return
+        await get().sendMessage(lastQuery)
       },
     }),
     { name: 'chat-store' },
@@ -224,23 +206,21 @@ function _updateLastMsg(set, patch) {
   }))
 }
 
-function _cancelActiveStream(set) {
-  if (!activeStreamController) return
-  activeStreamController.abort()
-  activeStreamController = null
-  set((state) => ({
-    isStreaming: false,
-    messages: state.messages.map((message, index) => index === state.messages.length - 1 && message.isStreaming
-      ? { ...message, content: message.content || 'Response stopped.', isStreaming: false, isCancelled: true }
-      : message),
-  }))
-}
-
-function _normalizeReferences(raw) {
-  if (!Array.isArray(raw)) return []
-  return raw
-    .map((reference) => typeof reference === 'object'
-      ? reference
-      : { note_id: reference, title: 'Referenced note' })
-    .filter((reference) => reference?.note_id)
+function _friendlyErrorMessage(err) {
+  const message = err?.message?.toLowerCase() ?? ''
+  if (message.includes('401') || message.includes('403')) {
+    return 'Your chat session could not be verified. Please sign in again.'
+  }
+  if (
+    message.includes('failed to fetch')
+    || message.includes('network')
+    || message.includes('chat request failed with 5')
+    || message.includes('temporarily unavailable')
+  ) {
+    return 'Something went wrong on our end. Please try again.'
+  }
+  if (message.includes('inference')) {
+    return 'The AI response service is not running. Start the full app and try again.'
+  }
+  return 'Something went wrong. Please try again.'
 }
