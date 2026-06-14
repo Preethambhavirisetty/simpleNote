@@ -5,6 +5,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useFeatureFlagStore } from '@/stores/featureFlagStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import FeatureGate from '@/components/FeatureGate'
+import RouteErrorPage from '@/components/RouteErrorPage'
 import AppLayout from '@/pages/AppLayout'
 import LoginPage from '@/pages/auth/LoginPage'
 import RegisterPage from '@/pages/auth/RegisterPage'
@@ -17,6 +18,7 @@ const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   {
+    errorElement: <RouteErrorPage />,
     element: (
       <ProtectedRoute>
         <AppLayout />

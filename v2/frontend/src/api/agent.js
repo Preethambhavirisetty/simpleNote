@@ -2,7 +2,7 @@
  * SSE streaming through the cookie-authenticated backend proxy.
  * Events: meta, delta, error, done.
  */
-export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
+export async function streamChat({ body, signal, onMeta, onDelta, onDone, onError }) {
   let reader
   let doneFired = false
 
@@ -19,9 +19,10 @@ export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => null)
-      throw new Error(payload?.message ?? `Chat request failed with ${response.status}`)
+      throw new Error(payload?.message ?? payload?.detail ?? ('Chat request failed with ' + response.status))
     }
 
+    if (!response.body) throw new Error('Chat response did not include a stream')
     reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''

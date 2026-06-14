@@ -5,7 +5,6 @@ import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
 
 let activeStreamController = null
-const pendingConversationLoads = new Map()
 let requestedConversationId = null
 
 export const useChatStore = create(
@@ -36,17 +35,22 @@ export const useChatStore = create(
 
       selectConversation: async (convId) => {
         if (get().activeConvId === convId) return
+        _cancelActiveStream(set)
         set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
         try {
           const conv = await conversationsApi.get(convId)
-          const msgs = (conv.messages ?? []).map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.status === 'error' ? _friendlyErrorMessage(new Error(m.error_message)) : m.content,
-            timestamp: m.created_at,
-            sources: m.sources_used,
-            isError: m.status === 'error',
-          }))
+          const msgs = (conv.messages ?? []).map((m) => {
+            const references = _normalizeReferences(m.sources_used)
+            return {
+              id: m.id,
+              role: m.role,
+              content: m.status === 'error' ? _friendlyErrorMessage(new Error(m.error_message)) : m.content,
+              timestamp: m.created_at,
+              sources: references.map((reference) => reference.note_id),
+              references,
+              isError: m.status === 'error',
+            }
+          })
           const lastUserMessage = [...msgs].reverse().find((message) => message.role === 'user')
           set({ messages: msgs, lastQuery: lastUserMessage?.content ?? null, isLoadingMessages: false })
         } catch (err) {
@@ -56,6 +60,7 @@ export const useChatStore = create(
       },
 
       newConversation: () => {
+        _cancelActiveStream(set)
         set({ activeConvId: null, messages: [], lastQuery: null, error: null })
       },
 
@@ -180,6 +185,7 @@ export const useChatStore = create(
             set({ isStreaming: false, error: err.message })
           },
         })
+        if (activeStreamController === streamController) activeStreamController = null
       },
 
       retryLastMessage: async () => {
@@ -223,4 +229,25 @@ function _friendlyErrorMessage(err) {
     return 'The AI response service is not running. Start the full app and try again.'
   }
   return 'Something went wrong. Please try again.'
+}
+
+function _cancelActiveStream(set) {
+  if (!activeStreamController) return
+  activeStreamController.abort()
+  activeStreamController = null
+  set((state) => ({
+    isStreaming: false,
+    messages: state.messages.map((message, index) => index === state.messages.length - 1 && message.isStreaming
+      ? { ...message, content: message.content || 'Response stopped.', isStreaming: false, isCancelled: true }
+      : message),
+  }))
+}
+
+function _normalizeReferences(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((reference) => typeof reference === 'object'
+      ? reference
+      : { note_id: reference, title: 'Referenced note' })
+    .filter((reference) => reference?.note_id)
 }

@@ -24,6 +24,7 @@ export default function ChatPage() {
   const newConversation = useChatStore((s) => s.newConversation)
   const deleteConversation = useChatStore((s) => s.deleteConversation)
   const sendMessage = useChatStore((s) => s.sendMessage)
+  const cancelStream = useChatStore((s) => s.cancelStream)
   const retryLastMessage = useChatStore((s) => s.retryLastMessage)
 
   const [input, setInput] = useState('')
@@ -115,6 +116,7 @@ export default function ChatPage() {
           textareaRef={textareaRef}
           isStreaming={isStreaming}
           onSend={() => handleSend()}
+          onCancel={cancelStream}
           onPrompt={handleSend}
         />
       </div>
@@ -216,7 +218,7 @@ function Message({ message, user, onRetry }) {
   )
 }
 
-function Composer({ input, setInput, textareaRef, isStreaming, onSend, onPrompt }) {
+function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel, onPrompt }) {
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()

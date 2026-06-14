@@ -6,6 +6,7 @@ import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useNoteStore } from '@/stores/noteStore'
 import { useFolderStore } from '@/stores/folderStore'
+import { useTagStore } from '@/stores/tagStore'
 
 const AUTOSAVE_MS = 1200
 
@@ -71,8 +72,12 @@ export default function NotesPage() {
   const updateNote = useNoteStore((s) => s.updateNote)
   const deleteNote = useNoteStore((s) => s.deleteNote)
   const clearActiveNote = useNoteStore((s) => s.clearActiveNote)
+  const addTag = useNoteStore((s) => s.addTag)
+  const removeTag = useNoteStore((s) => s.removeTag)
   const folders = useFolderStore((s) => (Array.isArray(s.folders) ? s.folders : []))
   const createFolder = useFolderStore((s) => s.createFolder)
+  const tags = useTagStore((s) => s.tags)
+  const createTag = useTagStore((s) => s.createTag)
 
   const [search, setSearch] = useState('')
   const currentFolder = folders.find((folder) => String(folder.id) === String(folderId))
@@ -126,7 +131,11 @@ export default function NotesPage() {
       <NoteEditor
         note={activeNote}
         isSaving={isSaving}
-        onSave={(payload) => activeNote?.id && updateNote(activeNote.id, payload)}
+        onSave={(id, payload) => updateNote(id, payload)}
+        tags={tags}
+        onCreateTag={createTag}
+        onAddTag={(tag) => activeNote?.id && addTag(activeNote.id, tag)}
+        onRemoveTag={(tag) => activeNote?.id && removeTag(activeNote.id, tag)}
         onBack={() => navigate(folderId ? `/folders/${folderId}` : '/notes')}
         onDelete={() => activeNote?.id && handleDelete(activeNote.id)}
       />
@@ -197,14 +206,15 @@ function NoteCard({ note, index, active, onSelect, onDelete, onPin }) {
   )
 }
 
-function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
+function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTag, onAddTag, onRemoveTag }) {
   const [title, setTitle] = useState('')
   const [dirty, setDirty] = useState(false)
   const timerRef = useRef(null)
+  const noteIdRef = useRef(note?.id)
   const titleRef = useRef('')
   const noteSnapshotRef = useRef(note)
   const onSaveRef = useRef(onSave)
-  useEffect(() => { noteSnapshotRef.current = note }, [note])
+  useEffect(() => { noteSnapshotRef.current = note; noteIdRef.current = note?.id }, [note])
   useEffect(() => { onSaveRef.current = onSave }, [onSave])
 
   const editor = useEditor({
@@ -221,7 +231,8 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
       clearTimeout(timerRef.current)
       const content = instance.getJSON()
       timerRef.current = setTimeout(() => {
-        onSaveRef.current({ title: titleRef.current, content })
+        timerRef.current = null
+        onSaveRef.current(noteIdRef.current, { title: titleRef.current, content })
         setDirty(false)
       }, AUTOSAVE_MS)
     },
@@ -240,7 +251,12 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
     })
   }, [note?.id, editor])
 
-  useEffect(() => () => clearTimeout(timerRef.current), [])
+  useEffect(() => () => {
+    if (!timerRef.current || !note?.id || !editor || editor.isDestroyed) return
+    clearTimeout(timerRef.current)
+    timerRef.current = null
+    onSaveRef.current(note.id, { title: titleRef.current, content: editor.getJSON() })
+  }, [editor, note?.id])
 
   const handleTitle = (event) => {
     const value = event.target.value
@@ -249,7 +265,8 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
     setDirty(true)
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
-      onSaveRef.current({ title: value, content: editor?.getJSON() })
+      timerRef.current = null
+      onSaveRef.current(noteIdRef.current, { title: value, content: editor?.getJSON() })
       setDirty(false)
     }, AUTOSAVE_MS)
   }
@@ -269,12 +286,9 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
 
       <EditorToolbar editor={editor} />
 
-      <div className="workspace-scroll flex-1 overflow-y-auto">
+      <div className="workspace-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="note-page">
-          <div className="mb-6 flex flex-wrap gap-2">
-            {note.tags?.map((tag) => <span key={tag.id} className="note-tag">#{tag.name}</span>)}
-            {note.tags?.length === 0 && <span className="workspace-faint text-[11px]">Tags will appear here</span>}
-          </div>
+          <TagEditor note={note} tags={tags} onCreate={onCreateTag} onAdd={onAddTag} onRemove={onRemoveTag} />
           <input value={title} onChange={handleTitle} placeholder="Untitled note" className="note-title-input" />
           <div className="workspace-faint mb-9 mt-3 flex items-center gap-2 text-[10px]">
             <span>Last edited {relativeTime(note.updated_at)}</span><span>•</span><span>Autosaved</span>
@@ -283,6 +297,43 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete }) {
         </div>
       </div>
     </section>
+  )
+}
+
+function TagEditor({ note, tags, onCreate, onAdd, onRemove }) {
+  const [name, setName] = useState('')
+  const attachedIds = new Set(note.tags?.map((tag) => tag.id) ?? [])
+  const available = tags.filter((tag) => !attachedIds.has(tag.id))
+
+  const handleCreate = async (event) => {
+    event.preventDefault()
+    const value = name.trim()
+    if (!value) return
+    const result = await onCreate(value)
+    if (result?.ok) {
+      await onAdd(result.tag)
+      setName('')
+    }
+  }
+
+  return (
+    <div className="tag-editor">
+      <div className="flex flex-wrap gap-2">
+        {note.tags?.map((tag) => (
+          <button key={tag.id} onClick={() => onRemove(tag)} className="note-tag tag-remove" title={`Remove ${tag.name}`}>#{tag.name} <span>×</span></button>
+        ))}
+        {available.length > 0 && (
+          <select defaultValue="" onChange={(event) => { const tag = tags.find((item) => item.id === event.target.value); if (tag) onAdd(tag); event.target.value = "" }} className="tag-select">
+            <option value="" disabled>Add tag</option>
+            {available.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}
+          </select>
+        )}
+      </div>
+      <form onSubmit={handleCreate} className="tag-create">
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Create a tag" maxLength={100} />
+        <button type="submit" disabled={!name.trim()}>Add</button>
+      </form>
+    </div>
   )
 }
 

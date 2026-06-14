@@ -4,6 +4,7 @@ import { notesApi } from '@/api/notes'
 import { unwrap, unwrapList } from '@/lib/api'
 
 const pendingNoteLoads = new Map()
+const pendingNoteUpdates = new Map()
 let requestedNoteId = null
 
 // ---------- TipTap helpers ----------
@@ -107,22 +108,33 @@ export const useNoteStore = create(
       },
 
       updateNote: async (noteId, payload) => {
+        const previous = pendingNoteUpdates.get(noteId) ?? Promise.resolve()
         set({ isSaving: true })
-        try {
-          const { data } = await notesApi.update(noteId, payload)
-          const note = normalizeNote(unwrap(data))
-          set((s) => ({
-            notes: s.notes.map((n) => (n.id === noteId ? note : n)),
-            activeNote: s.activeNote?.id === noteId ? note : s.activeNote,
-          }))
-          return { ok: true, note }
-        } catch (err) {
-          console.error('[noteStore] updateNote:', err.response?.data ?? err.message)
-          return { ok: false, error: err.response?.data?.detail ?? err.message }
-        } finally {
-          set({ isSaving: false })
+        const request = previous.catch(() => {}).then(async () => {
+          try {
+            const { data } = await notesApi.update(noteId, payload)
+            const note = normalizeNote(unwrap(data))
+            set((s) => ({
+              notes: s.notes.map((n) => (n.id === noteId ? note : n)),
+              activeNote: s.activeNote?.id === noteId ? note : s.activeNote,
+            }))
+            return { ok: true, note }
+          } catch (err) {
+            console.error('[noteStore] updateNote:' , err.response?.data ?? err.message)
+            return { ok: false, error: err.response?.data?.detail ?? err.message }
+          }
+        })
+        pendingNoteUpdates.set(noteId, request)
+        const result = await request
+        if (pendingNoteUpdates.get(noteId) === request) {
+          pendingNoteUpdates.delete(noteId)
+          set({ isSaving: pendingNoteUpdates.size > 0 })
         }
+        return result
       },
+
+      addTag: async (noteId, tag) => _updateTagAssociation(set, noteId, tag, true),
+      removeTag: async (noteId, tag) => _updateTagAssociation(set, noteId, tag, false),
 
       deleteNote: async (noteId) => {
         try {
@@ -157,3 +169,24 @@ export const useNoteStore = create(
     { name: 'note-store' },
   ),
 )
+
+async function _updateTagAssociation(set, noteId, tag, add) {
+  try {
+    if (add) await notesApi.addTag(noteId, tag.id)
+    else await notesApi.removeTag(noteId, tag.id)
+    const update = (note) => {
+      if (note.id !== noteId) return note
+      const tags = add
+        ? [...(note.tags ?? []).filter((item) => item.id !== tag.id), tag]
+        : (note.tags ?? []).filter((item) => item.id !== tag.id)
+      return { ...note, tags }
+    }
+    set((state) => ({
+      notes: state.notes.map(update),
+      activeNote: state.activeNote ? update(state.activeNote) : null,
+    }))
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.response?.data?.detail ?? err.message }
+  }
+}

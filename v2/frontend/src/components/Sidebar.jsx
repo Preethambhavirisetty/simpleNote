@@ -149,7 +149,7 @@ export default function Sidebar() {
                       {!isCollapsed && <button onClick={() => deleteFolder(folder.id).then(() => String(folder.id) === String(folderId) && navigate('/notes'))} className="folder-tree-action hover:text-red-400" title="Delete folder"><Icon name="trash" className="h-3.5 w-3.5" /></button>}
                     </div>
                     {!isCollapsed && isExpanded && (
-                      <div className="workspace-tree-border ml-4 border-l pl-2">
+                      <div className="folder-note-list workspace-tree-border border-l">
                         {folderNotes.map((note) => (
                           <div key={note.id} className={`folder-note-row group ${String(note.id) === String(activeNoteId) ? 'folder-note-active' : ''}`}>
                             <button onClick={() => navigate(`/folders/${folder.id}?note=${note.id}`)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
