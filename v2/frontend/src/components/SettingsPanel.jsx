@@ -10,7 +10,7 @@ import { CHARACTER_OPTIONS } from '@/lib/avatarOptions'
 // ---------- Section wrapper ----------
 function Section({ title, children }) {
   return (
-    <div className="py-4 px-5 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="settings-section">
       {title && (
         <p className="text-label font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
           {title}
@@ -233,12 +233,12 @@ export default function SettingsPanel() {
       {/* Panel */}
       <div
         ref={panelRef}
-        className={`fixed top-0 right-0 bottom-0 z-50 w-80 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
+        className={`settings-panel fixed top-0 right-0 bottom-0 z-50 w-80 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
           isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="settings-panel-header flex items-center justify-between px-5 py-4">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Settings</h2>
           <button
             onClick={close}
@@ -298,7 +298,7 @@ export default function SettingsPanel() {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-zinc-200 dark:border-zinc-800">
+        <div className="settings-panel-footer px-5 py-4">
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"

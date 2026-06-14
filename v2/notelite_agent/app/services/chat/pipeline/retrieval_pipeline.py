@@ -277,17 +277,15 @@ def assemble_context(
             if document is not seed:
                 neighbor_count += 1
 
-    context_texts = [
-        document.text
-        for document in _order_context_documents(context_documents, selected_seeds)
-    ]
+    ordered_context_documents = _order_context_documents(context_documents, selected_seeds)
+    context_texts = [document.text for document in ordered_context_documents]
     document_ids = _document_ids(selected_seeds)
     if _should_attach_summaries(selected_seeds, document_ids):
         for summary in postgres.summaries(document_ids, RETRIEVAL_MAX_SUMMARIES):
             if count_tokens(summary) <= RETRIEVAL_SUMMARY_BUDGET:
                 context_texts.append(f"Document summary:\n{summary}")
 
-    references = _references(selected_seeds)
+    references = _references(selected_seeds, ordered_context_documents)
     diagnostics = {
         "remaining_chunk_budget": remaining_budget,
         "expanded_context_count": len(context_texts),
@@ -549,28 +547,52 @@ def _bounded_history(history: Sequence[Mapping[str, str]] | None) -> list[dict[s
     return list(reversed(result))
 
 
-def _references(seeds: Sequence[SearchHit]) -> list[dict[str, Any]]:
+def _references(
+    seeds: Sequence[SearchHit],
+    context_documents: Sequence[LlamaDocument],
+) -> list[dict[str, Any]]:
     references: list[dict[str, Any]] = []
     by_note_id: dict[str, dict[str, Any]] = {}
+    seed_scores = {_document_identity(document): score for document, score in seeds}
 
     for document, _score in seeds:
         note_id = str(document.metadata.get("note_id") or "")
-        if not note_id:
+        if not note_id or note_id in by_note_id:
             continue
-        chunk_id = str(document.metadata.get("chunk_id"))
-        if note_id in by_note_id:
-            by_note_id[note_id]["chunk_ids"].append(chunk_id)
-            continue
-
         reference = {
             "note_id": note_id,
             "folder_id": str(document.metadata.get("folder_id") or ""),
             "title": str(document.metadata.get("note_title") or "Untitled"),
             "folder": str(document.metadata.get("folder_title") or ""),
-            "chunk_ids": [chunk_id],
+            "chunk_ids": [],
+            "chunks": [],
         }
         references.append(reference)
         by_note_id[note_id] = reference
+
+    for document in context_documents:
+        note_id = str(document.metadata.get("note_id") or "")
+        reference = by_note_id.get(note_id)
+        if reference is None:
+            continue
+        identity = _document_identity(document)
+        chunk_id = str(document.metadata.get("chunk_id") or document.id_)
+        if chunk_id in reference["chunk_ids"]:
+            continue
+        reference["chunk_ids"].append(chunk_id)
+        reference["chunks"].append({
+            "chunk_id": chunk_id,
+            "doc_id": str(document.metadata.get("doc_id") or ""),
+            "chunk_index": document.metadata.get("chunk_index"),
+            "total_chunks": document.metadata.get("total_chunks"),
+            "chunk_type": str(document.metadata.get("chunk_type") or ""),
+            "text": document.text,
+            "is_seed": identity in seed_scores,
+            "score": seed_scores.get(identity),
+            "keywords": document.metadata.get("keywords") or [],
+            "entities": document.metadata.get("entities") or [],
+        })
+
     return references
 
 

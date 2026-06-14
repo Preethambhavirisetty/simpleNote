@@ -61,6 +61,13 @@ export default function ChatPage() {
     textareaRef.current?.focus()
   }
 
+  const handleNewChat = () => {
+    newConversation()
+    setInput('')
+    navigate('/chat')
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }
+
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href)
@@ -87,6 +94,7 @@ export default function ChatPage() {
           </h1>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={handleNewChat} className="chat-new-button"><PlusIcon />New chat</button>
           <button onClick={handleCopyLink} className="chat-header-button">{linkCopied ? 'Copied' : 'Copy link'}</button>
           <button onClick={handleDelete} disabled={!activeConvId} className="chat-header-icon disabled:opacity-30" aria-label="Delete conversation" title="Delete conversation">
             <TrashIcon />
@@ -190,31 +198,65 @@ function Message({ message, user, onRetry }) {
         {!message.isStreaming && (
           <div className="workspace-faint mt-3 flex flex-wrap items-center gap-2 text-[10px]">
             {!message.isError && <button onClick={handleCopy} className="workspace-pill rounded-full px-2.5 py-1">{copied ? 'Copied' : 'Copy'}</button>}
-            {!message.isError && message.sources?.length > 0 && (
+            {!message.isError && message.references?.length > 0 && (
               <button onClick={() => setSourcesOpen((open) => !open)} className="workspace-pill rounded-full px-2.5 py-1">
-                {message.sources.length} {message.sources.length === 1 ? 'source' : 'sources'}
+                {message.references.length} {message.references.length === 1 ? 'source' : 'sources'} · chunks
               </button>
             )}
             {message.isError && <button onClick={onRetry} className="workspace-pill rounded-full px-2.5 py-1">Retry</button>}
             <time title={formatTimestamp(message.timestamp)}>{shortTimestamp(message.timestamp)}</time>
           </div>
         )}
-        {sourcesOpen && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {message.sources.map((source, index) => (
-              <button
-                key={source}
-                onClick={() => window.open(`/notes?note=${source}`, '_blank', 'noopener,noreferrer')}
-                className="workspace-pill workspace-muted rounded-lg px-2.5 py-1.5 text-[10px]"
-                title={String(source)}
-              >
-                Source {index + 1}
-              </button>
-            ))}
-          </div>
-        )}
+        {sourcesOpen && <SourceDebugPanel references={message.references} />}
       </div>
     </div>
+  )
+}
+
+function SourceDebugPanel({ references }) {
+  return (
+    <aside className="source-debug-panel">
+      <div className="source-debug-heading">
+        <span>Retrieval evidence</span>
+        <span>{references.reduce((count, reference) => count + (reference.chunks?.length ?? 0), 0)} context chunks</span>
+      </div>
+      {references.map((reference) => (
+        <details key={reference.note_id} className="source-debug-note">
+          <summary>
+            <span className="min-w-0 flex-1">
+              <strong>{reference.title || 'Untitled note'}</strong>
+              <small>{reference.folder ? `${reference.folder} · ` : ''}{reference.chunks?.length ?? reference.chunk_ids?.length ?? 0} chunks</small>
+            </span>
+            <button type="button" onClick={(event) => { event.preventDefault(); window.open(reference.folder_id ? `/folders/${reference.folder_id}?note=${reference.note_id}` : `/notes?note=${reference.note_id}`, '_blank', 'noopener,noreferrer') }}>
+              Open note
+            </button>
+          </summary>
+          <div className="source-debug-chunks">
+            {reference.chunks?.length ? reference.chunks.map((chunk) => <ChunkDebugCard key={chunk.chunk_id} chunk={chunk} />) : (
+              <p className="source-debug-legacy">Exact chunk text was not stored for this older response. Chunk IDs: {(reference.chunk_ids ?? []).join(', ') || 'unavailable'}.</p>
+            )}
+          </div>
+        </details>
+      ))}
+    </aside>
+  )
+}
+
+function ChunkDebugCard({ chunk }) {
+  const position = Number.isInteger(chunk.chunk_index)
+    ? `${chunk.chunk_index + 1}${chunk.total_chunks ? ` / ${chunk.total_chunks}` : ''}`
+    : 'unknown'
+  return (
+    <article className="source-debug-chunk">
+      <div className="source-debug-meta">
+        <span>{chunk.is_seed ? 'Selected chunk' : 'Neighbor context'}</span>
+        <span>Position {position}</span>
+        {chunk.chunk_type && <span>{chunk.chunk_type}</span>}
+        {typeof chunk.score === 'number' && <span>Score {chunk.score.toFixed(4)}</span>}
+        <code>{chunk.chunk_id}</code>
+      </div>
+      <pre>{chunk.text}</pre>
+    </article>
   )
 }
 
@@ -255,6 +297,14 @@ function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel,
         </button>
       </div>
     </div>
+  )
+}
+
+function PlusIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />
+    </svg>
   )
 }
 
