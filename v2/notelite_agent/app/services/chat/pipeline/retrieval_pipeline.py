@@ -17,8 +17,10 @@ from app.core.config import (
     HYDE_TIMEOUT,
     LLM_SUMMARIZER_MODEL,
     RETRIEVAL_CHUNK_BUDGET,
+    RETRIEVAL_CONTEXT_SEED_LIMIT,
     RETRIEVAL_HISTORY_BUDGET,
     RETRIEVAL_MAX_SUMMARIES,
+    RETRIEVAL_NEIGHBOR_SEED_LIMIT,
     RETRIEVAL_RRF_K,
     RETRIEVAL_RRF_TOP_K,
     RETRIEVAL_RRF_WEIGHTS,
@@ -50,6 +52,7 @@ _MONTH_PATTERN = re.compile(
     r"november|december)\b",
     re.IGNORECASE,
 )
+_NUMBER_PATTERN = re.compile(r"(?<!\w)\d+(?:[.,]\d+)*(?:%|\b)")
 
 
 @dataclass(frozen=True)
@@ -137,7 +140,11 @@ def generate_hyde(prepared: PreparedQuery) -> tuple[str | None, str]:
     except Exception as exc:
         return None, f"fallback:{type(exc).__name__}"
 
-    return (value or None), "completed" if value else "empty"
+    if not value:
+        return None, "empty"
+    if _invented_numbers(value, prepared.original_query):
+        return None, "rejected:unsupported_numbers"
+    return value, "completed"
 
 
 def embed_query(
@@ -243,12 +250,21 @@ def assemble_context(
     seeds: Sequence[SearchHit],
 ) -> tuple[list[str], list[dict[str, Any]], dict[str, Any]]:
     """Expand seed chunks with neighbors and selectively attach summaries."""
-    context_texts: list[str] = []
+    selected_seeds = list(seeds[:RETRIEVAL_CONTEXT_SEED_LIMIT])
+    context_documents: list[LlamaDocument] = []
     seen: set[tuple[str, str]] = set()
     remaining_budget = RETRIEVAL_CHUNK_BUDGET
+    neighbor_count = 0
 
-    for seed, _score in seeds:
-        for document in _seed_with_neighbors(store, postgres, seed):
+    for index, (seed, _score) in enumerate(selected_seeds):
+        documents = [seed]
+        if (
+            index < RETRIEVAL_NEIGHBOR_SEED_LIMIT
+            and count_tokens(seed.text) < _FRAGMENT_TOKEN_THRESHOLD
+        ):
+            documents = _seed_with_neighbors(store, postgres, seed)
+
+        for document in documents:
             if document is None:
                 continue
             identity = _document_identity(document)
@@ -256,19 +272,27 @@ def assemble_context(
             if identity in seen or token_count > remaining_budget:
                 continue
             seen.add(identity)
-            context_texts.append(document.text)
+            context_documents.append(document)
             remaining_budget -= token_count
+            if document is not seed:
+                neighbor_count += 1
 
-    document_ids = _document_ids(seeds)
-    if _should_attach_summaries(seeds, document_ids):
+    context_texts = [
+        document.text
+        for document in _order_context_documents(context_documents, selected_seeds)
+    ]
+    document_ids = _document_ids(selected_seeds)
+    if _should_attach_summaries(selected_seeds, document_ids):
         for summary in postgres.summaries(document_ids, RETRIEVAL_MAX_SUMMARIES):
             if count_tokens(summary) <= RETRIEVAL_SUMMARY_BUDGET:
                 context_texts.append(f"Document summary:\n{summary}")
 
-    references = _references(seeds)
+    references = _references(selected_seeds)
     diagnostics = {
         "remaining_chunk_budget": remaining_budget,
         "expanded_context_count": len(context_texts),
+        "context_seed_count": len(selected_seeds),
+        "neighbor_count": neighbor_count,
     }
     return context_texts, references, diagnostics
 
@@ -574,3 +598,42 @@ def _document_identity(document: LlamaDocument) -> tuple[str, str]:
 
 def _identity_text(identity: tuple[str, str]) -> str:
     return f"{identity[0]}::{identity[1]}"
+
+
+def _invented_numbers(generated_text: str, query: str) -> bool:
+    query_numbers = {
+        match.group(0).replace(",", "").casefold()
+        for match in _NUMBER_PATTERN.finditer(query)
+    }
+    generated_numbers = {
+        match.group(0).replace(",", "").casefold()
+        for match in _NUMBER_PATTERN.finditer(generated_text)
+    }
+    return bool(generated_numbers - query_numbers)
+
+
+def _order_context_documents(
+    documents: Sequence[LlamaDocument],
+    seeds: Sequence[SearchHit],
+) -> list[LlamaDocument]:
+    document_rank = {
+        document_id: rank
+        for rank, document_id in enumerate(_document_ids(seeds))
+    }
+    return sorted(
+        documents,
+        key=lambda document: (
+            document_rank.get(
+                str(document.metadata.get("doc_id", "")),
+                len(document_rank),
+            ),
+            _chunk_index(document),
+        ),
+    )
+
+
+def _chunk_index(document: LlamaDocument) -> int:
+    try:
+        return int(document.metadata.get("chunk_index", 0))
+    except (TypeError, ValueError):
+        return 0

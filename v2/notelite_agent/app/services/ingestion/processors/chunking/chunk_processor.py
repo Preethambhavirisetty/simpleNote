@@ -146,10 +146,17 @@ class ChunkProcessor:
                     previous.metadata.get("heading_context")
                     and previous.metadata.get("heading_context") == chunk.metadata.get("heading_context")
                 )
+                semantic_continuation = (
+                    previous.chunk_type in {
+                        ChunkType.FAQ.value,
+                        ChunkType.GLOSSARY.value,
+                    }
+                    and chunk.chunk_type == ChunkType.CONTENT.value
+                )
                 compatible = any(
                     previous.chunk_type in group and chunk.chunk_type in group
                     for group in compatible_groups
-                ) or (
+                ) or semantic_continuation or (
                     ChunkType.APPENDIX.value in {previous.chunk_type, chunk.chunk_type}
                     and previous.chunk_type in appendix_types
                     and chunk.chunk_type in appendix_types
