@@ -1,6 +1,0 @@
-# Exclude model files from build context — they are mounted as a volume at runtime.
-# Without this, podman/docker would try to send ~10 GB to the build daemon.
-models/
-build/
-*.gguf
-.env

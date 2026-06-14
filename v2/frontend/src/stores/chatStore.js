@@ -4,6 +4,10 @@ import { conversationsApi } from '@/api/conversations'
 import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
 
+let activeStreamController = null
+const pendingConversationLoads = new Map()
+let requestedConversationId = null
+
 export const useChatStore = create(
   devtools(
     (set, get) => ({
@@ -30,32 +34,57 @@ export const useChatStore = create(
       },
 
       selectConversation: async (convId) => {
-        if (get().activeConvId === convId) return
-        set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
-        try {
-          const conv = await conversationsApi.get(convId)
-          const msgs = (conv.messages ?? []).map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            timestamp: m.created_at,
-            sources: m.sources_used,
-          }))
-          set({ messages: msgs, isLoadingMessages: false })
-        } catch (err) {
-          console.error('[chatStore] selectConversation failed:', err)
-          set({ isLoadingMessages: false, error: 'Failed to load conversation' })
+        if (!convId) return null
+        if (get().activeConvId === convId && !get().isLoadingMessages) return null
+        requestedConversationId = convId
+        if (get().activeConvId !== convId) {
+          _cancelActiveStream(set)
+          set({ activeConvId: convId, messages: [], isLoadingMessages: true, error: null })
         }
+
+        // Route effects can request the same conversation more than once in
+        // development. Share one GET and ignore responses for stale routes.
+        const pending = pendingConversationLoads.get(convId)
+        if (pending) return pending
+
+        const request = conversationsApi.get(convId)
+          .then((conv) => {
+            const msgs = (conv.messages ?? []).map((m) => {
+              const references = _normalizeReferences(m.sources_used)
+              return {
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                timestamp: m.created_at,
+                sources: references.map((reference) => reference.note_id),
+                references,
+              }
+            })
+            if (requestedConversationId === convId) set({ messages: msgs, isLoadingMessages: false })
+            return conv
+          })
+          .catch((err) => {
+            console.error('[chatStore] selectConversation failed:', err)
+            if (requestedConversationId === convId) set({ isLoadingMessages: false, error: 'Failed to load conversation' })
+            return null
+          })
+          .finally(() => pendingConversationLoads.delete(convId))
+
+        pendingConversationLoads.set(convId, request)
+        return request
       },
 
       newConversation: () => {
-        set({ activeConvId: null, messages: [], error: null })
+        requestedConversationId = null
+        _cancelActiveStream(set)
+        set({ activeConvId: null, messages: [], isLoadingMessages: false, error: null })
       },
 
       deleteConversation: async (convId) => {
         try {
           await conversationsApi.delete(convId)
           const { activeConvId } = get()
+          if (requestedConversationId === convId) requestedConversationId = null
           set((s) => ({
             conversations: s.conversations.filter((c) => c.id !== convId),
             ...(activeConvId === convId ? { activeConvId: null, messages: [] } : {}),
@@ -67,7 +96,10 @@ export const useChatStore = create(
 
       // ── Streaming chat ─────────────────────────────────────────────
 
+      cancelStream: () => _cancelActiveStream(set),
+
       sendMessage: async (query) => {
+        _cancelActiveStream(set)
         const { user } = useAuthStore.getState()
         if (!user) return
 
@@ -83,7 +115,7 @@ export const useChatStore = create(
 
         const body = {
           query,
-          k: 5,
+          k: 20,
           user_id: user.id,
           role: user.roles?.includes('admin') ? 'admin' : 'user',
           tenant_id: user.id,
@@ -91,10 +123,15 @@ export const useChatStore = create(
           conversation_title: !activeConvId && messages.length === 0 ? query.slice(0, 100) : undefined,
         }
 
+        const streamController = new AbortController()
+        activeStreamController = streamController
+
         await streamChat({
           body,
+          signal: streamController.signal,
           onMeta: (meta) => {
             const convId = meta.conversation_id
+            requestedConversationId = convId
             set({ activeConvId: convId })
 
             if (meta.user_message_id) {
@@ -107,7 +144,12 @@ export const useChatStore = create(
             if (meta.message_id) {
               set((s) => ({
                 messages: s.messages.map((m) =>
-                  m.id === assistantMsg.id ? { ...m, id: meta.message_id } : m,
+                  m.id === assistantMsg.id ? {
+                    ...m,
+                    id: meta.message_id,
+                    sources: meta.sources,
+                    references: _normalizeReferences(meta.references ?? meta.sources),
+                  } : m,
                 ),
               }))
             }
@@ -140,7 +182,10 @@ export const useChatStore = create(
               msgs[msgs.length - 1] = {
                 ...last,
                 isStreaming: false,
-                sources: payload?.sources,
+                sources: payload?.sources ?? last.sources,
+                references: payload?.references || payload?.sources
+                  ? _normalizeReferences(payload.references ?? payload.sources)
+                  : last.references,
                 latency_ms: payload?.latency_ms,
               }
               return { messages: msgs, isStreaming: false }
@@ -157,6 +202,8 @@ export const useChatStore = create(
             set({ isStreaming: false, error: err.message })
           },
         })
+
+        if (activeStreamController === streamController) activeStreamController = null
       },
     }),
     { name: 'chat-store' },
@@ -175,4 +222,25 @@ function _updateLastMsg(set, patch) {
   set((s) => ({
     messages: s.messages.map((m, i) => (i === s.messages.length - 1 ? { ...m, ...patch } : m)),
   }))
+}
+
+function _cancelActiveStream(set) {
+  if (!activeStreamController) return
+  activeStreamController.abort()
+  activeStreamController = null
+  set((state) => ({
+    isStreaming: false,
+    messages: state.messages.map((message, index) => index === state.messages.length - 1 && message.isStreaming
+      ? { ...message, content: message.content || 'Response stopped.', isStreaming: false, isCancelled: true }
+      : message),
+  }))
+}
+
+function _normalizeReferences(raw) {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((reference) => typeof reference === 'object'
+      ? reference
+      : { note_id: reference, title: 'Referenced note' })
+    .filter((reference) => reference?.note_id)
 }

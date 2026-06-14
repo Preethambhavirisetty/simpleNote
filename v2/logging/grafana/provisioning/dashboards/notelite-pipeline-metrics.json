@@ -1,0 +1,542 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Ingestion Failures",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service=~\"agent|agent-celery\"} | json | event = `ingestion.failed` [$__range]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "title": "Skipped Summaries",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | summary_skipped = `true` [$__range]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "title": "Retrieval Fallback Rate",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "100 * sum(count_over_time({service=\"agent\"} | json | event = `retrieval.completed` | fallback_to_all_chunks = `true` [$__range])) / sum(count_over_time({service=\"agent\"} | json | event = `retrieval.completed` [$__range]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Chat Cancellation Rate",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "100 * sum(count_over_time({service=\"agent\"} | json | event = `chat.completed` | cancelled = `true` [$__range])) / sum(count_over_time({service=\"agent\"} | json | event = `chat.completed` [$__range]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Inference Errors",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service=\"agent\"} | json | event = `chat.completed` | inference_error = `true` [$__range]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "title": "Retrieval Failures",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service=\"agent\"} | json | event = `retrieval.failed` [$__range]))",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto"
+      }
+    },
+    {
+      "title": "Ingestion Latency P95",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap total_ms [5m])",
+          "refId": "A",
+          "legendFormat": "total"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap chunking_ms [5m])",
+          "refId": "B",
+          "legendFormat": "chunking"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap keyword_extraction_ms [5m])",
+          "refId": "C",
+          "legendFormat": "keywords"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap summary_ms [5m])",
+          "refId": "D",
+          "legendFormat": "summary"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap questions_ms [5m])",
+          "refId": "E",
+          "legendFormat": "questions"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap document_build_ms [5m])",
+          "refId": "F",
+          "legendFormat": "document build"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap document_ingestion_ms [5m])",
+          "refId": "G",
+          "legendFormat": "vector write"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Ingestion Volume",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "avg_over_time({service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap chunk_count [5m])",
+          "refId": "A",
+          "legendFormat": "avg chunks"
+        },
+        {
+          "expr": "avg_over_time({service=~\"agent|agent-celery\"} | json | event = `ingestion.completed` | unwrap llm_calls_total [5m])",
+          "refId": "B",
+          "legendFormat": "avg LLM calls"
+        }
+      ],
+      "description": "Average chunk count and enrichment LLM calls per ingested note.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Retrieval Quality",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `retrieval.completed` | unwrap summary_hit_count [5m])",
+          "refId": "A",
+          "legendFormat": "summary hits"
+        },
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `retrieval.completed` | unwrap chunk_hit_count [5m])",
+          "refId": "B",
+          "legendFormat": "chunk hits"
+        },
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `retrieval.completed` | unwrap selected_context_count [5m])",
+          "refId": "C",
+          "legendFormat": "selected context"
+        }
+      ],
+      "description": "Average retrieval-stage counts per chat turn.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Remaining Context Budget",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `retrieval.completed` | unwrap remaining_context_budget_tokens [5m])",
+          "refId": "A",
+          "legendFormat": "remaining tokens"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Chat Latency P95",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "quantile_over_time(0.95, {service=\"agent\"} | json | event = `chat.completed` | unwrap total_ms [5m])",
+          "refId": "A",
+          "legendFormat": "total"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=\"agent\"} | json | event = `chat.completed` | unwrap retrieval_ms [5m])",
+          "refId": "B",
+          "legendFormat": "retrieval"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=\"agent\"} | json | event = `chat.completed` | unwrap first_token_ms [5m])",
+          "refId": "C",
+          "legendFormat": "first token"
+        },
+        {
+          "expr": "quantile_over_time(0.95, {service=\"agent\"} | json | event = `chat.completed` | unwrap inference_ms [5m])",
+          "refId": "D",
+          "legendFormat": "inference"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Chat Token Usage",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `chat.completed` | unwrap prompt_tokens [5m])",
+          "refId": "A",
+          "legendFormat": "prompt"
+        },
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `chat.completed` | unwrap completion_tokens [5m])",
+          "refId": "B",
+          "legendFormat": "completion"
+        },
+        {
+          "expr": "avg_over_time({service=\"agent\"} | json | event = `chat.completed` | unwrap total_tokens [5m])",
+          "refId": "C",
+          "legendFormat": "total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "LLM Calls Per Note",
+      "type": "logs",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "{service=~\"agent|agent-celery\"} | json | event = `ingestion.completed`",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      }
+    },
+    {
+      "title": "Pipeline Failures",
+      "type": "logs",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": ""
+      },
+      "targets": [
+        {
+          "expr": "{service=~\"agent|agent-celery\"} | json | event = `ingestion.failed`",
+          "refId": "A"
+        },
+        {
+          "expr": "{service=\"agent\"} | json | event = `retrieval.failed`",
+          "refId": "B"
+        },
+        {
+          "expr": "{service=\"agent\"} | json | event = `chat.completed` | outcome = `failed`",
+          "refId": "C"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      }
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "tags": [
+    "notelite",
+    "observability",
+    "pipelines"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Notelite Pipeline Metrics",
+  "uid": "notelite-pipeline-metrics",
+  "version": 1
+}

@@ -117,7 +117,7 @@
       "options": { "showTime": true, "sortOrder": "Descending", "enableLogDetails": true }
     }
   ],
-  "refresh": "10s",
+  "refresh": "1m",
   "schemaVersion": 39,
   "tags": ["notelite", "logs"],
   "templating": { "list": [] },

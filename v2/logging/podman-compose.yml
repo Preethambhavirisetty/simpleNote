@@ -1,3 +1,6 @@
+# Optional standalone observability stack. The main ../podman-compose.yml already includes
+# Loki and Grafana; do not run both compose files at once because their ports overlap.
+
 version: '3.8'
 
 networks:

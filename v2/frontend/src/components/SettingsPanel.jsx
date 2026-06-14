@@ -12,7 +12,7 @@ function Section({ title, children }) {
   return (
     <div className="py-4 px-5 border-b border-zinc-200 dark:border-zinc-800">
       {title && (
-        <p className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
+        <p className="text-label font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
           {title}
         </p>
       )}
@@ -26,7 +26,7 @@ function ComingSoon({ label }) {
   return (
     <div className="flex items-center justify-between py-2">
       <span className="text-sm text-zinc-400 dark:text-zinc-500">{label}</span>
-      <span className="text-[10px] font-medium text-zinc-400 dark:text-zinc-600 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+      <span className="text-caption font-medium text-zinc-400 dark:text-zinc-600 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
         Coming soon
       </span>
     </div>

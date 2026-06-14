@@ -9,9 +9,10 @@ A modern, feature-rich note-taking application with AI integration, built with R
 
 ## ✨ Features
 
+- 🔐 **Authentication** - Secure JWT + HTTP-only cookie auth
 - 📝 **Rich Text Editor** - Format text, create lists, add tables
 - 🎨 **Dark/Light Mode** - Beautiful UI with theme switching
-- 🗄️ **PostgreSQL Database** - Reliable data persistence
+- 🗄️ **PostgreSQL Database** - Reliable data persistence with user isolation
 - 📤 **File Import** - Upload .docx and .txt files
 - 📥 **PDF Export** - Download notes as PDF
 - 🖼️ **Media Support** - Embed images and videos
@@ -23,6 +24,7 @@ A modern, feature-rich note-taking application with AI integration, built with R
 - 🎨 **Color Palette** - Highlight important text
 - 📊 **Tables** - Create structured data
 - 🔄 **Real-time Updates** - Changes saved instantly
+- 🎯 **Landing Page** - Modern, feature-rich homepage
 
 ---
 
@@ -75,6 +77,8 @@ make backup         # Backup database
 make restore        # Restore from backup
 make db-list        # List documents
 make db-count       # Count documents
+make db-users       # List all users
+make db-stats       # User and document statistics
 ```
 
 ### Build & Deploy
@@ -337,6 +341,7 @@ make start          # Fresh start
 
 ## 📚 Documentation
 
+- [Authentication Setup](AUTH_SETUP.md) - JWT auth and user management
 - [Makefile Guide](MAKEFILE_GUIDE.md) - Complete Makefile documentation
 - [PostgreSQL Setup](POSTGRES_SETUP.md) - Database configuration and management
 - [Port Allocation](PORT_ALLOCATION.md) - Multi-service port management
@@ -373,10 +378,21 @@ make start          # Fresh start
 
 ## 🎯 API Endpoints
 
+### Authentication (Public)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/auth/register` | POST | Create account |
+| `/api/auth/login` | POST | Sign in |
+| `/api/auth/logout` | POST | Sign out |
+| `/api/auth/me` | GET | Get current user |
+
+### Documents (Protected)
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/health` | GET | Health check |
-| `/api/documents` | GET | Get all documents |
+| `/api/documents` | GET | Get user's documents |
 | `/api/documents` | POST | Create document |
 | `/api/documents/:id` | PUT | Update document |
 | `/api/documents/:id` | DELETE | Delete document |

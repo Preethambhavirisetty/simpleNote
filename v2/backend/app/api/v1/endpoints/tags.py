@@ -3,6 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.schema.responses import ApiResponse, TagData
+
 from app.db.postgres.models.tag import Tag
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
@@ -26,39 +28,42 @@ def _tag_dict(tag: Tag) -> dict:
     }
 
 
-@router.get("/")
+@router.get("/", response_model=ApiResponse[list[TagData]], summary="List tags")
 def list_tags(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
+    """List tags owned by the authenticated user."""
     tags = service.list(db, current_user.id)
     return success_response([_tag_dict(t) for t in tags], "Tags retrieved")
 
 
-@router.post("/")
+@router.post("/", response_model=ApiResponse[TagData], summary="Create a tag")
 def create_tag(
     payload: TagCreate,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
+    """Create a tag for the authenticated user."""
     tag = service.create(db, current_user.id, payload)
     return success_response(_tag_dict(tag), "Tag created")
 
 
-@router.get("/{tag_id}")
+@router.get("/{tag_id}", response_model=ApiResponse[TagData], summary="Get a tag")
 def get_tag(
     tag_id: UUID,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
+    """Return one tag owned by the authenticated user."""
     tag = service.get(db, tag_id, current_user.id)
     return success_response(_tag_dict(tag), "Tag retrieved")
 
 
-@router.patch("/{tag_id}")
+@router.patch("/{tag_id}", response_model=ApiResponse[TagData], summary="Update a tag")
 def update_tag(
     tag_id: UUID,
     payload: TagUpdate,
@@ -66,16 +71,18 @@ def update_tag(
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
+    """Rename one tag owned by the authenticated user."""
     tag = service.update(db, tag_id, current_user.id, payload)
     return success_response(_tag_dict(tag), "Tag updated")
 
 
-@router.delete("/{tag_id}")
+@router.delete("/{tag_id}", response_model=ApiResponse[None], summary="Delete a tag")
 def delete_tag(
     tag_id: UUID,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
+    """Delete one tag owned by the authenticated user."""
     service.delete(db, tag_id, current_user.id)
     return success_response(None, "Tag deleted")

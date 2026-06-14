@@ -1,17 +1,39 @@
 {
-  "chat": {
-    "enabled": true,
-    "children": {
-      "streaming": { "enabled": true },
-      "history": { "enabled": true },
-      "intent_llm": { "enabled": false }
+    "chat": {
+        "enabled": true,
+        "children": {
+            "streaming": {
+                "enabled": true
+            },
+            "history": {
+                "enabled": true
+            },
+            "intent_classifier": {
+                "enabled": true
+            },
+            "intent_exemplar": {
+                "enabled": false
+            },
+            "intent_llm": {
+                "enabled": true
+            },
+            "query_rewrite": {
+                "enabled": false
+            }
+        }
+    },
+    "ingestion": {
+        "enabled": true,
+        "children": {
+            "questions_vector": {
+                "enabled": true
+            },
+            "sparse_index": {
+                "enabled": true
+            },
+            "remote_embeddings": {
+                "enabled": true
+            }
+        }
     }
-  },
-  "ingestion": {
-    "enabled": true,
-    "children": {
-      "questions_vector": { "enabled": true },
-      "sparse_index": { "enabled": true }
-    }
-  }
 }

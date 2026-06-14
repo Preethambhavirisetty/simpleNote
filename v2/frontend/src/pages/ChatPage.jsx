@@ -19,31 +19,36 @@ export default function ChatPage() {
   const messages = useChatStore((s) => s.messages)
   const isStreaming = useChatStore((s) => s.isStreaming)
   const isLoadingMessages = useChatStore((s) => s.isLoadingMessages)
+  const fetchConversations = useChatStore((s) => s.fetchConversations)
   const selectConversation = useChatStore((s) => s.selectConversation)
   const newConversation = useChatStore((s) => s.newConversation)
   const sendMessage = useChatStore((s) => s.sendMessage)
+  const cancelStream = useChatStore((s) => s.cancelStream)
 
   const [input, setInput] = useState('')
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const activeConversation = conversations.find((item) => String(item.id) === String(activeConvId))
 
+  useEffect(() => { fetchConversations() }, [fetchConversations])
+
   useEffect(() => {
     if (conversationId) selectConversation(conversationId)
-    else if (activeConvId) newConversation()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId])
+    else newConversation()
+  }, [conversationId, newConversation, selectConversation])
 
   useEffect(() => {
-    if (activeConvId && String(activeConvId) !== String(conversationId)) {
-      navigate(`/chat/${activeConvId}`, { replace: true })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConvId])
+    if (isStreaming && activeConvId && !conversationId) navigate(`/chat/${activeConvId}`, { replace: true })
+  }, [activeConvId, conversationId, isStreaming, navigate])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    const frame = requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({ behavior: isStreaming ? "auto" : "smooth" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [isStreaming, messages])
+
+  useEffect(() => () => cancelStream(), [cancelStream])
 
   const handleSend = async (suggestion) => {
     const text = (suggestion ?? input).trim()
@@ -90,6 +95,7 @@ export default function ChatPage() {
           textareaRef={textareaRef}
           isStreaming={isStreaming}
           onSend={() => handleSend()}
+          onCancel={cancelStream}
         />
       </div>
     </div>
@@ -158,7 +164,7 @@ function Message({ message, user }) {
   )
 }
 
-function Composer({ input, setInput, textareaRef, isStreaming, onSend }) {
+function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel }) {
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -181,8 +187,8 @@ function Composer({ input, setInput, textareaRef, isStreaming, onSend }) {
         <div className="flex items-center gap-1.5 overflow-x-auto">
           {['Brainstorm', 'Summarize', 'Plan'].map((item) => <span key={item} className="workspace-pill workspace-muted whitespace-nowrap rounded-full px-3 py-1.5 text-[10px]">{item}</span>)}
         </div>
-        <button onClick={onSend} disabled={isStreaming || !input.trim()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#b8ff67] text-sm font-semibold text-[#10140d] hover:bg-[#ccff8f] disabled:opacity-30">
-          {isStreaming ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/20 border-t-black" /> : '↑'}
+        <button onClick={isStreaming ? onCancel : onSend} disabled={!isStreaming && !input.trim()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#b8ff67] text-sm font-semibold text-[#10140d] hover:bg-[#ccff8f] disabled:opacity-30">
+          {isStreaming ? "Stop" : "↑"}
         </button>
       </div>
     </div>

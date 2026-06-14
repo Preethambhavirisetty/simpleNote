@@ -1,3 +1,208 @@
+Existing pipeline stages(04/16/2026)
+1. ingestion
+    1. chunking: structural + semantic
+    2. keywords + entities extraction
+    3. keywords dedup(llm)
+    4. recursive summarization(llm)
+    5. question generation(llm)
+    6. llama document assembly
+2. chat stream
+    0. llm call(standalone)
+    1. query rewriting(standalone)
+    2. rag retrival
+        1. summary search(cosine)
+        2. doc scoping
+        3. chunk search(cosine)
+        4. soft scoring
+        5. reranking(model)
+    3. intent + strategy
+    4. context assembly
+    5. build prompt
+    6. inference(llm)
+    7. stream(sse)
+
+
+### intent classification
+INTENT_CATEGORIES = [
+    {
+        "category": "General Understanding / Recall",
+        "intent": "semantic",
+        "description": "Understand, recall, or summarize user notes using semantic search.",
+        "strategy": "Default / low confidence / “explain” queries",
+        "goal": "Answer subjective or content-based queries that require understanding or summarizing information."
+    },
+    {
+        "category": "Locate / Find",
+        "intent": "locate_note",
+        "description": "Find a specific note based on content, section, or keyword (e.g., 'Which note has ...?', 'Where did I put the API key section?').",
+        "strategy": "LLM or embed exemplars; often same retrieval as semantic, different prompt/response shape",
+        "goal": "Return structured results with folder name, note title, snippets, and relevant IDs for citations."
+    },
+    {
+        "category": "Enumerate / Inventory",
+        "intent": "list_notes",
+        "description": "Enumerate notes matching criteria (e.g., 'List all notes about travel', 'Everything tagged work').",
+        "strategy": "LLM + slots for scope; rules for “list all” only if you accept broad inventory",
+        "goal": "Return a list view, support both scoped (filtered) and broad inventory requests. Prefer deterministic and concise answers."
+    },
+    {
+        "category": "Count / Quantify",
+        "intent": "keyword_count",
+        "description": "Count occurrences or quantify content (e.g., 'How many times did I mention x?', 'How many notes talk about debt?').",
+        "strategy": "Rules for obvious phrases + slot for phrase vs note count + executor",
+        "goal": "Return numerical answers based on keyword or note occurrence, distinguish between phrase matches and note counts."
+    },
+    {
+        "category": "Time-based",
+        "intent": "temporal",
+        "description": "Find notes based on time (e.g., 'When did I write this?', 'What did I add last week?', 'Notes from March').",
+        "strategy": "Rules for “last week / March” + date parser; LLM for messy phrasing; separate metadata vs content time if you can",
+        "goal": "Support by extracting/using metadata for filtering, sorting, and listing by date. May require date parsing from text or semantic matching."
+    },
+    {
+        "category": "Presence Check / Yes-No",
+        "intent": "presence_check",
+        "description": "Determine if a concept or note exists ('Did I ever note down x?', 'Do I have something on y?').",
+        "strategy": "Rules + retrieval threshold (“any hit?”) + short LLM yes/no",
+        "goal": "Provide a yes/no answer with reasoning and sourced context when possible."
+    },
+    {
+        "category": "Compare / Synthesize Across Notes",
+        "intent": "compare_notes",
+        "description": "Compare or synthesize between notes (e.g., 'Compare a and b', 'Contradictions between 2 write-ups').",
+        "strategy": "Rules/triggers + multi-retrieval template; intent can be “compare” with semantic execution",
+        "goal": "Support comparison via prompt templates. Generally requires LLM or multi-context reasoning."
+    },
+    {
+        "category": "Meta / Corpus Stats",
+        "intent": "corpus_stats",
+        "description": "Obtain statistics about the corpus (e.g., 'How many notes do I have?', 'Largest note', 'Empty folders').",
+        "strategy": "API / DB, rules; LLM only routes, does not compute",
+        "goal": "Return corpus-level data, such as counts, largest note, and folder status."
+    },
+    {
+        "category": "Conversation / UI Meta",
+        "intent": "conversation_meta",
+        "description": "Handle meta-questions about the ongoing conversation (e.g., 'What did I ask you before?', 'Repeat last answer').",
+        "strategy": "History + rules; no note index",
+        "goal": "Provide conversation-aware assistance and route users appropriately, avoiding polluting note-related intents."
+    },
+    {
+        "category": "Ambiguous / Clarification Required",
+        "intent": "clarify_intent",
+        "description": "Handle unsafe or ambiguous queries (e.g., missing topic, contradictory request, disambiguation required).",
+        "strategy": "Explicit policy when slots or confidence fail",
+        "goal": "Ask clarifying questions or prompt the user for specificity before proceeding."
+    }
+]
+
+endpoint for intent ingestion
+clarifying question
+include metadata(folder name, note name)
+clarify intent ask one clarifying question
+
+Scenario	Example	Why SetFit Struggles
+Completely novel phrasing	"yo check if I scribbled anything about that landlord drama"	Never seen anything remotely like this in training data
+Complex multi-signal queries	"I think maybe last month I had something about switching jobs or something"	Hedging language + temporal + presence — conflicting signals confuse the classification head
+Queries requiring reasoning	"which of my notes would be useful for my tax filing?"	This isn't just classification — it needs understanding of what "useful for tax filing" means
+
+CONFUSABLE_PAIRS = {
+    "temporal":       {"nearby": ["semantic", "list_notes"],
+                       "examples": ["what did I write about fitness?", "all my travel notes"]},
+    "list_notes":     {"nearby": ["semantic", "locate_note"],
+                       "examples": ["summarize my cooking notes", "find the recipe note"]},
+    "locate_note":    {"nearby": ["list_notes", "semantic"],
+                       "examples": ["all notes about travel", "what did I write about rent?"]},
+    "presence_check": {"nearby": ["semantic", "keyword_count"],
+                       "examples": ["tell me about yoga", "how many notes mention yoga?"]},
+    "keyword_count":  {"nearby": ["presence_check", "corpus_stats"],
+                       "examples": ["did I ever mention rent?", "how many notes do I have?"]},
+}
+
+Query
+  │
+  ├─ Layer 0: Regex (unchanged, 0ms, 100% accurate)
+  │
+  ├─ Layer 1: SetFit classifier (replaces Qdrant exemplar search)
+  │           - Single forward pass, ~5-10ms
+  │           - Returns intent + calibrated confidence
+  │           - If confidence ≥ threshold → return
+  │
+  └─ Layer 2: LLM fallback (only for low-confidence edge cases)
+              - Much rarer now, maybe 5-10% of queries
+
+todos:
+- store examples on vector store(llama 3.1)
+  - retrain head on top (83.3)
+    - improved? good
+    - else:
+      - change ST model to BAAI/bge-large-en-v1.5
+        - retrain
+          - improved? good
+          - else:
+            - generate more examples with mistral model
+            - reingest + retrain
+              - improved? good
+              - else:
+                - generate more examples
+                  - reingest + retrain
+                  - improved? good
+                  - else
+                    - setup sitfit
+                      - retrain
+                        - improved? good
+                        - else: do nothing, accept the defeat
+
+intent evaluation and retrain pipeline
+- store all user queries, intent, confidence score, along with other like answer in a db(conversations table)
+- for every question, check if the current user's query is denial of the previous one, reduce the previous query's intent confidence score by some percent.
+- every 2 weeks or so, I'll extract queries, intents, and confidence scores and use LLM like chatGPT API or something as a judge and relabel them and retrain the intent classifier
+
+
+all_intents = [Semantic, locate_note, list_notes, keyword_count, temporal, presence_check, compare_notes, corpus_stats, conversation_meta, clarify_intent]
+
+list_notes, temporal, presence_check: Query PGSQL
+sematic, locate_note: qdrant
+keyword_count, corpus_stats: PGSQL + aggregation logic
+
+Intent	Primary Source	Logic/Handler
+list_notes	- PostgreSQL	- SQL SELECT query
+temporal	- PostgreSQL	- SQL WHERE date_range
+presence_check -	PostgreSQL -	SQL EXISTS check
+Semantic	- Qdrant	- Vector Similarity Search
+locate_note	- Qdrant/Postgres	- Hybrid Search (Vector + Metadata filter)
+compare_notes	- Both	- Fetch multiple IDs -> Send to LLM
+corpus_stats	- PostgreSQL	- COUNT(*), GROUP BY
+clarify_intent	- Inference	- LLM re-prompt logic
+
+Actions:
+- semantic_search(A)
+- compare_notes(A, B): semantic_search(A) + semantic_search(B)
+- list_notes(that has search_term)
+- 
+
+
+CHAT:
+user query -> CHAT UI -> Agent -> 
+                                |
+                                1. ---> Rewrite(flag)
+                                |
+                                2. ---> intent detection(flag): trained classifier or LLM fallback
+                                      |
+                                      2.1 ---> Keyword Intent -> search for the keywords, chuck by chunk
+                                      |
+                                      2.2 ---> Locate Note Intent -> 
+
+user query -> CHAT UI -> Agent ->
+                                       |
+                                       2.2 ---> Locate Note Intent -> ?
+
+### Install HF models
+pip install -U "huggingface_hub[cli]"
+huggingface-cli login
+huggingface-cli download <REPO_ID_1> --local-dir ./model_1
+huggingface-cli download <REPO_ID_2> --local-dir ./model_2
+
 ### Run postgres with podman:
 podman run -d \
   --name notelite-postgres \
@@ -44,50 +249,51 @@ podman exec -it mypostgres psql -U postgres -c "\l+" -> gives the size of db
 
 ### PODMAN COMMANDS
 podman system prune -a --volumes
-podman compose -f podman-compose.yml up -d --build
+podman-compose up -d --build
+podman stats --no-stream
 
-podman compose -f podman-compose.yml build --no-cache backend
-podman compose -f podman-compose.yml up -d --force-recreate backend backend-celery
-podman compose -f podman-compose.yml build agent
+podman-compose build --no-cache backend
+podman-compose up -d --force-recreate backend backend-celery
+podman-compose build agent
 podman rm -f notelite-agent notelite-agent-celery
-podman compose -f podman-compose.yml up -d agent agent-celery
+podman-compose up -d agent agent-celery
 podman logs --tail 20 notelite-backend-celery
 ### Verify all 8 containers are up
 podman ps --format "table {{.Names}}\t{{.Status}}"
 
 # Fix backend-celery (separate image from backend)
-podman compose -f podman-compose.yml build --no-cache backend-celery
+podman-compose build --no-cache backend-celery
 podman rm -f notelite-backend-celery
-podman compose -f podman-compose.yml up -d backend-celery
+podman-compose up -d backend-celery
 
 # Fix inference (static build, no .so needed)
 podman rm -f notelite-inference
-podman compose -f podman-compose.yml build inference
-podman compose -f podman-compose.yml up -d inference
+podman-compose build inference
+podman-compose up -d inference
 
 ```bash
 podman ps -a --filter name=notelite-inference --format "table {{.Names}}\t{{.Status}}"
 podman ps -a --filter name=notelite-inference
 
 cd /Users/rbhaviri/Desktop/_others/simpleNote/v2
-podman compose -f podman-compose.yml up -d redis postgres qdrant
+podman-compose up -d redis postgres qdrant
 
 
 podman stop myredis mypostgres nl-qdrant
 podman stop notelite-backend notelite-backend-celery notelite-agent notelite-agent-celery
 
 podman rm -f notelite-backend notelite-backend-celery notelite-agent notelite-agent-celery
-podman compose -f podman-compose.yml build --no-cache backend backend-celery agent agent-celery
-podman compose -f podman-compose.yml up -d backend backend-celery agent agent-celery
+podman-compose build --no-cache backend backend-celery agent agent-celery
+podman-compose up -d backend backend-celery agent agent-celery
 
 
-podman compose -f podman-compose.yml build --no-cache backend backend-celery
-podman compose -f podman-compose.yml build --no-cache agent
-podman compose -f podman-compose.yml build inference        # static build, skips cached broken layers
+podman-compose build --no-cache backend backend-celery
+podman-compose build --no-cache agent
+podman-compose build inference        # static build, skips cached broken layers
 
 
 podman rm -f notelite-backend notelite-backend-celery notelite-agent notelite-agent-celery
-podman compose -f podman-compose.yml up -d agent agent-celery
+podman-compose up -d agent agent-celery
 
 
 > podman ps --format "table {{.Names}}\t{{.Status}}"
@@ -118,18 +324,35 @@ output: ["inspector winston", "late summer"]
 is it too complicated? why couldn't you implement chat and stream feature properly? its pretty straightforward right? new chat -> ask questions get responses -> saves it in the BG to DB -> reload get all conversations for the user for the chat, when clicked on a chat, put it in the route and API call to convverations/{chatid} and render all chats
 
 
+**Chunking enhancements:**
+  - types: content, mixed_content, boilerplate
+  - metadata: {"has_dates": true, "has_links": true, "has_emails": true, "has_code": false, "heading_level": 2}
+  Final new bugs:
+
+**Bugs to fix as of 06/06/2026(4 bugs for a stress test)**
+  - Heading context update inside fenced blocks — critical, corrupts metadata
+  - H2 heading split at period — high, creates orphan heading chunks
+  - Transcript timestamp regex — high, full datetime format not recognized
+  - Glossary entry atomicity — medium, entries split mid-definition
+
+DocumentBuilder should also compute adjacent chunk references:
+json"prev_chunk_id": "",
+"next_chunk_id": ""
+At query time, when you retrieve chunk N you often want to expand context by also fetching N-1 and N+1. If those IDs are in the index payload you can fetch them directly from Qdrant without a second vector search. DocumentBuilder knows the full ordered list of chunks for a document, so it's trivially cheap to compute these references there. 
+
+NOTE: The one thing most production apps do that you don't yet is document-level pre-processing — running a lightweight pass over the full document before chunking to extract the document type, primary language, estimated structure density, and overall topic. That global context improves chunking decisions, particularly for freeform notes where there are no structural signals to work from. Worth adding eventually but not blocking.
+
+
+also update keyword/entitity extractor documentation in [docs](v2/notelite_agent/docs/) 
 
 
 ### STARTUP STEPS
 - podman machine start
 - cd simpleNote/v2
-- podman compose -f podman-compose.yml up -d
+- podman-compose up -d
 - podman ps
 - npm run dev
-- cd notelite_inference
-- chmod +x ./setup_llama.sh && ./setup_llama.sh
-- Terminal 1: cd build && source ../.env.llama && ./inference_api --port=8081 --mode=summarization
-- Terminal 2: cd build && source ../.env.llama && ./inference_api --port=8082 --mode=summarization
+- cd notelite_inference && ./build/inference_api
 - podman logs -f --tail 20 notelite-backend -> note apis
 - podman logs -f --tail 20 notelite-agent-celery -> ingestion
 
@@ -1144,3 +1367,501 @@ Current Attempt: Success. extracts actual business and technical concepts while 
 
 
 {"text":"th","metadata":{"doc_id":"6946c8a4-c0ec-4462-a3dd-d3ed2b0f2b72-306d7544-f16d-4d1e-952f-fdf46ca4cdd6-78f61915-ce78-433d-a4c3-369749a6f15e","user_id":"6946c8a4-c0ec-4462-a3dd-d3ed2b0f2b72","tenant_id":"6946c8a4-c0ec-4462-a3dd-d3ed2b0f2b72","folder_id":"306d7544-f16d-4d1e-952f-fdf46ca4cdd6","note_id":"78f61915-ce78-433d-a4c3-369749a6f15e","folder_title":"Chapters","note_title":"Chapter 1: the super robot assistant","description":"","tags":"","chunk_id":1,"summary":"The text is missing. Please provide the text for summarization."}}
+
+### Existing File Structure:
+
+- apis
+  - routes
+    - chat
+      - /chat/completions
+      - /chat/stream
+    - ingest
+      - /status/{task_id}
+      - /ingest
+    - intent
+      - /intent/exemplars
+    - retrieve
+      - /get-context -> move to chat
+      - /chat -> move to chat + rename the endpoint
+  - deps
+    - require_api_key
+    - get_db
+    - get_qdrant -> needs implementation
+  - schema
+    - IngestionRequest
+    - RetrieveRequest
+    - ChatRequest
+    - ChatMessage
+    - ChatCompletionModel
+- core
+  - config
+    - _require_env
+    - other over-complicated methods for llm bases -> simplify to use only one llm base
+  - contracts
+    - AccessContext -> is it needed here? any other ways to manage context?
+      - USE middleware folder with auth and request_context
+  - feature_flags
+    - load_flags
+    - is_enabled
+    - toggle_flag
+    - require_feature
+  - pg
+    - _get_conn
+    - connection -> rename it to pg specific
+    - fetch_note_version
+    - ??? add get_db from deps to this folder ???
+  - schema
+    - IngestionTaskPayload ??? move it to apis or move them to this core folder ???
+  - settings
+    - _materialize_host_ca_bundle_for_openssl
+    - _configure_runtime_logging
+    - init_llama_index_settings
+    - is_llama_index_settings_initialized
+  
+
+- handlers
+  - strategies
+    - tests
+      - test_keyword_count
+    - keyword_count
+      - KeywordExtractor
+      - TermCount
+      - KeywordCounter
+  - base
+    - DBHandler -> is it required?
+  - qdrant
+    - QdrantHandler -> is it required like this?
+- pipeline
+  - builder
+    - _shared_metadata
+    - get_document_objects
+  - chunking
+    - _split_by_headings
+    - _inject_numbered_line_breaks
+    - _semantic_split
+    - _window_split
+    - _split_large_text
+    - validate_chunk
+    - _is_heading_like
+    - _is_list_chunk
+    - _has_parent_context
+    - _is_table_like
+    - _is_table_rowish_chunk
+    - _is_address_like_chunk
+    - _merge_table_and_address_chunks
+    - _normalize_chunk_text
+    - _postprocess_chunks
+    - _handle_small_paragraph
+    - _flush_pending_chunk
+    - _process_heading_parts
+    - split_into_sections
+  - enrichment
+    - _is_useless_summary
+    - summarize_chunk
+    - merge_for_summarization
+    - recursive_summarize
+    - deduplicate_keywords_llm
+    - generate_questions
+  - intent_handlers
+    - handle_intent
+  - intent
+    - __all__ -> exposes all methods -> refactor it later, push it to the backlog for now
+  - keywords
+    - _get_spacy_nlp
+    - _get_yake_extractor
+    - _build_pos_sets
+    - _has_noun
+    - _refine_with_pos
+    - _clean_term
+    - _stem
+    - _split_tokens
+    - _is_subphrase
+    - extract_entities
+    - prune_keywords
+    - _extract_hybrid
+    - _extract_yake_fallback
+    - extract_keywords
+  - llm
+    - llm_call
+  - strategies -> Out of scope
+    - handle_list_notes_intent
+    - handle_temporal_intent
+    - handle_presence_check_intent
+    - handle_keyword_count_intent
+    - handle_corpus_stats_intent
+    - handle_semantic_intent
+    - handle_locate_note_intent
+    - handle_compare_notes_intent
+    - handle_conversation_meta_intent
+    - handle_clarify_intent
+- services
+  - intent_service/ -> Out of scope
+  - backend_client
+    - _headers
+    - _url
+    - get_messages
+    - create_conversation
+    - create_message
+    - update_message
+  - inference_stream
+    - stream_chat_completions
+    - _stream_single_base
+    - _parse_sse_data_line
+    - _events_from_chunk
+  - ingestion
+    - _run_ingestion
+    - _run_delete
+    - _normalize_payload
+    - _is_stale
+    - run_ingestion_task
+  - retrieval
+    - _tokenize_phrases
+    - _jaccard
+    - _entity_recall
+    - _soft_score
+    - _get_reranker
+    - VectorStore
+      - embedder
+      - _load_handler
+      - _resolve_scope_filter
+      - _is_backend_reachable
+      - _ensure_connected
+      - connect
+      - get_all_document_for_user 
+      - retrieve_documents
+      - upsert
+      - delete_documents
+      - document_count
+      - scroll_all_chunks
+- workers
+  - app
+    - _on_celery_setup_logging
+    - _on_worker_process_init
+    - conf.update
+    - autodiscover_tasks
+  - tasks
+    - ingest_in_background
+    - persist_message
+  
+
+
+
+
+### Improved file structure for MVP
+what do i need?
+- user creates folders and notes
+- user writes notes
+- user asks question on their notes
+
+backend:
+  - user creates folders and notes: pgsql DB already inplace --- DONE
+  - user writes notes: tiptap editor is already setup + stored as json and text --- DONE
+notelite-agent
+  - user asks questions on their notes
+    - ingestion request comes from backend every debounced write to a redis queue
+      - takes request from the queue
+      - processes ingestion task
+        - checks if the text version matches the version on DB, if not, its outdated so disregard it
+        - chunks
+        - extract keywords from each chunk
+        - get summaries for each chunk ? is this required? may be increase each chunk size, for less iterations
+          - if each chunk size < defined chunk size: disregard it
+        - store chunks and summary in 2 different collections on qdrant
+          - if summary length < chunk size; disregard it
+    - chat
+      - preprocess chat request
+        - intent classification -> make it light-weight with few intents
+          - clarify
+          - metadata
+            - list_notes
+            - temporal
+          - aggregation
+            - keyword_count
+            - temporal
+        - execute intent handler function
+        - get conversation: last 16 turns
+        - build prompt: handler's response + instructions + conversation
+      - non-stream
+        - get final prompt from preprocess chat request
+        - LLM call(non stream)
+      - stream
+        - get final prompt from preprocess chat request
+        - LLM call(stream)
+
+
+
+
+- core
+  - config.py
+  - settings.py
+  - dependencies.py
+- db
+  - qdrant.py
+  - postgresql.py
+  - redis.py -> _Out of scope_
+- services/
+  - ingestion/
+    - orchestrator.py
+    - constants.py
+    - routes.py
+      - /ingest
+      - /ingest/{job_id}
+    - schemas.py
+      - IngestDocumentRequest
+      - IngestionResponse
+      - IngestionStatusResponse
+      - VectorSearchResult
+    - pipeline/
+      - document_pipeline.py -> _Out of scope_
+      - reindex_pipeline.py -> imp, but _Out of scope_
+    - processors/
+      - chunk_processor.py
+      - keyword_processor.py
+      - summary_processor.py
+      - embedding_processor.py
+    - storage/
+      - vector_store.py
+      - pg_store.py
+    - workers
+      - celery_app.py
+      - ingestion_tasks.py
+    - validators
+      - request_version_validator
+  - chat/
+    - constants.py
+    - streaming.py
+    - routes.py
+      - /chat/stream
+    - schemas.py
+      - ChatRequest
+      - ChatResponse
+      - StreamChunk
+      - RetrievedChunk
+      - LLMMessage
+      - LLMCompletionRequest
+    - pipelines/
+      - rag_pipeline.py
+      - retrieval_pipeline.py
+      - conversation_pipeline.py
+    - processors/
+      - reranker.py
+      - prompt_builder.py
+      - context_builder.py
+      - citation_builder.py
+    - -- --- ---- -------
+    - memory/ -> _Out of scope_
+      - redis_memory.py
+      - session_store.py
+    - providers/ -> _Out of scope_
+      - llm_provider.py
+      - llama_provider.py
+    - -- --- ---- -------
+  - shared/
+    - utils.py
+      - generate_job_id
+      - utc_now
+      - estimate_tokens
+      - normalize_text
+      - sha256_text
+      - sse_event
+      - llm_output_validator
+    - schemas
+      - HealthResponse
+      - ErrorResponse
+
+
+
+
+
+
+
+
+- apis
+  - routes
+    - chat
+      - /chat/completions
+      - /chat/stream
+    - ingest
+      - /status/{task_id}
+      - /ingest
+    - intent
+      - /intent/exemplars
+    - retrieve
+      - /get-context -> move to chat
+      - /chat -> move to chat + rename the endpoint
+  - deps
+    - require_api_key
+    - get_db
+    - get_qdrant -> needs implementation
+  - schema
+    - IngestionRequest
+    - RetrieveRequest
+    - ChatRequest
+    - ChatMessage
+    - ChatCompletionModel
+- core
+  - config
+    - _require_env
+    - other over-complicated methods for llm bases -> simplify to use only one llm base
+  - contracts
+    - AccessContext -> is it needed here? any other ways to manage context?
+      - USE middleware folder with auth and request_context
+  - feature_flags
+    - load_flags
+    - is_enabled
+    - toggle_flag
+    - require_feature
+  - pg
+    - _get_conn
+    - connection -> rename it to pg specific
+    - fetch_note_version
+    - ??? add get_db from deps to this folder ???
+  - schema
+    - IngestionTaskPayload ??? move it to apis or move them to this core folder ???
+  - settings
+    - _materialize_host_ca_bundle_for_openssl
+    - _configure_runtime_logging
+    - init_llama_index_settings
+    - is_llama_index_settings_initialized
+- handlers
+  - strategies
+    - tests
+      - test_keyword_count
+    - keyword_count
+      - KeywordExtractor
+      - TermCount
+      - KeywordCounter
+  - base
+    - DBHandler -> is it required?
+  - qdrant
+    - QdrantHandler -> is it required like this?
+- pipeline
+  - builder
+    - _shared_metadata
+    - get_document_objects
+  - chunking
+    - _split_by_headings
+    - _inject_numbered_line_breaks
+    - _semantic_split
+    - _window_split
+    - _split_large_text
+    - validate_chunk
+    - _is_heading_like
+    - _is_list_chunk
+    - _has_parent_context
+    - _is_table_like
+    - _is_table_rowish_chunk
+    - _is_address_like_chunk
+    - _merge_table_and_address_chunks
+    - _normalize_chunk_text
+    - _postprocess_chunks
+    - _handle_small_paragraph
+    - _flush_pending_chunk
+    - _process_heading_parts
+    - split_into_sections
+  - enrichment
+    - _is_useless_summary
+    - summarize_chunk
+    - merge_for_summarization
+    - recursive_summarize
+    - deduplicate_keywords_llm
+    - generate_questions
+  - intent_handlers
+    - handle_intent
+  - intent
+    - __all__ -> exposes all methods -> refactor it later, push it to the backlog for now
+  - keywords
+    - _get_spacy_nlp
+    - _get_yake_extractor
+    - _build_pos_sets
+    - _has_noun
+    - _refine_with_pos
+    - _clean_term
+    - _stem
+    - _split_tokens
+    - _is_subphrase
+    - extract_entities
+    - prune_keywords
+    - _extract_hybrid
+    - _extract_yake_fallback
+    - extract_keywords
+  - llm
+    - llm_call
+  - strategies -> Out of scope
+    - handle_list_notes_intent
+    - handle_temporal_intent
+    - handle_presence_check_intent
+    - handle_keyword_count_intent
+    - handle_corpus_stats_intent
+    - handle_semantic_intent
+    - handle_locate_note_intent
+    - handle_compare_notes_intent
+    - handle_conversation_meta_intent
+    - handle_clarify_intent
+- services
+  - intent_service/ -> Out of scope
+  - backend_client
+    - _headers
+    - _url
+    - get_messages
+    - create_conversation
+    - create_message
+    - update_message
+  - inference_stream
+    - stream_chat_completions
+    - _stream_single_base
+    - _parse_sse_data_line
+    - _events_from_chunk
+  - ingestion
+    - _run_ingestion
+    - _run_delete
+    - _normalize_payload
+    - _is_stale
+    - run_ingestion_task
+  - retrieval
+    - _tokenize_phrases
+    - _jaccard
+    - _entity_recall
+    - _soft_score
+    - _get_reranker
+    - VectorStore
+      - embedder
+      - _load_handler
+      - _resolve_scope_filter
+      - _is_backend_reachable
+      - _ensure_connected
+      - connect
+      - get_all_document_for_user 
+      - retrieve_documents
+      - upsert
+      - delete_documents
+      - document_count
+      - scroll_all_chunks
+- workers
+  - app
+    - _on_celery_setup_logging
+    - _on_worker_process_init
+    - conf.update
+    - autodiscover_tasks
+  - tasks
+    - ingest_in_background
+    - persist_message
+
+
+**REFERENCE:**
+app/services/chat/
+├── reranker.py      cross-encoder reranking (Cohere-compatible API, RRF fallback)
+├── retriever.py     two-stage RAG: summaries → doc_ids → hybrid chunk search → rerank
+├── prompt.py        system prompt, context injection, token estimation (pure functions)
+├── llm_client.py    HTTP SSE streaming to remote LLM (pure I/O, no state)
+├── conversation.py  init_conversation, load_history, persist_assistant_message
+└── streaming.py     StreamingService — thin orchestrator, wires all modules together
+
+
+
+IMPROVEMENTS:
+- One future improvement: add timestamps per event (e.g. {"event": "summary api call", "t_ms": 45.2}). That would let you see which specific LLM call was slow without needing the stages_ms aggregates.
+- does text_template and metadata_template work as expected for both summary and chunks?
+- Implement delete + insert new chunks, with insert with new ids first and then delete old ids -> no window
+- lets say in the future, if i need to add image, vid, document support. will this current pipeline can be adaped easily?
+

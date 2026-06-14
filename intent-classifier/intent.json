@@ -1,0 +1,48 @@
+{
+  "health_care_procedures_services": {
+    "description": "Used when a member asks about coverage, eligibility, frequency, cost-share, or limitations for preventive or diagnostic healthcare procedures and screening services.",
+    "services": {
+      "breast_imaging": {
+        "keywords": [
+          "mammogram",
+          "breast imaging",
+          "3d mammogram"
+        ],
+        "description": "Breast-related imaging services including screening and diagnostic mammograms."
+      },
+      "vision_exam": {
+        "keywords": [
+          "eye exam",
+          "vision screening",
+          "eye checkup",
+          "glasses test"
+        ],
+        "description": "Routine vision screenings and eye exams, including tests for glasses or contact lenses."
+      },
+      "physical_exam": {
+        "keywords": [
+          "annual physical",
+          "routine physical",
+          "wellness visit"
+        ],
+        "description": "Routine physical exams and annual wellness visits."
+      },
+      "flu_shot": {
+        "keywords": [
+          "flu shot",
+          "influenza vaccine"
+        ],
+        "description": "Flu shots and influenza vaccination services."
+      }
+    }
+  },
+  "payflex_inspira_hsa": {
+    "description": "In insurance terms, PayFlex/Inspira HSA refers to a Health Savings Account (HSA) administered through PayFlex and Inspira. These are third-party platforms that manage tax-advantaged accounts for healthcare expenses. An HSA is typically paired with a High Deductible Health Plan (HDHP) and allows members to contribute pre-tax dollars to pay for qualified medical expenses such as doctor visits, prescriptions, and certain preventive services. Funds in an HSA can roll over year to year, earn interest, and may offer investment options, making it both a spending and savings tool. The PayFlex/Inspira integration ensures secure account management, contribution tracking, and compliance with IRS regulations for eligible expenses. This intent covers member requests related to PayFlex or Inspira Health Savings Accounts (HSA), including HSA debit/benefits cards. This includes activating an Inspira or PayFlex card, card replacement, card usage, account access, contributions, balances, and other HSA-related actions or questions. Applies when the utterance mentions Inspira/Inspira, PayFlex, HSA, or HSA card actions (e.g., activate card)."
+  },
+  "self_harm_english": {
+    "description": "This intent captures utterances expressing acute emotional distress, mental health crisis or behavioral health emergency, or thoughts of self-harm or suicide. It includes explicit first-person statements indicating a desire to die or cause self-directed harm (e.g., 'I want to kill myself', 'I want to die', 'I need immediate behavioral health support'), as well as implicit suicidal ideation, mentions of feeling tired of life, hopelessness, or entrapment. Utterances mapped to this intent represent a high-risk safety situation requiring immediate escalation to crisis-handling or human-support workflows. This intent has higher priority than profanity, abuse, or foul-language intents and must override them when matched. It excludes outwardly directed violence, threats toward others, profanity without self-directed harm intent, jokes, metaphors, or exaggerations without emotional distress."
+  },
+  "cancer_care_support_program": {
+    "description": "Used only when the member explicitly asks about the Cancer Care Support Program, including enrollment, eligibility, or connecting with that program."
+  }
+}
