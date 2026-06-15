@@ -10,6 +10,10 @@ export function ChatBubbleIcon({ className = 'h-4 w-4 shrink-0' }) {
   return <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
 }
 
+export function LinkIcon({ className = 'h-4 w-4' }) {
+  return <svg className={className} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.59 13.41a2 2 0 010-2.83l3.54-3.54a2 2 0 012.83 0 2 2 0 010 2.83l-1.41 1.41m-2.83 2.83l-3.54 3.54a2 2 0 01-2.83 0 2 2 0 010-2.83l1.41-1.41m4.95-4.95l-4.24 4.24" /></svg>
+}
+
 export function NoteIcon({ className = 'h-3.5 w-3.5 shrink-0' }) {
   return <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
 }

@@ -16,7 +16,7 @@ export default defineConfig({
     proxy: {
       // All /api/* requests → BE (no CORS preflight, same origin from browser's POV)
       '/api': {
-        target: 'http://localhost:3001',
+        target: process.env.VITE_PROXY_TARGET ?? 'http://localhost:3001',
         changeOrigin: true,
       },
     },

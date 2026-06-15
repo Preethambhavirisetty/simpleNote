@@ -16,6 +16,8 @@ const icons = {
   file: <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.6a1 1 0 01.7.3l5.4 5.4a1 1 0 01.3.7V19a2 2 0 01-2 2z" />,
   chevron: <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />,
   plus: <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />,
+  pencil: <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />,
+  check: <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />,
   trash: <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.9 12.1a2 2 0 01-2 1.9H7.9a2 2 0 01-2-1.9L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />,
 }
 
@@ -29,6 +31,8 @@ export default function Sidebar() {
   const user = useAuthStore((s) => s.user)
   const folders = useFolderStore((s) => (Array.isArray(s.folders) ? s.folders : []))
   const deleteFolder = useFolderStore((s) => s.deleteFolder)
+  const createFolder = useFolderStore((s) => s.createFolder)
+  const updateFolder = useFolderStore((s) => s.updateFolder)
   const notes = useNoteStore((s) => s.notes)
   const fetchNotes = useNoteStore((s) => s.fetchNotes)
   const createNote = useNoteStore((s) => s.createNote)
@@ -44,6 +48,8 @@ export default function Sidebar() {
   const navigate = useNavigate()
   const [expandedFolders, setExpandedFolders] = useState({})
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [editingFolderId, setEditingFolderId] = useState(null)
+  const [editingFolderName, setEditingFolderName] = useState('')
 
   const isChatPage = location.pathname.startsWith('/chat')
   const activeConversationId = isChatPage ? location.pathname.split('/')[2] : null
@@ -62,6 +68,28 @@ export default function Sidebar() {
     navigate(`/folders/${folder.id}?note=${result.note.id}`)
   }
 
+  const handleNewFolder = async () => {
+    const result = await createFolder({ name: 'Untitled' })
+    if (result?.ok) {
+      setExpandedFolders((current) => ({ ...current, [result.folder.id]: true }))
+    }
+  }
+
+  const handleRenameFolder = async (event, folder) => {
+    event.stopPropagation()
+    setEditingFolderId(folder.id)
+    setEditingFolderName(folder.name)
+  }
+
+  const handleSaveRename = async (folder) => {
+    if (!editingFolderName?.trim() || editingFolderName === folder.name) {
+      setEditingFolderId(null)
+      return
+    }
+    await updateFolder(folder.id, { name: editingFolderName.trim() })
+    setEditingFolderId(null)
+  }
+
   const handleDeleteConversation = async (event, id) => {
     event.stopPropagation()
     await deleteConversation(id)
@@ -73,7 +101,7 @@ export default function Sidebar() {
       <div className={`flex items-center pb-5 pt-4 ${isCollapsed ? 'flex-col gap-3 px-2' : 'justify-between px-4'}`}>
         <div className="flex items-center gap-2.5">
           <img src={noteliteIcon} alt="" className="h-9 w-9 rounded-xl" />
-          {!isCollapsed && <span className="workspace-primary text-[15px] font-semibold tracking-tight">NoteLite</span>}
+          {!isCollapsed && <span className="text-base font-semibold tracking-tight workspace-primary">NoteLite</span>}
         </div>
         <button
           onClick={() => setIsCollapsed((value) => !value)}
@@ -81,13 +109,13 @@ export default function Sidebar() {
           aria-label={isCollapsed ? 'Expand menu' : 'Collapse menu'}
           title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
             <path strokeLinecap="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
         </button>
       </div>
 
-      <nav className={`space-y-1 ${isCollapsed ? 'px-2' : 'px-3'}`}>
+      <nav className={`space-y-1 capitalize ${isCollapsed ? 'px-2' : 'px-3'}`}>
         <NavLink to="/notes" className={navCls} title="All notes"><Icon name="notes" />{!isCollapsed && 'All notes'}</NavLink>
         {isChatEnabled && <NavLink to="/chat" className={navCls} title="Ask NoteLite"><Icon name="chat" />{!isCollapsed && 'Ask NoteLite'}</NavLink>}
       </nav>
@@ -97,7 +125,7 @@ export default function Sidebar() {
           <>
             {!isCollapsed && <SectionHeader label="Recent conversations" />}
             <div className={`workspace-scroll flex-1 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-2'}`}>
-              {!isCollapsed && conversations.length === 0 && <p className="workspace-faint px-3 py-3 text-xs">Your conversations will appear here.</p>}
+              {!isCollapsed && conversations.length === 0 && <p className="px-3 py-3 text-sm workspace-faint">Your conversations will appear here.</p>}
               {conversations.map((conversation) => (
                 <button
                   key={conversation.id}
@@ -105,10 +133,10 @@ export default function Sidebar() {
                   title={conversation.title || 'Untitled conversation'}
                   className={`conversation-row group ${isCollapsed ? 'conversation-row-collapsed' : ''} ${String(conversation.id) === activeConversationId ? 'conversation-row-active' : ''}`}
                 >
-                  <Icon name="chat" className="h-4 w-4 shrink-0" />
+                  <Icon name="chat" className="w-4 h-4 shrink-0" />
                   {!isCollapsed && (
                     <>
-                      <span className="truncate flex-1">{conversation.title || 'Untitled conversation'}</span>
+                      <span className="flex-1 truncate">{conversation.title || 'Untitled conversation'}</span>
                       <span role="button" tabIndex={0} onClick={(event) => handleDeleteConversation(event, conversation.id)} className="opacity-0 group-hover:opacity-100 hover:text-red-400">
                         <Icon name="trash" className="h-3.5 w-3.5" />
                       </span>
@@ -120,7 +148,7 @@ export default function Sidebar() {
           </>
         ) : (
           <>
-            {!isCollapsed && <SectionHeader label="Workspace" />}
+            {!isCollapsed && <SectionHeader label="Workspace" action={handleNewFolder} />}
             <div className={`workspace-folder-scroll workspace-scroll min-h-0 flex-1 overflow-y-auto pb-3 ${isCollapsed ? 'px-2' : 'px-3'}`}>
               {folders.map((folder) => {
                 const folderNotes = notes.filter((note) => String(note.folder_id) === String(folder.id))
@@ -129,30 +157,48 @@ export default function Sidebar() {
                 return (
                   <div key={folder.id} className="mb-0.5">
                     <div className={`folder-tree-row group ${isCollapsed ? 'folder-tree-row-collapsed' : ''} ${isActiveFolder ? 'workspace-nav-active' : ''}`}>
-                      <button
-                        onClick={() => {
-                          if (isCollapsed) {
+                      {editingFolderId === folder.id ? (
+                        <input
+                          type="text"
+                          value={editingFolderName}
+                          onChange={(e) => setEditingFolderName(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex-1 px-2 py-1 text-sm text-white border bg-transparent/10 rounded-3xl focus:outline-none focus:border-green-100"
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          onClick={() => {
+                            if (isCollapsed) {
+                              navigate(`/folders/${folder.id}`)
+                              return
+                            }
+                            setExpandedFolders((current) => ({ ...current, [folder.id]: !(current[folder.id] ?? isActiveFolder) }))
                             navigate(`/folders/${folder.id}`)
-                            return
-                          }
-                          setExpandedFolders((current) => ({ ...current, [folder.id]: !(current[folder.id] ?? isActiveFolder) }))
-                          navigate(`/folders/${folder.id}`)
-                        }}
-                        title={folder.name}
-                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                      >
-                        {!isCollapsed && <Icon name="chevron" className={`h-3 w-3 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />}
-                        <Icon name="folder" className="h-4 w-4 shrink-0" />
-                        {!isCollapsed && <span className="truncate">{folder.name}</span>}
-                      </button>
-                      {!isCollapsed && <button onClick={(event) => handleNewNote(event, folder)} className="folder-tree-action" title="New note"><Icon name="plus" className="h-3.5 w-3.5" /></button>}
-                      {!isCollapsed && <button onClick={() => deleteFolder(folder.id).then(() => String(folder.id) === String(folderId) && navigate('/notes'))} className="folder-tree-action hover:text-red-400" title="Delete folder"><Icon name="trash" className="h-3.5 w-3.5" /></button>}
+                          }}
+                          title={folder.name}
+                          className="flex items-center flex-1 min-w-0 gap-2 text-left"
+                        >
+                          {!isCollapsed && <Icon name="chevron" className={`h-3 w-3 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />}
+                          <Icon name="folder" className="w-4 h-4 shrink-0" />
+                          {!isCollapsed && <span className="truncate">{folder.name}</span>}
+                        </button>
+                      )}
+                      {!isCollapsed && editingFolderId !== folder.id && <button onClick={(event) => handleNewNote(event, folder)} className="folder-tree-action" title="New note"><Icon name="plus" className="h-3.5 w-3.5" /></button>}
+                      {!isCollapsed && editingFolderId === folder.id ? (
+                        <button onClick={() => handleSaveRename(folder)} className="text-green-400 folder-tree-action" title="Save name"><Icon name="check" className="h-3.5 w-3.5" /></button>
+                      ) : (
+                        <>
+                          {!isCollapsed && <button onClick={(event) => handleRenameFolder(event, folder)} className="folder-tree-action" title="Rename folder"><Icon name="pencil" className="h-3.5 w-3.5" /></button>}
+                          {!isCollapsed && <button onClick={() => deleteFolder(folder.id).then(() => String(folder.id) === String(folderId) && navigate('/notes'))} className="folder-tree-action hover:text-red-400" title="Delete folder"><Icon name="trash" className="h-3.5 w-3.5" /></button>}
+                        </>
+                      )}
                     </div>
                     {!isCollapsed && isExpanded && (
-                      <div className="folder-note-list workspace-tree-border border-l">
+                      <div className="border-l folder-note-list workspace-tree-border">
                         {folderNotes.map((note) => (
                           <div key={note.id} className={`folder-note-row group ${String(note.id) === String(activeNoteId) ? 'folder-note-active' : ''}`}>
-                            <button onClick={() => navigate(`/folders/${folder.id}?note=${note.id}`)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                            <button onClick={() => navigate(`/folders/${folder.id}?note=${note.id}`)} className="flex items-center flex-1 min-w-0 gap-2 text-left">
                               <Icon name="file" className="h-3.5 w-3.5 shrink-0" />
                               <span className="truncate">{note.title || 'Untitled'}</span>
                             </button>
@@ -169,7 +215,7 @@ export default function Sidebar() {
                             </button>
                           </div>
                         ))}
-                        {folderNotes.length === 0 && <p className="workspace-faint px-2 py-1.5 text-[10px]">Empty folder</p>}
+                        {folderNotes.length === 0 && <p className="workspace-faint px-2 py-1.5 text-xs">Empty folder</p>}
                       </div>
                     )}
                   </div>
@@ -188,9 +234,9 @@ export default function Sidebar() {
         <ProfileAvatar />
         {!isCollapsed && (
           <>
-            <span className="min-w-0 flex-1">
-              <span className="workspace-primary block truncate text-xs font-medium">{user?.name || 'Your profile'}</span>
-              <span className="workspace-faint block truncate text-[10px]">{user?.email}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-sm font-medium truncate workspace-primary">{user?.name || 'Your profile'}</span>
+              <span className="block text-xs truncate workspace-faint">{user?.email}</span>
             </span>
             <span className="workspace-faint">•••</span>
           </>
@@ -202,8 +248,8 @@ export default function Sidebar() {
 
 function SectionHeader({ label, action }) {
   return (
-    <div className="mb-2 flex items-center justify-between px-5">
-      <span className="workspace-faint text-[10px] font-semibold uppercase tracking-[0.16em]">{label}</span>
+    <div className="flex items-center justify-between px-5 mb-2">
+      <span className="workspace-faint font-semibold uppercase tracking-[0.16em]">{label}</span>
       {action && <button onClick={action} className="workspace-faint hover:text-[#7aa83a]"><Icon name="plus" className="h-3.5 w-3.5" /></button>}
     </div>
   )

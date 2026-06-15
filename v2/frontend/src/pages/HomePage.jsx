@@ -107,19 +107,19 @@ function WorkspacePreview() {
       <div className="relative overflow-hidden rounded-[30px] border border-black/10 bg-white/80 p-3 shadow-[0_30px_80px_rgba(46,58,38,0.16)]">
         <div className="flex min-h-[480px] overflow-hidden rounded-[22px] border border-black/[0.07] bg-white">
           <div className="hidden w-36 shrink-0 border-r border-black/[0.07] bg-[#f2f5ef] p-3 sm:block">
-            <div className="mb-8 flex items-center gap-2 text-[10px] font-semibold">
+            <div className="mb-8 flex items-center gap-2 text-xs font-semibold">
               <div className="h-5 w-5 rounded-lg bg-[#b8ff67]" />
               NoteLite
             </div>
-            <div className="rounded-lg bg-[#9ed858] px-3 py-2 text-[8px] font-semibold text-[#17220e]">+ New chat</div>
-            <div className="mt-6 space-y-3 text-[8px] text-[#7b8476]">
+            <div className="rounded-lg bg-[#9ed858] px-3 py-2 text-xs font-semibold text-[#17220e]">+ New chat</div>
+            <div className="mt-6 space-y-3 text-xs text-[#7b8476]">
               <p className="text-[#35402f]">Explore notes</p>
               <p>All notes</p>
               <p>Favorites</p>
               <p>Settings</p>
             </div>
-            <p className="mb-3 mt-8 text-[7px] uppercase tracking-widest text-[#929b8d]">Recent chats</p>
-            <div className="space-y-3 text-[7px] text-[#7b8476]">
+            <p className="mb-3 mt-8 text-xs uppercase tracking-widest text-[#929b8d]">Recent chats</p>
+            <div className="space-y-3 text-xs text-[#7b8476]">
               <p className="truncate text-[#567c28]">Plan the product launch</p>
               <p className="truncate">Summarize research ideas</p>
               <p className="truncate">Weekly reflections</p>
@@ -128,16 +128,16 @@ function WorkspacePreview() {
           <div className="flex flex-1 flex-col p-5">
             <div className="flex items-center justify-between border-b border-black/[0.07] pb-4">
               <div>
-                <p className="text-[9px] text-[#929b8d]">Conversation</p>
+                <p className="text-xs text-[#929b8d]">Conversation</p>
                 <p className="mt-1 text-xs">Plan the product launch</p>
               </div>
               <div className="h-7 w-7 rounded-full bg-[#9ed858]/30" />
             </div>
             <div className="flex-1 space-y-5 pt-6">
-              <div className="ml-auto max-w-[78%] rounded-2xl rounded-br-sm bg-[#f1f4ee] px-3 py-2.5 text-[8px] leading-4 text-[#566151]">
+              <div className="ml-auto max-w-[78%] rounded-2xl rounded-br-sm bg-[#f1f4ee] px-3 py-2.5 text-xs leading-4 text-[#566151]">
                 Pull together the strongest launch ideas from my notes.
               </div>
-              <div className="max-w-[88%] text-[8px] leading-4 text-[#667061]">
+              <div className="max-w-[88%] text-xs leading-4 text-[#667061]">
                 <p className="mb-2 text-[#35402f]">Here is a focused launch plan based on your notes:</p>
                 <div className="space-y-2 rounded-xl border border-black/[0.06] bg-[#f7f9f5] p-3">
                   <p><span className="text-[#567c28]">01</span> Lead with the personal knowledge story.</p>
@@ -147,13 +147,13 @@ function WorkspacePreview() {
               </div>
             </div>
             <div className="rounded-2xl border border-black/[0.07] bg-[#f4f6f2] p-3">
-              <p className="text-[8px] text-[#929b8d]">Ask anything about your notes...</p>
+              <p className="text-xs text-[#929b8d]">Ask anything about your notes...</p>
               <div className="mt-3 flex justify-between">
                 <div className="flex gap-1.5">
-                  <span className="rounded-full bg-white px-2 py-1 text-[6px] text-[#7b8476]">Brainstorm</span>
-                  <span className="rounded-full bg-white px-2 py-1 text-[6px] text-[#7b8476]">Summarize</span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-[#7b8476]">Brainstorm</span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs text-[#7b8476]">Summarize</span>
                 </div>
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#9ed858] text-[7px] text-[#17220e]">↑</span>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#9ed858] text-xs text-[#17220e]">↑</span>
               </div>
             </div>
           </div>

@@ -19,7 +19,7 @@ const icons = {
   back: <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />,
 }
 
-function Icon({ name, className = 'h-4 w-4' }) {
+function Icon({ name, className = 'w-4 h-4' }) {
   return <svg className={className} fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">{icons[name]}</svg>
 }
 
@@ -115,7 +115,7 @@ export default function NotesPage() {
   }
 
   return (
-    <div className="notes-desk h-full">
+    <div className="h-full notes-desk">
       <NoteBrowser
         title={currentFolder?.name || 'All notes'}
         notes={visibleNotes}
@@ -148,25 +148,25 @@ function NoteBrowser({ title, notes, activeId, search, setSearch, isLoading, onS
     <section className={`notes-browser ${activeId ? 'notes-browser-has-selection' : ''}`}>
       <div className="notes-browser-header">
         <div>
-          <p className="workspace-faint text-[10px] font-semibold uppercase tracking-[0.16em]">Workspace</p>
-          <h1 className="workspace-primary mt-1 text-2xl font-semibold tracking-[-0.04em]">{title}</h1>
+          <p className="workspace-faint text-xs font-semibold uppercase tracking-[0.16em]">Workspace</p>
+          <h1 className="workspace-primary mt-1 text-2xl font-semibold tracking-[-0.04em] capitalize">{title}</h1>
         </div>
         <button onClick={onNew} className="note-new-button" title="Create note"><Icon name="plus" /></button>
       </div>
 
       <label className="notes-search">
-        <Icon name="search" className="h-4 w-4 shrink-0" />
+        <Icon name="search" className="w-4 h-4 shrink-0" />
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search notes..." />
-        {search && <button onClick={() => setSearch('')} className="workspace-faint text-xs">Clear</button>}
+        {search && <button onClick={() => setSearch('')} className="text-xs workspace-faint">Clear</button>}
       </label>
 
-      <div className="workspace-scroll flex-1 overflow-y-auto px-4 pb-5">
+      <div className="flex-1 px-4 pb-5 overflow-y-auto workspace-scroll">
         {isLoading && notes.length === 0 && <div className="flex justify-center py-12"><span className="note-spinner" /></div>}
         {!isLoading && notes.length === 0 && (
           <button onClick={onNew} className="notes-empty-card">
-            <span className="notes-empty-icon"><Icon name="note" className="h-5 w-5" /></span>
-            <span className="workspace-primary text-sm font-medium">Start a fresh note</span>
-            <span className="workspace-faint mt-1 text-xs">Your ideas will appear here.</span>
+            <span className="notes-empty-icon"><Icon name="note" className="w-5 h-5" /></span>
+            <span className="text-sm font-medium workspace-primary">Start a fresh note</span>
+            <span className="mt-1 text-xs workspace-faint">Your ideas will appear here.</span>
           </button>
         )}
         <div className="space-y-3">
@@ -184,9 +184,9 @@ function NoteCard({ note, index, active, onSelect, onDelete, onPin }) {
   return (
     <article onClick={() => onSelect(note.id)} className={`note-card group ${active ? 'note-card-active' : ''}`} style={{ animationDelay: `${Math.min(index, 8) * 35}ms` }}>
       <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 className="workspace-primary truncate text-sm font-semibold">{note.title || 'Untitled note'}</h2>
-          <p className="workspace-muted mt-2 line-clamp-2 text-xs leading-5">{preview}</p>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-semibold truncate workspace-primary">{note.title || 'Untitled note'}</h2>
+          <p className="mt-2 text-xs leading-5 workspace-muted line-clamp-2">{preview}</p>
         </div>
         <span className={`note-card-dot ${note.is_pinned ? 'note-card-dot-pinned' : ''}`} />
       </div>
@@ -195,8 +195,8 @@ function NoteCard({ note, index, active, onSelect, onDelete, onPin }) {
           {note.tags.slice(0, 3).map((tag) => <span key={tag.id} className="note-tag">#{tag.name}</span>)}
         </div>
       )}
-      <div className="mt-4 flex items-center justify-between">
-        <span className="workspace-faint text-[10px]">{relativeTime(note.updated_at ?? note.created_at)}</span>
+      <div className="flex items-center justify-between mt-4">
+        <span className="workspace-faint text-xs">{relativeTime(note.updated_at ?? note.created_at)}</span>
         <div className="note-card-actions">
           <button onClick={(event) => { event.stopPropagation(); onPin(note) }} className={note.is_pinned ? 'text-[var(--accent)]' : ''} title={note.is_pinned ? 'Unpin note' : 'Pin note'}><Icon name="pin" className="h-3.5 w-3.5" /></button>
           <button onClick={(event) => { event.stopPropagation(); onDelete(note.id) }} className="hover:text-red-500" title="Delete note"><Icon name="trash" className="h-3.5 w-3.5" /></button>
@@ -278,7 +278,7 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTa
       <div className="note-editor-topbar">
         <button onClick={onBack} className="note-mobile-back" title="Back to notes"><Icon name="back" /></button>
         <span className="save-status"><span className={`save-dot ${dirty || isSaving ? 'save-dot-working' : ''}`} />{isSaving ? 'Saving' : dirty ? 'Unsaved' : 'Saved'}</span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center gap-2 ml-auto">
           <button onClick={onDelete} className="editor-icon-button hover:text-red-500" title="Delete note"><Icon name="trash" /></button>
           <button className="editor-icon-button" title="More options">•••</button>
         </div>
@@ -286,11 +286,11 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTa
 
       <EditorToolbar editor={editor} />
 
-      <div className="workspace-scroll min-h-0 flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto workspace-scroll">
         <div className="note-page">
           <TagEditor note={note} tags={tags} onCreate={onCreateTag} onAdd={onAddTag} onRemove={onRemoveTag} />
           <input value={title} onChange={handleTitle} placeholder="Untitled note" className="note-title-input" />
-          <div className="workspace-faint mb-9 mt-3 flex items-center gap-2 text-[10px]">
+          <div className="workspace-faint mb-9 mt-3 flex items-center gap-2 text-xs">
             <span>Last edited {relativeTime(note.updated_at)}</span><span>•</span><span>Autosaved</span>
           </div>
           <EditorContent editor={editor} />
@@ -358,11 +358,11 @@ function EditorToolbar({ editor }) {
 
 function EditorWelcome() {
   return (
-    <section className="note-editor-panel items-center justify-center text-center">
+    <section className="items-center justify-center text-center note-editor-panel">
       <div className="editor-welcome-icon">✦</div>
-      <p className="workspace-faint mt-6 text-[10px] font-semibold uppercase tracking-[0.18em]">A quiet place to think</p>
+      <p className="workspace-faint mt-6 text-xs font-semibold uppercase tracking-[0.18em]">A quiet place to think</p>
       <h2 className="workspace-primary mt-3 text-3xl font-semibold tracking-[-0.04em]">Pick a note and start writing.</h2>
-      <p className="workspace-muted mt-3 max-w-sm text-sm leading-6">Select a card from the left or create a new note. Changes save automatically as you write.</p>
+      <p className="max-w-sm mt-3 text-sm leading-6 workspace-muted">Select a card from the left or create a new note. Changes save automatically as you write.</p>
     </section>
   )
 }

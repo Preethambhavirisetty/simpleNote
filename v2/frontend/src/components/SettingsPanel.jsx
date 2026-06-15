@@ -12,7 +12,7 @@ function Section({ title, children }) {
   return (
     <div className="settings-section">
       {title && (
-        <p className="text-label font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
+        <p className="mb-3 font-semibold tracking-wider uppercase text-label text-zinc-400 dark:text-zinc-500">
           {title}
         </p>
       )}
@@ -25,7 +25,7 @@ function Section({ title, children }) {
 function ComingSoon({ label }) {
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="text-sm text-zinc-400 dark:text-zinc-500">{label}</span>
+      <span className="text-xs text-zinc-400 dark:text-zinc-500">{label}</span>
       <span className="text-caption font-medium text-zinc-400 dark:text-zinc-600 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
         Coming soon
       </span>
@@ -99,7 +99,7 @@ function AvatarChooser() {
           <p className="mt-0.5 text-xs text-zinc-500">Synced across your workspace.</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-6 gap-2">
+      <div className="grid grid-cols-6 gap-2 mt-4">
         {CHARACTER_OPTIONS.map((value) => (
           <button
             key={value}
@@ -112,7 +112,7 @@ function AvatarChooser() {
         ))}
       </div>
       <input ref={inputRef} onChange={handleImage} type="file" accept="image/*" className="hidden" />
-      <button onClick={() => inputRef.current?.click()} className="mt-3 w-full rounded-lg border border-zinc-200 px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+      <button onClick={() => inputRef.current?.click()} className="w-full px-3 py-2 mt-3 text-xs font-medium border rounded-lg border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
         Upload your own image
       </button>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
@@ -148,11 +148,11 @@ function ChangePasswordForm({ onDone }) {
   }
 
   if (status === 'ok') {
-    return <p className="text-sm text-emerald-500 py-2">Password changed ✓</p>
+    return <p className="py-2 text-sm text-emerald-500">Password changed ✓</p>
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2 mt-2">
+    <form onSubmit={handleSubmit} className="mt-2 space-y-2">
       {[
         { key: 'current_password', placeholder: 'Current password' },
         { key: 'new_password', placeholder: 'New password' },
@@ -165,7 +165,7 @@ function ChangePasswordForm({ onDone }) {
           placeholder={placeholder}
           value={form[key]}
           onChange={set(key)}
-          className="w-full bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors"
+          className="w-full px-3 py-2 text-sm transition-colors border rounded-lg bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-indigo-500"
         />
       ))}
       {status && status !== 'loading' && (
@@ -238,11 +238,11 @@ export default function SettingsPanel() {
         }`}
       >
         {/* Header */}
-        <div className="settings-panel-header flex items-center justify-between px-5 py-4">
+        <div className="flex items-center justify-between px-5 py-4 settings-panel-header">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Settings</h2>
           <button
             onClick={close}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="flex items-center justify-center transition-colors rounded-md w-7 h-7 text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -256,10 +256,10 @@ export default function SettingsPanel() {
             <div className="flex items-center gap-3">
               <ProfileAvatar size="lg" />
               <div className="min-w-0">
-                <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                <p className="text-sm font-medium truncate text-zinc-900 dark:text-zinc-100">
                   {user?.name ?? 'Anonymous'}
                 </p>
-                <p className="text-xs text-zinc-500 dark:text-zinc-500 truncate">{user?.email}</p>
+                <p className="text-xs truncate text-zinc-500 dark:text-zinc-500">{user?.email}</p>
               </div>
             </div>
           </Section>
@@ -280,10 +280,10 @@ export default function SettingsPanel() {
             ) : (
               <button
                 onClick={() => setShowChangePassword(true)}
-                className="w-full flex items-center justify-between py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 group"
+                className="flex items-center justify-between w-full py-2 text-sm text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 group"
               >
                 Change password
-                <svg className="w-4 h-4 text-zinc-400 dark:text-zinc-600 group-hover:text-zinc-600 dark:group-hover:text-zinc-400 transition-colors" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <svg className="w-4 h-4 transition-colors text-zinc-400 dark:text-zinc-600 group-hover:text-zinc-600 dark:group-hover:text-zinc-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                 </svg>
               </button>
@@ -298,10 +298,10 @@ export default function SettingsPanel() {
         </div>
 
         {/* Footer */}
-        <div className="settings-panel-footer px-5 py-4">
+        <div className="px-5 py-4 settings-panel-footer">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+            className="flex items-center w-full gap-2 px-3 py-2 text-sm text-red-500 transition-colors rounded-lg dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.75} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
