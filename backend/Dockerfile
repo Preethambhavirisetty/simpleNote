@@ -28,6 +28,12 @@ COPY --from=builder /deps /usr/local
 # Copy only the application source; tests, local config, and the venv stay out.
 COPY --chown=app:app app/ ./app/
 
+# Database migrations (applied before the app starts, via the entrypoint below).
+COPY --chown=app:app alembic/ ./alembic/
+COPY --chown=app:app alembic.ini ./alembic.ini
+COPY --chown=app:app docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 USER app
 
 # Prevent Python from writing .pyc files and buffer stdout/stderr so logs
@@ -48,4 +54,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 # Runtime environment variables must be supplied by the orchestrator / Compose.
 # Required: POSTGRES_DB_URL, SECRET_KEY
 # Optional: HASH_ALGORITHM (default: HS256)
+# The entrypoint runs `alembic upgrade head` (retrying until Postgres is ready),
+# then execs the CMD below.
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

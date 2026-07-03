@@ -8,13 +8,50 @@ from app.shared.utils import require_env
 APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BASE_DIR = os.path.abspath(os.path.join(APP_DIR, ".."))
 
+
+def _load_aws_secrets() -> None:
+    """Populate os.environ from an AWS Secrets Manager secret when configured.
+
+    In production set AWS_SECRETS_MANAGER_SECRET_ID (and AWS_REGION) to the id/ARN of a
+    secret whose value is a JSON object of ENV_KEY: value pairs; each pair is loaded into
+    the environment. Values already present in the environment win, so nothing set by the
+    orchestrator (or a local .env) is overwritten. No-op when the variable is unset, so
+    local and test runs keep using plain environment variables.
+    """
+    secret_id = os.getenv("AWS_SECRETS_MANAGER_SECRET_ID")
+    if not secret_id:
+        return
+
+    import json
+
+    try:
+        import boto3
+    except ImportError as exc:  # boto3 is only needed when this feature is used
+        raise RuntimeError(
+            "AWS_SECRETS_MANAGER_SECRET_ID is set but boto3 is not installed. "
+            "Install boto3 to load secrets from AWS Secrets Manager."
+        ) from exc
+
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+    client = boto3.client("secretsmanager", region_name=region)
+    secret_string = client.get_secret_value(SecretId=secret_id).get("SecretString")
+    if not secret_string:
+        raise RuntimeError("AWS Secrets Manager secret has no SecretString value.")
+
+    for key, value in json.loads(secret_string).items():
+        os.environ.setdefault(key, str(value))
+
+
 load_dotenv(os.path.join(BASE_DIR, ".env"))
+_load_aws_secrets()
 
 
 # Core application
 SECRET_KEY = require_env("SECRET_KEY")
 BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
+# Synchronous, blocking debug ingestion endpoint. Off by default; enable only in dev.
+ENABLE_DIRECT_INGEST = require_env("ENABLE_DIRECT_INGEST", "false").lower() == "true"
 
 
 # Prompt selection

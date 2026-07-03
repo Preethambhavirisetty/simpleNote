@@ -135,10 +135,21 @@ class TestNoteServiceMove:
         note_service.repo.get_by_id.return_value = note
         new_folder_id = uuid4()
 
-        note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=new_folder_id))
+        note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=new_folder_id), current_user.role)
 
         assert note.folder_id == new_folder_id
         mock_db.commit.assert_called_once()
+
+    def test_move_to_missing_folder_raises_404(self, note_service, mock_db, current_user):
+        note = make_note(user_id=current_user.id)
+        note_service.repo.get_by_id.return_value = note
+        note_service.folder_repo.get_by_id.return_value = None
+
+        with pytest.raises(AppException) as exc:
+            note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=uuid4()), current_user.role)
+
+        assert exc.value.status_code == 404
+        mock_db.commit.assert_not_called()
 
 
 class TestNoteServiceTagOperations:

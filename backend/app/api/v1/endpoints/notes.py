@@ -106,7 +106,7 @@ def move_note(
     service: NoteService = Depends(get_note_service),
 ):
     """Move one note to another existing folder."""
-    note = service.move(db, note_id, current_user.id, payload)
+    note = service.move(db, note_id, current_user.id, payload, current_user.role)
     return success_response(_note_dict(note), "Note moved")
 
 

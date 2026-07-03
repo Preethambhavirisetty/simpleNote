@@ -9,11 +9,12 @@ SessionLocal: sessionmaker[Session] | None = None
 
 
 def init_postgres(db_url: str) -> None:
-    """Create engine, session factory, and tables. Called once at app startup."""
+    """Create the engine and session factory. Called once at app startup.
+
+    The schema itself is managed by Alembic migrations (`alembic upgrade head`,
+    run by the container entrypoint), not by this function.
+    """
     global engine, SessionLocal
-    # import app.db.postgres.models.user  # noqa: F401 — registers User model with Base
-    import app.db.postgres.models
-    from app.db.postgres.base import Base
 
     engine = create_engine(
         db_url,
@@ -36,9 +37,6 @@ def init_postgres(db_url: str) -> None:
     # Verify connection is reachable at startup
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
-
-    # Create all tables that don't exist yet (safe to run repeatedly)
-    Base.metadata.create_all(engine)
 
 
 def dispose_postgres() -> None:

@@ -11,7 +11,7 @@ token_service = TokenService()
 user_service = UserService()
 
 
-async def get_current_user(
+def get_current_user(
     request: Request,
     db: Session = Depends(get_postgres_session),
 ):
@@ -30,4 +30,11 @@ async def get_current_user(
             status_code=401,
             error_code=ErrorCode.UNAUTHORIZED
         )
-    return user_service.get_user(db, user_id)
+    user = user_service.get_user(db, user_id)
+    if not user.is_active:
+        raise AppException(
+            message="Account is deactivated",
+            status_code=403,
+            error_code=ErrorCode.PERMISSION_DENIED
+        )
+    return user

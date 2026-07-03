@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 import jwt
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 
 from app.api.v1.api import api_router
 from app.core.config import POSTGRES_DB_URL, SECRET_KEY, HASH_ALGORITHM
 from app.db.postgres.session import dispose_postgres, init_postgres
 from app.exceptions.handlers import register_exceptions
 from app.logger import setup_logging, logger
+from app.metrics import REQUEST_COUNT, REQUEST_LATENCY, render_metrics
 from app.core.openapi import OPENAPI_TAGS, configure_openapi
 
 
@@ -59,7 +60,8 @@ def _extract_user_id(request: Request) -> str:
 @app.middleware("http")
 async def request_middleware(request: Request, call_next):
     clear_contextvars()
-    trace_id = str(uuid.uuid4())
+    # Reuse an inbound trace id so a request keeps one id across services; else start one.
+    trace_id = request.headers.get("x-trace-id") or str(uuid.uuid4())
     user_id = _extract_user_id(request)
     bind_contextvars(trace_id=trace_id, user_id=user_id)
 
@@ -79,6 +81,16 @@ async def request_middleware(request: Request, call_next):
 
     duration_ms = round((time.monotonic() - start) * 1000, 2)
 
+    # Metrics: label by the matched route template (not the raw path) to bound cardinality.
+    route = request.scope.get("route")
+    path_label = getattr(route, "path", None) or "unmatched"
+    if request.url.path != "/metrics":
+        REQUEST_LATENCY.labels(request.method, path_label).observe((time.monotonic() - start))
+        REQUEST_COUNT.labels(request.method, path_label, str(response.status_code)).inc()
+
+    # Expose the correlation id so callers (and error reports) can be tied back to logs.
+    response.headers["X-Trace-Id"] = trace_id
+
     log_kw = dict(
         method=request.method,
         path=request.url.path,
@@ -96,6 +108,13 @@ async def request_middleware(request: Request, call_next):
         logger.info("request", **log_kw)
 
     return response
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """Prometheus scrape endpoint."""
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
 
 
 app.include_router(api_router)

@@ -5,7 +5,7 @@ import jwt
 from fastapi.responses import Response
 from jwt import PyJWTError
 
-from app.core.config import HASH_ALGORITHM, SECRET_KEY
+from app.core.config import COOKIE_SECURE, HASH_ALGORITHM, SECRET_KEY
 from app.exceptions.base import AppException
 from app.schema.base import ErrorCode
 
@@ -36,7 +36,7 @@ class TokenService:
                 max_age=cookie_ttl_seconds,
                 expires=cookie_ttl_seconds,
                 samesite="lax",
-                secure=False,
+                secure=COOKIE_SECURE,
             )
             return True
         except Exception:

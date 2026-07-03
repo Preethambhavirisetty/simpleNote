@@ -146,11 +146,22 @@ class NoteService:
                 })
         return note
 
-    def move(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteMoveRequest):
+    def move(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteMoveRequest, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
+        folder = self.folder_repo.get_by_id(db, payload.folder_id, user_id)
+        if not folder:
+            raise AppException(
+                message="Folder not found",
+                status_code=404,
+                error_code=ErrorCode.NOT_FOUND,
+            )
         note.folder_id = payload.folder_id
         db.commit()
         db.refresh(note)
+
+        # Re-index so the vector store's folder metadata reflects the new folder.
+        if note.content_text and note.content_text.strip():
+            _dispatch_ingest(self._ingestion_payload(db, note, user_role))
         return note
 
     def delete(self, db: Session, note_id: UUID, user_id: UUID, user_role: list[str]):

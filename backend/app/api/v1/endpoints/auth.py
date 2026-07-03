@@ -23,38 +23,38 @@ def get_user_service():
 
 
 @router.post("/register", response_model=ApiResponse[AuthUserData], summary="Register a user")
-async def register_user(
+def register_user(
     response: Response,
     payload: UserRegisterRequest,
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_postgres_session)
 ):
     """Create a user account and set its authentication cookie."""
-    result = await auth_service.register_user(db, payload, response)
+    result = auth_service.register_user(db, payload, response)
     return success_response(result, "User registered")
 
 
 @router.post("/login", response_model=ApiResponse[AuthUserData], summary="Log in a user")
-async def login_user(
+def login_user(
     response: Response,
     payload: UserLoginRequest,
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_postgres_session)
 ):
     """Validate credentials and set the authentication cookie."""
-    result = await auth_service.login_user(db, payload, response)
+    result = auth_service.login_user(db, payload, response)
     return success_response(result, "User logged in")
 
 
 @router.delete("/logout/", dependencies=[Depends(get_current_user)], response_model=ApiResponse[LogoutData], summary="Log out the current user")
-async def logout(response: Response, auth_service: AuthService = Depends(get_auth_service)):
+def logout(response: Response, auth_service: AuthService = Depends(get_auth_service)):
     """Delete the current authentication cookie."""
-    result = await auth_service.logout_user(response)
+    result = auth_service.logout_user(response)
     return success_response(result, "User logged out!")
 
 
 @router.patch('/change-password', response_model=ApiResponse[None], summary="Change the current user password")
-async def change_password(
+def change_password(
     payload: UserChangePassword,
     current_user = Depends(get_current_user),
     user_service = Depends(get_user_service),

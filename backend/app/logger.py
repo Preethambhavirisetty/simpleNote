@@ -17,10 +17,25 @@ import sys
 import threading
 import time as _time
 import urllib.request
+from datetime import datetime
 
 import structlog
 
 _loki_queue: queue.Queue | None = None
+
+
+def _iso_to_ns(timestamp: str | None) -> str:
+    """Convert a structlog ISO timestamp to Loki's nanosecond string.
+
+    Falls back to the current time if the timestamp is missing or unparseable.
+    """
+    if timestamp:
+        try:
+            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            return str(int(dt.timestamp() * 1e9))
+        except ValueError:
+            pass
+    return str(int(_time.time() * 1e9))
 
 
 def _loki_enqueue(logger, method_name, event_dict):
@@ -52,12 +67,11 @@ def _start_loki_pusher(loki_url: str, service: str):
             except queue.Empty:
                 continue
 
-            now_ns = str(int(_time.time() * 1e9))
             values = []
             for entry in batch:
-                entry.pop("timestamp", None)
+                ts_ns = _iso_to_ns(entry.pop("timestamp", None))
                 line = json.dumps(entry, default=str)
-                values.append([now_ns, line])
+                values.append([ts_ns, line])
 
             payload = json.dumps({
                 "streams": [{
@@ -113,3 +127,8 @@ def setup_logging(level: int = logging.INFO, service: str = "backend"):
 
 
 logger = structlog.get_logger()
+
+
+def get_trace_id() -> str | None:
+    """Return the current request's trace id bound in structlog contextvars, if any."""
+    return structlog.contextvars.get_contextvars().get("trace_id")

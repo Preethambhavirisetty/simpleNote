@@ -11,6 +11,16 @@ class Role(str, Enum):
     ADMIN_USER = "admin_user"
 
 
+def validate_password_strength(v: str) -> str:
+    if len(v) < 6:
+        raise ValueError("Password must have atleast 6 characters")
+    if not any(c.isupper() for c in v):
+        raise ValueError("Password must have at least one uppercase")
+    if not any(c.isdigit() or not c.isalnum() for c in v):
+        raise ValueError("Password must have atleast one alphanumeric or a special character")
+    return v
+
+
 class UserBase(BaseModel):
     id: UUID
     name: str
@@ -37,13 +47,7 @@ class UserChangePassword(BaseModel):
     @field_validator("new_password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Password must have atleast 6 characters")
-        if v.islower():
-            raise ValueError("Password must have at least one uppercase")
-        if v.isalpha() or v.isnumeric():
-            raise ValueError("Password must have atleast one alphanumeric or a special character")
-        return v
+        return validate_password_strength(v)
 
 
 class UserAssignRoles(BaseModel):
@@ -54,18 +58,11 @@ class UserRegisterRequest(BaseModel):
     name: str
     email: EmailStr
     password: str
-    role: Optional[List[Role]] = Field(default_factory=lambda: [Role.STANDARD_USER])
 
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Password must have atleast 6 characters")
-        if v.islower():
-            raise ValueError("Password must have at least one uppercase")
-        if v.isalpha() or v.isnumeric():
-            raise ValueError("Password must have atleast one alphanumeric or a special character")
-        return v
+        return validate_password_strength(v)
 
 
 class UserRegisterResponse(BaseModel):

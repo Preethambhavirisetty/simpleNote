@@ -1,8 +1,7 @@
 """
 Tests for authentication: AuthService unit tests and /api/auth/* endpoints.
 """
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,7 +35,7 @@ class TestAuthServiceRegister:
             email="test@example.com",
             password="Test123",
         )
-        result = asyncio.run(auth_service.register_user(mock_db, payload, MagicMock()))
+        result = auth_service.register_user(mock_db, payload, MagicMock())
 
         assert result["email"] == new_user.email
         assert "hashed_password" not in result
@@ -51,7 +50,7 @@ class TestAuthServiceRegister:
             password="Test123",
         )
         with pytest.raises(AppException) as exc:
-            asyncio.run(auth_service.register_user(mock_db, payload, MagicMock()))
+            auth_service.register_user(mock_db, payload, MagicMock())
 
         assert exc.value.status_code == 400
         assert exc.value.error_code == ErrorCode.REGISTRATION_FAILED
@@ -68,7 +67,7 @@ class TestAuthServiceRegister:
             password="Test123",
         )
         with pytest.raises(AppException) as exc:
-            asyncio.run(auth_service.register_user(mock_db, payload, MagicMock()))
+            auth_service.register_user(mock_db, payload, MagicMock())
 
         assert exc.value.status_code == 400
 
@@ -80,7 +79,7 @@ class TestAuthServiceLogin:
 
         with patch("app.services.auth.check_password", return_value=True):
             payload = UserLoginRequest(email=existing.email, password="Test123")
-            result = asyncio.run(auth_service.login_user(mock_db, payload, MagicMock()))
+            result = auth_service.login_user(mock_db, payload, MagicMock())
 
         assert result["email"] == existing.email
 
@@ -89,7 +88,7 @@ class TestAuthServiceLogin:
 
         payload = UserLoginRequest(email="ghost@example.com", password="Test123")
         with pytest.raises(AppException) as exc:
-            asyncio.run(auth_service.login_user(mock_db, payload, MagicMock()))
+            auth_service.login_user(mock_db, payload, MagicMock())
 
         assert exc.value.status_code == 400
         assert exc.value.error_code == ErrorCode.INVALID_CREDENTIALS
@@ -100,7 +99,7 @@ class TestAuthServiceLogin:
         with patch("app.services.auth.check_password", return_value=False):
             payload = UserLoginRequest(email="test@example.com", password="WrongPass1")
             with pytest.raises(AppException) as exc:
-                asyncio.run(auth_service.login_user(mock_db, payload, MagicMock()))
+                auth_service.login_user(mock_db, payload, MagicMock())
 
         assert exc.value.status_code == 400
         assert exc.value.error_code == ErrorCode.INVALID_CREDENTIALS
@@ -113,7 +112,7 @@ class TestRegisterEndpoint:
         from app.services.auth import AuthService
 
         mock_result = {"name": "Test", "email": "test@example.com", "role": ["standard_user"], "is_active": True}
-        with patch.object(AuthService, "register_user", new=AsyncMock(return_value=mock_result)):
+        with patch.object(AuthService, "register_user", return_value=mock_result):
             resp = client.post(
                 "/api/auth/register",
                 json={"name": "Test", "email": "test@example.com", "password": "Test123"},
@@ -166,9 +165,7 @@ class TestRegisterEndpoint:
         with patch.object(
             AuthService,
             "register_user",
-            new=AsyncMock(
-                side_effect=AppException("User with this email already exists", 400, ErrorCode.REGISTRATION_FAILED)
-            ),
+            side_effect=AppException("User with this email already exists", 400, ErrorCode.REGISTRATION_FAILED),
         ):
             resp = client.post(
                 "/api/auth/register",
@@ -184,7 +181,7 @@ class TestLoginEndpoint:
         from app.services.auth import AuthService
 
         mock_result = {"name": "Test", "email": "test@example.com", "role": ["standard_user"], "is_active": True}
-        with patch.object(AuthService, "login_user", new=AsyncMock(return_value=mock_result)):
+        with patch.object(AuthService, "login_user", return_value=mock_result):
             resp = client.post(
                 "/api/auth/login",
                 json={"email": "test@example.com", "password": "Test123"},
@@ -203,9 +200,7 @@ class TestLoginEndpoint:
         with patch.object(
             AuthService,
             "login_user",
-            new=AsyncMock(
-                side_effect=AppException("Invalid email or password", 400, ErrorCode.INVALID_CREDENTIALS)
-            ),
+            side_effect=AppException("Invalid email or password", 400, ErrorCode.INVALID_CREDENTIALS),
         ):
             resp = client.post(
                 "/api/auth/login",
@@ -227,7 +222,7 @@ class TestLogoutEndpoint:
         with patch.object(
             AuthService,
             "logout_user",
-            new=AsyncMock(return_value={"message": "successfully deleted cookie"}),
+            return_value={"message": "successfully deleted cookie"},
         ):
             resp = client.delete("/api/auth/logout")
 

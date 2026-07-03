@@ -14,7 +14,7 @@ class AuthService:
         self.token_service = TokenService()
         self.user_repo = UserRepository()
 
-    async def register_user(self, db: Session, payload: UserRegisterRequest, response: Response):
+    def register_user(self, db: Session, payload: UserRegisterRequest, response: Response):
         if self.user_repo.get_by_email(db, payload.email):
             raise AppException(
                 message="User with this email already exists",
@@ -22,16 +22,11 @@ class AuthService:
                 error_code=ErrorCode.REGISTRATION_FAILED,
             )
 
-        role_values = (
-            [r.value for r in payload.role]
-            if payload.role
-            else [Role.STANDARD_USER.value]
-        )
         user_data = UserCreate(
             name=payload.name,
             email=payload.email,
             hashed_password=hash_password(payload.password),
-            role=role_values,
+            role=[Role.STANDARD_USER.value],
         )
         new_user = self.user_repo.create(db, user_data)
         db.commit()
@@ -52,7 +47,7 @@ class AuthService:
             "is_active": new_user.is_active,
         }
 
-    async def login_user(self, db: Session, payload: UserLoginRequest, response: Response):
+    def login_user(self, db: Session, payload: UserLoginRequest, response: Response):
         existing_user = self.user_repo.get_by_email(db, payload.email)
 
         if not existing_user:
@@ -67,6 +62,13 @@ class AuthService:
                 message="Invalid email or password",
                 status_code=400,
                 error_code=ErrorCode.INVALID_CREDENTIALS,
+            )
+
+        if not existing_user.is_active:
+            raise AppException(
+                message="Account is deactivated",
+                status_code=403,
+                error_code=ErrorCode.PERMISSION_DENIED,
             )
 
         if not self.token_service.create_assign_http_only_cookie(
@@ -84,7 +86,7 @@ class AuthService:
             "is_active": existing_user.is_active,
         }
 
-    async def logout_user(self, response: Response):
+    def logout_user(self, response: Response):
         try:
             response.delete_cookie("access_token")
             return {"message": "successfully deleted cookie"}

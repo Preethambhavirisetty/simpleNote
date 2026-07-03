@@ -319,7 +319,9 @@ def run_retrieval(
     embeddings = embed_query(store, prepared, hyde)
     events.append(f"retrieval embedding completed: hyde={hyde is not None}")
 
-    metadata_filter = None if role == "admin" else {"user_id": user_id}
+    # Always scope retrieval to the requesting user. No admin bypass: an admin role
+    # must never read across tenants from a user-facing chat request.
+    metadata_filter = {"user_id": user_id}
     sources, search_diagnostics = multi_collection_search(
         store,
         prepared,

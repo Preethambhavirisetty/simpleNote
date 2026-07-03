@@ -2,6 +2,7 @@ import logging
 from typing import Optional
 
 from app.core.config import BACKEND_INTERNAL_URL_BASE, AGENT_API_KEY
+from app.logger import get_trace_id
 from app.shared.api_client import APIClient
 
 
@@ -15,11 +16,15 @@ class BackendConversationClient:
         self.api_client = APIClient(BACKEND_INTERNAL_URL_BASE)
 
     def get_headers(self, user_id):
-        return {
+        headers = {
             "X-Internal-Key": AGENT_API_KEY,
             "X-User-Id": user_id,
             "Content-Type": "application/json",
         }
+        trace_id = get_trace_id()
+        if trace_id:
+            headers["X-Trace-Id"] = trace_id  # propagate the correlation id back to the backend
+        return headers
 
     def get_messages(self, user_id: str, conversation_id: str):
         resp = self.api_client.get(

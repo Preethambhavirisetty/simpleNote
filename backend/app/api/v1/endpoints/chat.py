@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from app.core.config import AGENT_API_KEY, AGENT_INTERNAL_URL
 from app.core.feature_flags import require_feature
 from app.deps.auth import get_current_user
+from app.logger import get_trace_id
 from app.schema.conversation import ChatStreamRequest
 
 
@@ -24,13 +25,18 @@ async def stream_chat(
         "role": "admin" if role_values.intersection({"admin", "admin_user"}) else "user",
     })
 
+    headers = {"X-API-Key": AGENT_API_KEY}
+    trace_id = get_trace_id()
+    if trace_id:
+        headers["X-Trace-Id"] = trace_id  # propagate the correlation id to the agent
+
     client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=5.0))
     try:
         request = client.build_request(
             "POST",
             f"{AGENT_INTERNAL_URL.rstrip('/')}/api/chat/stream",
             json=agent_payload,
-            headers={"X-API-Key": AGENT_API_KEY},
+            headers=headers,
         )
         response = await client.send(request, stream=True)
     except httpx.RequestError as exc:

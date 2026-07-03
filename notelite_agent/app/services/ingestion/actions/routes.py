@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.core.dependencies import get_qdrant_store
+from app.core.dependencies import get_qdrant_store, require_api_key
 from app.services.ingestion.actions.controller import PipelineActionController
 from app.services.ingestion.actions.schema import PipelineActionRequest, PipelineActionResponse
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.schema import ApiResponse
 
 
-router = APIRouter(prefix="/api/actions", tags=["pipeline-actions"])
+router = APIRouter(prefix="/api/actions", tags=["pipeline-actions"], dependencies=[Depends(require_api_key)])
 
 
 @router.post(

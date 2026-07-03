@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_postgres_db, get_qdrant_store
+from app.core.config import ENABLE_DIRECT_INGEST
+from app.core.dependencies import get_postgres_db, get_qdrant_store, require_api_key
 from app.logger import logger
 from app.services.ingestion.orchestrator import IngestionOrchestrator
 from app.services.ingestion.schema import (
@@ -22,7 +23,7 @@ from app.shared.schema import ApiResponse
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/ingest", tags=["ingestion"])
+router = APIRouter(prefix="/api/ingest", tags=["ingestion"], dependencies=[Depends(require_api_key)])
 
 @router.get("/health", response_model=ApiResponse[IngestionHealthData], summary="Check ingestion dependencies")
 def ingestion_health(
@@ -68,7 +69,10 @@ def ingest_note_direct(
 
     Development / debugging endpoint only — not for production use.
     Blocks until all LLM calls and vector writes complete (~2-5s).
+    Disabled unless ENABLE_DIRECT_INGEST is set.
     """
+    if not ENABLE_DIRECT_INGEST:
+        raise HTTPException(status_code=404, detail="Not found")
     try:
         result = IngestionOrchestrator(vector_store=vector_store).run(payload.model_dump(exclude_none=True))
         return ApiResponse.ok(result)

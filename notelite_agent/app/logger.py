@@ -113,3 +113,8 @@ def setup_logging(level: int = logging.INFO, service: str = "backend"):
 
 
 logger = structlog.get_logger()
+
+
+def get_trace_id() -> str | None:
+    """Return the current request's trace id bound in structlog contextvars, if any."""
+    return structlog.contextvars.get_contextvars().get("trace_id")

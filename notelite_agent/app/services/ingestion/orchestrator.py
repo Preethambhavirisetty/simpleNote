@@ -12,6 +12,11 @@ from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.utils import count_tokens
 from app.services.ingestion.processors.date_extractor import DateExtractor
 from app.services.ingestion.storage.postgres_store import PostgresArtifactStore
+from app.db.postgres import DatabaseManager
+from app.services.ingestion.validators.request_version_validator import (
+    fetch_note_version,
+    is_stale_ingestion,
+)
 
 
 class IngestionOrchestrator:
@@ -28,6 +33,9 @@ class IngestionOrchestrator:
 
         if action == "delete":
             return self.delete_action(payload)
+
+        if self._is_stale_upsert(payload):
+            return self._skipped_result(action, payload)
 
         events = ["ingestion started"]
         start = time.perf_counter()
@@ -144,6 +152,8 @@ class IngestionOrchestrator:
         return result
 
     def delete_action(self, payload: dict) -> dict:
+        if self._is_stale_delete(payload):
+            return self._skipped_result("delete", payload)
         doc_id = self._doc_id(payload)
         self.vector_store.delete_document(doc_id)
         self.postgres_store.delete_document(doc_id)
@@ -155,6 +165,43 @@ class IngestionOrchestrator:
         }
         logger.info("ingestion.deleted", note_id=result["note_id"])
         return result
+
+    def _skipped_result(self, action: str, payload: dict) -> dict:
+        logger.info(
+            "ingestion.skipped",
+            action=action,
+            note_id=payload.get("note_id"),
+            reason="stale_version",
+        )
+        return {
+            "action": action,
+            "status": "skipped",
+            "note_id": payload.get("note_id"),
+            "reason": "stale_version",
+        }
+
+    def _is_stale_upsert(self, payload: dict) -> bool:
+        """True when a newer note version supersedes this upsert (out-of-order/duplicate delivery)."""
+        if not self._has_version_keys(payload):
+            return False
+        with DatabaseManager.get_session_factory()() as session:
+            return is_stale_ingestion(payload, session)
+
+    def _is_stale_delete(self, payload: dict) -> bool:
+        """True only when the note still exists with a newer version.
+
+        A missing note row is the normal case for a real delete (the backend removes the
+        row before dispatching), so deletion must proceed in that case.
+        """
+        if not self._has_version_keys(payload):
+            return False
+        with DatabaseManager.get_session_factory()() as session:
+            db_version = fetch_note_version(str(payload["note_id"]), str(payload["user_id"]), session)
+        return db_version is not None and payload["version"] < db_version
+
+    @staticmethod
+    def _has_version_keys(payload: dict) -> bool:
+        return all(payload.get(key) is not None for key in ("version", "user_id", "note_id"))
 
     @staticmethod
     def _payload(data: Optional[dict], **kwargs) -> dict:

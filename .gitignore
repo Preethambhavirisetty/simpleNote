@@ -1,6 +1,10 @@
 __pycache__
 .venv
+# Secrets: never commit real values. Templates (*.env.example) stay tracked. See SECRETS.md.
 .env
+.env.*
+!.env.example
+!*.env.example
 *.pyc
 _others
 # docs/
@@ -9,4 +13,8 @@ decisions/
 # notelite_inference - decoupled
 _backup
 certs/
+# TLS material and any private keys must never be committed.
+*.pem
+*.key
+*.crt
 v2_/
