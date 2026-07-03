@@ -181,6 +181,9 @@ def test_context_limits_seeds_and_expands_only_top_small_fragment(monkeypatch):
     )
 
     assert contexts == ["previous", "small fragment", "second seed"]
-    assert references[0]["chunk_ids"] == ["1", "2"]
+    assert references[0]["chunk_ids"] == ["0", "1", "2"]
+    assert [chunk["text"] for chunk in references[0]["chunks"]] == contexts
+    assert [chunk["is_seed"] for chunk in references[0]["chunks"]] == [False, True, True]
+    assert [chunk["score"] for chunk in references[0]["chunks"]] == [None, 1.0, 0.9]
     assert diagnostics["context_seed_count"] == 2
     assert diagnostics["neighbor_count"] == 2

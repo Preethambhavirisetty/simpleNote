@@ -4,6 +4,13 @@ import { authApi } from '@/api/auth'
 import { usersApi } from '@/api/users'
 import { unwrap } from '@/lib/api'
 
+function authError(err, fallback) {
+  if (!err.response) {
+    return 'Cannot reach the NoteLite server. Please check that the backend is running.'
+  }
+  return err.response.data?.message ?? err.response.data?.detail ?? fallback
+}
+
 export const useAuthStore = create(
   devtools(
     (set, get) => ({
@@ -31,12 +38,12 @@ export const useAuthStore = create(
       login: async (credentials) => {
         set({ isLoading: true })
         try {
-          await authApi.login(credentials)
+          await authApi.login({ ...credentials, email: credentials.email.trim().toLowerCase() })
           const { data } = await usersApi.getMe()
           set({ user: unwrap(data) })
           return { ok: true }
         } catch (err) {
-          return { ok: false, error: err.response?.data?.detail ?? 'Login failed' }
+          return { ok: false, error: authError(err, 'Login failed') }
         } finally {
           set({ isLoading: false })
         }
@@ -45,12 +52,16 @@ export const useAuthStore = create(
       register: async (payload) => {
         set({ isLoading: true })
         try {
-          await authApi.register(payload)
+          await authApi.register({
+            ...payload,
+            name: payload.name.trim(),
+            email: payload.email.trim().toLowerCase(),
+          })
           const { data } = await usersApi.getMe()
           set({ user: unwrap(data) })
           return { ok: true }
         } catch (err) {
-          return { ok: false, error: err.response?.data?.detail ?? 'Registration failed' }
+          return { ok: false, error: authError(err, 'Registration failed') }
         } finally {
           set({ isLoading: false })
         }

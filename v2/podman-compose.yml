@@ -136,6 +136,7 @@ services:
       CELERY_RESULT_BACKEND:  *redis-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
+      AGENT_INTERNAL_URL:     http://agent:8000
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     ports:

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.config import LLM_REASONER_MODEL
-from app.core.dependencies import get_qdrant_store
+from app.core.dependencies import get_qdrant_store, require_api_key
 from app.services.chat.schema import (
     ChatCompletionData,
     ChatCompletionRequest,
@@ -23,7 +23,7 @@ from app.shared.schema import ApiResponse
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/chat", tags=["chat"])
+router = APIRouter(prefix="/api/chat", tags=["chat"], dependencies=[Depends(require_api_key)])
 _streaming_service = StreamingService()
 
 

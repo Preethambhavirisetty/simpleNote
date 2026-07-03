@@ -5,28 +5,30 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useFeatureFlagStore } from '@/stores/featureFlagStore'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import FeatureGate from '@/components/FeatureGate'
+import RouteErrorPage from '@/components/RouteErrorPage'
 import AppLayout from '@/pages/AppLayout'
 import LoginPage from '@/pages/auth/LoginPage'
 import RegisterPage from '@/pages/auth/RegisterPage'
 import NotesPage from '@/pages/NotesPage'
 import ChatPage from '@/pages/ChatPage'
+import HomePage from '@/pages/HomePage'
 
 const router = createBrowserRouter([
+  { path: '/', element: <HomePage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   {
-    path: '/',
+    errorElement: <RouteErrorPage />,
     element: (
       <ProtectedRoute>
         <AppLayout />
       </ProtectedRoute>
     ),
     children: [
-      { index: true, element: <Navigate to="/notes" replace /> },
-      { path: 'notes', element: <NotesPage /> },
-      { path: 'folders/:folderId', element: <NotesPage /> },
-      { path: 'chat', element: <FeatureGate flag="chat"><ChatPage /></FeatureGate> },
-      { path: 'chat/:conversationId', element: <FeatureGate flag="chat"><ChatPage /></FeatureGate> },
+      { path: '/notes', element: <NotesPage /> },
+      { path: '/folders/:folderId', element: <NotesPage /> },
+      { path: '/chat', element: <FeatureGate flag="chat"><ChatPage /></FeatureGate> },
+      { path: '/chat/:conversationId', element: <FeatureGate flag="chat"><ChatPage /></FeatureGate> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
