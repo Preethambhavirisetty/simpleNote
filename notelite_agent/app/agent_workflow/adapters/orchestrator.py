@@ -17,6 +17,12 @@ def engine_event_to_sse(event: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
             for k in ("phase", "tool", "label", "input_preview", "result_preview")
             if k in event
         }
+    if event_type == "pending_approval":
+        return "approval_required", {
+            "tool": event.get("tool"),
+            "arguments_preview": event.get("arguments_preview"),
+            "thread_id": event.get("thread_id"),
+        }
     if event_type == "done":
         return "done", {
             "answer": event.get("answer"),
@@ -25,6 +31,8 @@ def engine_event_to_sse(event: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
             "tool_call_count": event.get("tool_call_count"),
             "has_error": bool(event.get("error")),
             "error": event.get("error"),
+            "pending_approval": event.get("pending_approval"),
+            "thread_id": event.get("thread_id"),
         }
     return None
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
+from langgraph.types import Command
 
 from app.agent_workflow.config import AgentConfig, load_agent_config
 from app.agent_workflow.graph import build_graph
@@ -25,17 +28,51 @@ def _merge_state(state: AgentState, update: dict[str, Any]) -> AgentState:
 
 @dataclass
 class AgentEngine:
+    """Compile-once agent runtime.
+
+    The graph is compiled a single time with a checkpointer, so every run is
+    durable per thread_id: a destructive tool call with no synchronous approver
+    pauses at the approval node's interrupt, and `resume(thread_id, approved=…)`
+    continues from the checkpoint. The default MemorySaver is per-process;
+    inject a durable checkpointer (e.g. Postgres) for multi-worker deployments.
+    """
+
     config: AgentConfig
     llm: LlmProvider
     tools: ToolProvider
     callbacks: HostCallbacks
+    checkpointer: Any = None
+    graph: Any = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.checkpointer is None:
+            self.checkpointer = MemorySaver()
+        self.graph = build_graph(
+            self.config,
+            self.llm,
+            self.tools,
+            callbacks=self._callback_map(),
+            checkpointer=self.checkpointer,
+        )
 
     @classmethod
-    def from_config(cls, path: str | Path, *, callbacks: HostCallbacks | None = None) -> "AgentEngine":
+    def from_config(
+        cls,
+        path: str | Path,
+        *,
+        callbacks: HostCallbacks | None = None,
+        checkpointer: Any = None,
+    ) -> "AgentEngine":
         config = load_agent_config(path)
         llm = DefaultLlmProvider(model=config.policy.model)
         tools = create_tool_provider(config.mcp)
-        return cls(config=config, llm=llm, tools=tools, callbacks=callbacks or HostCallbacks())
+        return cls(
+            config=config,
+            llm=llm,
+            tools=tools,
+            callbacks=callbacks or HostCallbacks(),
+            checkpointer=checkpointer,
+        )
 
     def _initial_state(self, request: RunRequest) -> AgentState:
         return AgentState(
@@ -56,6 +93,7 @@ class AgentEngine:
             phase="planning",
             final_answer="",
             error=None,
+            pending_destructive=None,
         )
 
     def _callback_map(self) -> dict[str, Any]:
@@ -66,14 +104,29 @@ class AgentEngine:
             "on_destructive_action": self.callbacks.on_destructive_action,
         }
 
-    def _graph_run_config(self) -> dict[str, Any]:
+    def _new_thread_id(self, session_id: str) -> str:
+        # Unique per run: reusing a conversation-scoped id verbatim would collide
+        # with the previous turn's checkpoint (including a paused interrupt).
+        return f"{session_id or 'run'}-{uuid.uuid4().hex[:12]}"
+
+    def _thread_config(self, thread_id: str) -> dict[str, Any]:
         review_passes = max(1, self.config.policy.max_review_cycles + 1)
         replan_passes = max(1, self.config.policy.max_review_cycles + 1)
         executor_budget = self.config.policy.max_executor_iterations * review_passes * replan_passes
-        return {"recursion_limit": max(25, executor_budget + 8)}
+        return {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": max(25, executor_budget + 8),
+        }
 
     @staticmethod
-    def _recursion_error_result(state: AgentState, exc: GraphRecursionError) -> RunResult:
+    def _awaiting_answer(pending: dict[str, Any]) -> str:
+        tool = pending.get("tool") or "a destructive tool"
+        return (
+            f"This request needs an action that requires approval: {tool}. "
+            "The run is paused until the action is approved or denied."
+        )
+
+    def _recursion_error_result(self, state: AgentState, exc: GraphRecursionError, thread_id: str) -> RunResult:
         answer = str(state.get("final_answer") or state.get("draft_answer") or "")
         if not answer and state.get("artifacts"):
             from app.agent_workflow.nodes.executor import _fallback_answer
@@ -86,82 +139,220 @@ class AgentEngine:
             tool_calls=list(state.get("tool_calls") or []),
             events=list(state.get("events") or []) + [{"step": "graph.recursion_limit", "error": str(exc)}],
             error="Graph recursion limit reached; returning best-effort answer.",
+            thread_id=thread_id,
         )
 
-    def run(self, request: RunRequest) -> RunResult:
-        state = self._initial_state(request)
-        graph = build_graph(self.config, self.llm, self.tools, callbacks=self._callback_map())
-        try:
-            stream = graph.stream(state, stream_mode="updates", config=self._graph_run_config())
-            for step in stream:
-                for _node_name, update in step.items():
-                    if not isinstance(update, dict):
-                        continue
-                    if update.get("plan") and self.callbacks.on_plan:
-                        self.callbacks.on_plan(dict(update["plan"]))
-                    if update.get("review") and self.callbacks.on_review:
-                        self.callbacks.on_review(dict(update["review"]))
-                    state = _merge_state(state, update)
-        except GraphRecursionError as exc:
-            return self._recursion_error_result(state, exc)
+    # ── update pump (shared by run/stream/resume) ──────────────────────────────
 
+    def _pending_events_from_interrupt(self, raw_interrupt: Any, thread_id: str) -> Iterator[dict[str, Any]]:
+        interrupts = raw_interrupt if isinstance(raw_interrupt, (list, tuple)) else [raw_interrupt]
+        for intr in interrupts:
+            payload = getattr(intr, "value", None)
+            event = {
+                "type": "pending_approval",
+                "thread_id": thread_id,
+                **(payload if isinstance(payload, dict) else {"value": payload}),
+            }
+            if self.callbacks.on_event:
+                self.callbacks.on_event(event)
+            yield event
+
+    def _pump(
+        self,
+        stream: Iterator[dict[str, Any]],
+        holder: dict[str, Any],
+        thread_id: str,
+    ) -> Iterator[dict[str, Any]]:
+        """Translate raw graph updates into host events while folding state."""
+        for step in stream:
+            for node_name, update in step.items():
+                if node_name == "__interrupt__":
+                    yield from self._pending_events_from_interrupt(update, thread_id)
+                    continue
+                if isinstance(update, dict) and "__interrupt__" in update:
+                    yield from self._pending_events_from_interrupt(update["__interrupt__"], thread_id)
+                    continue
+                if not isinstance(update, dict):
+                    continue
+                if update.get("plan") and self.callbacks.on_plan:
+                    self.callbacks.on_plan(dict(update["plan"]))
+                if update.get("review") and self.callbacks.on_review:
+                    self.callbacks.on_review(dict(update["review"]))
+
+                for event in map_graph_update(update, holder["state"]):
+                    if event.get("type") == "done":
+                        event["thread_id"] = thread_id
+                    if self.callbacks.on_event:
+                        self.callbacks.on_event(event)
+                    yield event
+
+                holder["state"] = _merge_state(holder["state"], update)
+
+    @staticmethod
+    def _pending_approval_event(state: AgentState, thread_id: str) -> dict[str, Any] | None:
+        pending = state.get("pending_destructive")
+        if state.get("phase") != "awaiting_approval" or not pending:
+            return None
+        event = {"type": "pending_approval", "thread_id": thread_id}
+        event.update(dict(pending))
+        return event
+
+    @staticmethod
+    def _error_result(thread_id: str, error: str) -> RunResult:
         return RunResult(
-            answer=str(state.get("final_answer") or state.get("draft_answer") or ""),
+            answer="",
+            review={},
+            artifacts=[],
+            tool_calls=[],
+            events=[],
+            error=error,
+            thread_id=thread_id,
+        )
+
+    def _final_event(self, state: AgentState, thread_id: str) -> dict[str, Any] | None:
+        """Terminal event for runs the graph did not close out itself."""
+        pending = state.get("pending_destructive")
+        if state.get("phase") == "awaiting_approval" and pending:
+            return {
+                "type": "done",
+                "answer": self._awaiting_answer(pending),
+                "review": state.get("review"),
+                "artifact_count": len(state.get("artifacts") or []),
+                "tool_call_count": len(state.get("tool_calls") or []),
+                "error": None,
+                "pending_approval": dict(pending),
+                "thread_id": thread_id,
+            }
+        if state.get("phase") != "done":
+            return {
+                "type": "done",
+                "answer": state.get("final_answer") or state.get("draft_answer") or "",
+                "review": state.get("review"),
+                "artifact_count": len(state.get("artifacts") or []),
+                "tool_call_count": len(state.get("tool_calls") or []),
+                "error": state.get("error"),
+                "thread_id": thread_id,
+            }
+        return None
+
+    def _result_from_state(self, state: AgentState, thread_id: str) -> RunResult:
+        pending = state.get("pending_destructive")
+        awaiting = state.get("phase") == "awaiting_approval" and bool(pending)
+        answer = str(state.get("final_answer") or state.get("draft_answer") or "")
+        if awaiting and not answer:
+            answer = self._awaiting_answer(pending)
+        return RunResult(
+            answer=answer,
             review=dict(state.get("review") or {}),
             artifacts=list(state.get("artifacts") or []),
             tool_calls=list(state.get("tool_calls") or []),
             events=list(state.get("events") or []),
             error=state.get("error"),
+            pending_approval=dict(pending) if awaiting else None,
+            thread_id=thread_id,
         )
 
-    def stream(self, request: RunRequest) -> Iterator[dict[str, Any]]:
-        graph = build_graph(self.config, self.llm, self.tools, callbacks=self._callback_map())
-        state = self._initial_state(request)
+    # ── public API ─────────────────────────────────────────────────────────────
 
-        yield {"type": "status", "message": "Planning..."}
+    def run(self, request: RunRequest) -> RunResult:
+        thread_id = self._new_thread_id(request.session_id)
+        holder = {"state": self._initial_state(request)}
+        try:
+            stream = self.graph.stream(
+                holder["state"], stream_mode="updates", config=self._thread_config(thread_id)
+            )
+            for _event in self._pump(stream, holder, thread_id):
+                pass
+        except GraphRecursionError as exc:
+            return self._recursion_error_result(holder["state"], exc, thread_id)
+        return self._result_from_state(holder["state"], thread_id)
+
+    def stream(self, request: RunRequest) -> Iterator[dict[str, Any]]:
+        thread_id = self._new_thread_id(request.session_id)
+        holder = {"state": self._initial_state(request)}
+        yielded_pending_approval = False
+
+        yield {"type": "status", "message": "Planning...", "thread_id": thread_id}
 
         try:
-            stream = graph.stream(state, stream_mode="updates", config=self._graph_run_config())
-            for step in stream:
-                for _node_name, update in step.items():
-                    if not isinstance(update, dict):
-                        continue
-                    if update.get("plan") and self.callbacks.on_plan:
-                        self.callbacks.on_plan(dict(update["plan"]))
-                    if update.get("review") and self.callbacks.on_review:
-                        self.callbacks.on_review(dict(update["review"]))
-
-                    for event in map_graph_update(update, state):
-                        if self.callbacks.on_event:
-                            self.callbacks.on_event(event)
-                        yield event
-
-                    state = _merge_state(state, update)
+            stream = self.graph.stream(
+                holder["state"], stream_mode="updates", config=self._thread_config(thread_id)
+            )
+            for event in self._pump(stream, holder, thread_id):
+                if event.get("type") == "pending_approval":
+                    yielded_pending_approval = True
+                yield event
         except GraphRecursionError as exc:
-            result = self._recursion_error_result(state, exc)
-            done = {
-                "type": "done",
-                "answer": result.answer,
-                "review": result.review,
-                "artifact_count": len(result.artifacts),
-                "tool_call_count": len(result.tool_calls),
-                "error": result.error,
-            }
-            if self.callbacks.on_event:
-                self.callbacks.on_event(done)
-            yield done
+            result = self._recursion_error_result(holder["state"], exc, thread_id)
+            yield self._done_event_from_result(result)
             return
 
-        if state.get("phase") != "done":
-            answer = state.get("final_answer") or state.get("draft_answer") or ""
-            done = {
+        pending_event = self._pending_approval_event(holder["state"], thread_id)
+        if pending_event is not None and not yielded_pending_approval:
+            if self.callbacks.on_event:
+                self.callbacks.on_event(pending_event)
+            yield pending_event
+
+        final = self._final_event(holder["state"], thread_id)
+        if final is not None:
+            if self.callbacks.on_event:
+                self.callbacks.on_event(final)
+            yield final
+
+    def resume(self, thread_id: str, *, approved: bool) -> RunResult:
+        last_event: dict[str, Any] | None = None
+        for event in self.resume_stream(thread_id, approved=approved):
+            last_event = event
+        if last_event and last_event.get("error"):
+            return self._error_result(thread_id, str(last_event["error"]))
+        state = dict(self.graph.get_state(self._thread_config(thread_id)).values or {})
+        return self._result_from_state(state, thread_id)
+
+    def resume_stream(self, thread_id: str, *, approved: bool) -> Iterator[dict[str, Any]]:
+        """Continue a run paused on a destructive-approval interrupt."""
+        config = self._thread_config(thread_id)
+        try:
+            snapshot = self.graph.get_state(config)
+            state = dict(snapshot.values or {})
+        except Exception:  # noqa: BLE001
+            state = {}
+        if not state.get("pending_destructive"):
+            event = {
                 "type": "done",
-                "answer": answer,
-                "review": state.get("review"),
-                "artifact_count": len(state.get("artifacts") or []),
-                "tool_call_count": len(state.get("tool_calls") or []),
-                "error": state.get("error"),
+                "answer": "",
+                "error": f"No pending approval for thread {thread_id}.",
+                "thread_id": thread_id,
             }
             if self.callbacks.on_event:
-                self.callbacks.on_event(done)
-            yield done
+                self.callbacks.on_event(event)
+            yield event
+            return
+
+        holder = {"state": state}
+        try:
+            stream = self.graph.stream(
+                Command(resume={"approved": approved}), stream_mode="updates", config=config
+            )
+            yield from self._pump(stream, holder, thread_id)
+        except GraphRecursionError as exc:
+            result = self._recursion_error_result(holder["state"], exc, thread_id)
+            yield self._done_event_from_result(result)
+            return
+
+        final = self._final_event(holder["state"], thread_id)
+        if final is not None:
+            if self.callbacks.on_event:
+                self.callbacks.on_event(final)
+            yield final
+
+    @staticmethod
+    def _done_event_from_result(result: RunResult) -> dict[str, Any]:
+        return {
+            "type": "done",
+            "answer": result.answer,
+            "review": result.review,
+            "artifact_count": len(result.artifacts),
+            "tool_call_count": len(result.tool_calls),
+            "error": result.error,
+            "thread_id": result.thread_id,
+        }

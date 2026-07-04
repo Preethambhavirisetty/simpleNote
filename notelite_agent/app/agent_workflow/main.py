@@ -40,10 +40,15 @@ def main() -> None:
         sys.path.insert(0, str(_ORCHESTRATOR_ROOT))
 
     from app.agent_workflow.engine import AgentEngine
-    from app.agent_workflow.streaming import RunRequest
+    from app.agent_workflow.streaming import HostCallbacks, RunRequest
 
     parser = argparse.ArgumentParser(description="Run the LangGraph agent workflow engine")
     parser.add_argument("--config", default=str(_DEFAULT_CONFIG), help="Path to agent YAML config")
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Approve destructive tool calls without prompting (non-interactive runs)",
+    )
     parser.add_argument("query", nargs="*", help="User query")
     args = parser.parse_args()
 
@@ -52,7 +57,16 @@ def main() -> None:
         print("Query is required.", file=sys.stderr)
         raise SystemExit(2)
 
-    engine = AgentEngine.from_config(args.config)
+    def approve_destructive(tool: str, arguments: dict) -> bool:
+        if args.yes:
+            return True
+        prompt = f"\n[approval] run destructive tool {tool} with {json.dumps(arguments)[:200]}? [y/N] "
+        return input(prompt).strip().lower() in {"y", "yes"}
+
+    engine = AgentEngine.from_config(
+        args.config,
+        callbacks=HostCallbacks(on_destructive_action=approve_destructive),
+    )
     print(f"Running agent: {engine.config.name}\n", flush=True)
 
     for event in engine.stream(RunRequest(query=query, session_id="cli")):
@@ -77,6 +91,14 @@ def main() -> None:
                 print(f"           args: {json.dumps(event['arguments'])[:200]}", flush=True)
             if event.get("error"):
                 print(f"           error: {event['error']}", flush=True)
+        elif event_type == "pending_approval":
+            # Unreachable with the interactive approver above, but printed for
+            # hosts embedding this loop without a synchronous callback.
+            print(
+                f"[approval] paused: {event.get('tool')} requires approval "
+                f"(thread {event.get('thread_id')})",
+                flush=True,
+            )
         elif event_type == "review":
             _print_review(event)
         elif event_type == "delta":

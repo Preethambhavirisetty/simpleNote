@@ -120,6 +120,26 @@ def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: Llm
     return answer or _fallback_answer(state)
 
 
+def _was_denied(state: AgentState, tool_name: str) -> bool:
+    return any(
+        record.get("name") == tool_name and record.get("status") == "denied"
+        for record in (state.get("tool_calls") or [])
+    )
+
+
+def _record_denial(state: AgentState, updates: dict[str, Any], tool_name: str, arguments: dict[str, Any]) -> None:
+    record: ToolCallRecord = {
+        "name": tool_name,
+        "args_preview": json.dumps(arguments)[:300],
+        "status": "denied",
+        "latency_ms": 0,
+        "error": None,
+    }
+    tool_calls = list(updates.get("tool_calls") or state.get("tool_calls") or [])
+    tool_calls.append(record)
+    updates["tool_calls"] = tool_calls
+
+
 def _execute_tool_call_action(
     *,
     state: AgentState,
@@ -140,14 +160,71 @@ def _execute_tool_call_action(
         updates["error"] = "call_tool missing name"
         return updates
 
-    if tool_name in config.policy.destructive_tools:
-        approved = True
-        if config.policy.require_destructive_confirmation and on_destructive_action:
-            approved = on_destructive_action(tool_name, arguments)
-        if not approved:
-            updates["events"].append({"step": "executor.destructive_blocked", "tool": tool_name})
+    if tool_name in config.policy.destructive_tools and config.policy.require_destructive_confirmation:
+        # A destructive call denied earlier in this run must not be re-asked forever.
+        if _was_denied(state, tool_name):
+            updates["events"].append(
+                {"step": "executor.destructive_skipped", "tool": tool_name, "reason": "previously_denied"}
+            )
             return updates
 
+        if on_destructive_action is not None:
+            # Host supplied a synchronous approver (e.g. interactive CLI).
+            if not on_destructive_action(tool_name, arguments):
+                _record_denial(state, updates, tool_name, arguments)
+                updates["events"].append({"step": "executor.destructive_denied", "tool": tool_name})
+                return updates
+        else:
+            # Fail closed: no approver is wired, so never execute. Park the call
+            # in state and pause the graph at the approval node (interrupt), so
+            # the host can approve out-of-band and resume from the checkpoint.
+            updates["pending_destructive"] = {
+                "tool": tool_name,
+                "arguments": arguments,
+                "step_index": step_index,
+                "step_query": step_query,
+                "requested_at": time.time(),
+            }
+            updates["phase"] = "awaiting_approval"
+            updates["events"].append(
+                {"step": "executor.approval_required", "tool": tool_name, "arguments": arguments}
+            )
+            return updates
+
+    return _run_tool_and_record(
+        state=state,
+        config=config,
+        tools=tools,
+        tool_name=tool_name,
+        arguments=arguments,
+        updates=updates,
+        iteration=iteration,
+        step_index=step_index,
+        step_query=step_query,
+        on_tool_call=on_tool_call,
+        on_artifact=on_artifact,
+    )
+
+
+def _run_tool_and_record(
+    *,
+    state: AgentState,
+    config: AgentConfig,
+    tools: ToolProvider,
+    tool_name: str,
+    arguments: dict[str, Any],
+    updates: dict[str, Any],
+    iteration: dict[str, Any],
+    step_index: int,
+    step_query: str,
+    on_tool_call: Callable[[str, dict[str, Any], Any], None] | None,
+    on_artifact: Callable[[Artifact], None] | None,
+) -> dict[str, Any]:
+    """Execute a tool call and fold the result into state updates.
+
+    No destructive gating here — callers are either non-destructive paths or the
+    approval node executing an explicitly approved call.
+    """
     started = time.perf_counter()
     status = "ok"
     error: str | None = None

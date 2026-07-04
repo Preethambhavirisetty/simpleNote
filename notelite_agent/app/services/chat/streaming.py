@@ -101,6 +101,8 @@ class StreamingService:
             tool_call_count = 0
             artifact_count = 0
             review: dict[str, Any] | None = None
+            pending_approval: dict[str, Any] | None = None
+            thread_id: str | None = None
             events.append("agent_workflow.started")
 
             try:
@@ -121,6 +123,8 @@ class StreamingService:
                         tool = engine_event.get("tool", "tool")
                         phase = engine_event.get("phase", "running")
                         events.append(f"agent_workflow.tool {tool} {phase}")
+                    if engine_event.get("type") == "pending_approval":
+                        events.append(f"agent_workflow.approval_required {engine_event.get('tool')}")
                     if engine_event.get("type") == "done":
                         answer = str(engine_event.get("answer") or "")
                         if not answer_parts and answer:
@@ -129,6 +133,9 @@ class StreamingService:
                         review = engine_event.get("review") if isinstance(engine_event.get("review"), dict) else None
                         tool_call_count = int(engine_event.get("tool_call_count") or 0)
                         artifact_count = int(engine_event.get("artifact_count") or 0)
+                        if isinstance(engine_event.get("pending_approval"), dict):
+                            pending_approval = engine_event["pending_approval"]
+                        thread_id = engine_event.get("thread_id") or thread_id
                         if engine_event.get("error"):
                             error_message = str(engine_event.get("error"))
                         continue
@@ -140,7 +147,7 @@ class StreamingService:
                         if content:
                             answer_parts.append(content)
                             yield _sse("delta", {"content": content})
-                    elif event_name in {"agent_activity", "status"}:
+                    elif event_name in {"agent_activity", "status", "approval_required"}:
                         yield _sse(event_name, payload)
             except Exception as exc:  # noqa: BLE001
                 error_message = str(exc)
@@ -196,6 +203,10 @@ class StreamingService:
                 "artifact_count": artifact_count,
                 "tool_call_count": tool_call_count,
                 "mode": "agent_workflow",
+                # Present when the run paused on a destructive-tool approval;
+                # resume via AgentEngine.resume(thread_id, approved=...).
+                "pending_approval": pending_approval,
+                "thread_id": thread_id,
             })
 
         return StreamingResponse(

@@ -23,6 +23,10 @@ class RunResult:
     tool_calls: list[dict[str, Any]]
     events: list[dict[str, Any]]
     error: str | None = None
+    # Set when the run paused on a destructive-approval interrupt; resume with
+    # AgentEngine.resume(thread_id, approved=...).
+    pending_approval: dict[str, Any] | None = None
+    thread_id: str = ""
 
 
 @dataclass
@@ -81,6 +85,29 @@ def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str,
             )
         elif step == "executor.coerced":
             events.append({"type": "debug", "message": entry.get("message", "")})
+        elif step == "executor.approval_required":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "blocked",
+                    "tool": entry.get("tool", "tool"),
+                    "label": f"Approval required for {entry.get('tool')}",
+                }
+            )
+        elif step in {"executor.destructive_denied", "executor.destructive_skipped", "approval.denied"}:
+            events.append(
+                {
+                    "type": "debug",
+                    "message": f"Destructive tool {entry.get('tool')} not executed ({step.rsplit('.', 1)[-1]})",
+                }
+            )
+        elif step == "approval.approved":
+            events.append(
+                {
+                    "type": "debug",
+                    "message": f"Destructive tool {entry.get('tool')} approved; executing",
+                }
+            )
         elif step == "executor.finish_step":
             events.append(
                 {
