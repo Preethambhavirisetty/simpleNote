@@ -62,11 +62,21 @@ class AgentPolicy:
 
 
 @dataclass
+class McpServerConfig:
+    name: str = "default"
+    url: str = ""
+    auth_token: str = ""
+    timeout_seconds: float = 120.0
+    verify_ssl: bool = True
+
+
+@dataclass
 class McpConfig:
     url: str = ""
     auth_token: str = ""
     timeout_seconds: float = 120.0
     verify_ssl: bool = True
+    servers: list[McpServerConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -128,11 +138,27 @@ def load_agent_config(path: str | Path) -> AgentConfig:
     )
 
     mcp_raw = raw.get("mcp") or {}
+    server_entries = list(mcp_raw.get("servers") or [])
+    servers: list[McpServerConfig] = []
+    for idx, entry in enumerate(server_entries):
+        if not isinstance(entry, dict):
+            continue
+        servers.append(
+            McpServerConfig(
+                name=str(entry.get("name") or f"server{idx + 1}").strip() or f"server{idx + 1}",
+                url=str(entry.get("url") or "").strip(),
+                auth_token=str(entry.get("auth_token") or "").strip(),
+                timeout_seconds=float(entry.get("timeout_seconds", mcp_raw.get("timeout_seconds", 120.0))),
+                verify_ssl=bool(entry.get("verify_ssl", mcp_raw.get("verify_ssl", True))),
+            )
+        )
+
     mcp = McpConfig(
         url=str(mcp_raw.get("url") or os.getenv("MCP_URL", "")).strip(),
         auth_token=str(mcp_raw.get("auth_token") or os.getenv("MCP_AUTH_TOKEN", "")).strip(),
         timeout_seconds=float(mcp_raw.get("timeout_seconds", 120.0)),
         verify_ssl=bool(mcp_raw.get("verify_ssl", True)),
+        servers=servers,
     )
 
     base_dir = config_path.parent
