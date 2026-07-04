@@ -26,85 +26,94 @@ def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
     }
 
 
-def _pick_coerced_tool(
-    candidates: list[dict[str, Any]],
-    *,
-    current_step: dict[str, Any],
-    user_query: str,
-    exclude: set[str] | None = None,
-) -> dict[str, Any]:
-    exclude = exclude or set()
-    available = [c for c in candidates if c.get("name") not in exclude]
-    pool = available or list(candidates)
-    hints = " ".join(
-        part
-        for part in [
-            current_step.get("tool_hint", ""),
-            current_step.get("title", ""),
-            current_step.get("action", ""),
-            user_query,
-        ]
-        if part
-    ).lower()
-
-    def score(tool: dict[str, Any]) -> float:
-        name = str(tool.get("name") or "").lower()
-        desc = str(tool.get("description") or tool.get("title") or "").lower()
-        base = float(tool.get("score") or 0.0)
-        bonus = 0.0
-        tool_hint = str(current_step.get("tool_hint") or "").lower()
-        if tool_hint and tool_hint.replace(" ", "_") in name:
-            bonus += 1.0
-        for token in hints.replace("_", " ").split():
-            if len(token) < 4:
-                continue
-            if token in name:
-                bonus += 0.35
-            elif token in desc:
-                bonus += 0.1
-        if "panel" in hints and "panel" in name:
-            bonus += 0.8
-        if "panel" in hints and "dashboard" in name and "panel" not in name:
-            bonus -= 0.5
-        if name in exclude:
-            bonus -= 2.0
-        return base + bonus
-
-    return max(pool, key=score)
-
-
-def _default_tool_arguments(tool_name: str, *, state: AgentState, current_step: dict[str, Any]) -> dict[str, Any]:
-    query = str(state.get("user_query") or current_step.get("action") or "").strip()
-    runtime = state.get("runtime_context") or {}
-    user_id = str(runtime.get("user_id") or runtime.get("tenant_id") or "").strip()
-    role = str(runtime.get("role") or "user")
-    access_token = str(runtime.get("access_token") or "").strip()
-
-    if tool_name == "search_panels":
-        return {"query": query or "panels", "top_k": 25}
-    if tool_name == "search_documents":
-        return {"query": query}
-    if tool_name in {"search_notes", "locate_notes"}:
-        args: dict[str, Any] = {"query": query, "user_id": user_id, "role": role}
-        history = state.get("messages") or []
-        if history:
-            args["history"] = history[-6:]
-        return args
-    if tool_name == "summarize_notes":
-        return {"query": query, "user_id": user_id}
-    if tool_name in {"list_folders", "list_notes"}:
-        return {"access_token": access_token}
+def _schema_for_tool(tool_name: str, candidate_tools: list[dict[str, Any]]) -> dict[str, Any]:
+    for tool in candidate_tools:
+        if tool.get("name") == tool_name:
+            schema = tool.get("input_schema") or tool.get("inputSchema") or {}
+            return schema if isinstance(schema, dict) else {}
     return {}
 
 
-def _default_arguments_ready(tool_name: str, arguments: dict[str, Any]) -> bool:
-    if tool_name in {"search_notes", "locate_notes"}:
-        return bool(arguments.get("query") and arguments.get("user_id"))
-    if tool_name == "summarize_notes":
-        return bool(arguments.get("user_id") and (arguments.get("query") or arguments.get("note_ids")))
-    if tool_name in {"list_folders", "list_notes"}:
-        return bool(arguments.get("access_token"))
+def _matches_json_type(value: Any, expected: Any) -> bool:
+    if isinstance(expected, list):
+        return any(_matches_json_type(value, item) for item in expected)
+    if not expected:
+        return True
+    if expected == "null":
+        return value is None
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "object":
+        return isinstance(value, dict)
     return True
+
+
+def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    if not schema:
+        return []
+
+    errors: list[str] = []
+    schema_type = schema.get("type")
+    if schema_type and not _matches_json_type(arguments, schema_type):
+        return [f"{tool_name} arguments must match JSON schema type {schema_type!r}"]
+
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    for field in required:
+        if field not in arguments or arguments.get(field) is None:
+            errors.append(f"missing required argument: {field}")
+
+    if schema.get("additionalProperties") is False and properties:
+        for field in sorted(set(arguments) - set(properties)):
+            errors.append(f"unexpected argument: {field}")
+
+    for field, value in arguments.items():
+        field_schema = properties.get(field)
+        if not isinstance(field_schema, dict):
+            continue
+        expected = field_schema.get("type")
+        if expected and not _matches_json_type(value, expected):
+            errors.append(f"argument {field} must match JSON schema type {expected!r}")
+    return errors
+
+
+def _record_invalid_tool_arguments(
+    *,
+    state: AgentState,
+    updates: dict[str, Any],
+    iteration: dict[str, Any],
+    tool_name: str,
+    arguments: dict[str, Any],
+    errors: list[str],
+) -> dict[str, Any]:
+    record: ToolCallRecord = {
+        "name": tool_name,
+        "args_preview": json.dumps(arguments)[:300],
+        "status": "invalid_args",
+        "latency_ms": 0,
+        "error": "; ".join(errors),
+    }
+    tool_calls = list(state.get("tool_calls") or [])
+    tool_calls.append(record)
+    iteration["tool_calls"] = int(iteration.get("tool_calls") or 0) + 1
+    updates["tool_calls"] = tool_calls
+    updates["iteration"] = iteration
+    updates["events"].append(
+        {
+            "step": "executor.tool_args_invalid",
+            "tool": tool_name,
+            "error": record["error"],
+        }
+    )
+    return updates
 
 
 def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> str:
@@ -349,8 +358,6 @@ def executor_node(
 
     candidate_tools = list(state.get("candidate_tools") or [])
     called_this_step = _called_tools_for_step(state, step_index)
-    step_has_results = bool(called_this_step)
-
     updates: dict[str, Any] = {"iteration": iteration, "phase": "executing"}
     updates["events"] = [
         {
@@ -362,99 +369,37 @@ def executor_node(
         }
     ]
 
-    # Search already ran for this step — call the best matching tool instead of looping.
-    if action_type == "search_tools" and candidate_tools and not step_has_results:
-        picked = _pick_coerced_tool(
-            candidate_tools,
-            current_step=current_step,
-            user_query=str(state.get("user_query") or ""),
+    if action_type == "search_tools" and candidate_tools:
+        updates["events"].append(
+            {
+                "step": "executor.tool_candidates_available",
+                "message": "Candidate tools are already available; select call_tool with schema-valid arguments.",
+                "tool_count": len(candidate_tools),
+            }
         )
-        tool_name = str(picked.get("name") or "")
-        arguments = _default_tool_arguments(tool_name, state=state, current_step=current_step)
-        if _default_arguments_ready(tool_name, arguments):
-            action_type = "call_tool"
-            action = {"action": "call_tool", "name": tool_name, "arguments": arguments}
-            updates["events"].append(
-                {
-                    "step": "executor.coerced",
-                    "message": f"Tools already found; calling {picked.get('name')} instead of searching again",
-                }
-            )
-        else:
-            updates["events"].append(
-                {
-                    "step": "executor.coerced",
-                    "message": f"Tool {tool_name} needs explicit arguments; asking executor to continue",
-                }
-            )
-            return updates
-
-    # Step has results but LLM searched again — call another unused tool or finish.
-    if action_type == "search_tools" and step_has_results:
-        unused = [t for t in candidate_tools if t.get("name") not in called_this_step]
-        if unused:
-            picked = _pick_coerced_tool(
-                unused,
-                current_step=current_step,
-                user_query=str(state.get("user_query") or ""),
-            )
-            tool_name = str(picked.get("name") or "")
-            arguments = _default_tool_arguments(tool_name, state=state, current_step=current_step)
-            if _default_arguments_ready(tool_name, arguments):
-                action_type = "call_tool"
-                action = {"action": "call_tool", "name": tool_name, "arguments": arguments}
-                updates["events"].append(
-                    {
-                        "step": "executor.coerced",
-                        "message": f"Step has results; calling {picked.get('name')} for more evidence",
-                    }
-                )
-            else:
-                action_type = "finish_step"
-                updates["events"].append(
-                    {"step": "executor.coerced", "message": f"Skipping {tool_name}; required default arguments are missing"}
-                )
-        else:
-            action_type = "finish_step"
-            updates["events"].append(
-                {"step": "executor.coerced", "message": "Step already has tool results; finishing step"}
-            )
+        return updates
 
     if action_type == "call_tool":
         tool_name = str(action.get("name") or "")
         step_call_count = len(called_this_step)
         max_per_step = config.policy.max_tool_calls_per_step
-        if tool_name in called_this_step or step_call_count >= max_per_step:
-            unused = [t for t in candidate_tools if t.get("name") not in called_this_step]
-            if unused and step_call_count < max_per_step:
-                picked = _pick_coerced_tool(
-                    unused,
-                    current_step=current_step,
-                    user_query=str(state.get("user_query") or ""),
-                )
-                tool_name = str(picked.get("name") or "")
-                arguments = _default_tool_arguments(tool_name, state=state, current_step=current_step)
-                if _default_arguments_ready(tool_name, arguments):
-                    action = {"action": "call_tool", "name": tool_name, "arguments": arguments}
-                    updates["events"].append(
-                        {
-                            "step": "executor.coerced",
-                            "message": f"Skipping duplicate tool; calling {tool_name} instead",
-                        }
-                    )
-                else:
-                    action_type = "finish_step"
-                    updates["events"].append(
-                        {"step": "executor.coerced", "message": f"Skipping {tool_name}; required default arguments are missing"}
-                    )
-            else:
-                action_type = "finish_step"
-                updates["events"].append(
-                    {
-                        "step": "executor.coerced",
-                        "message": "Enough tool results for this step; finishing step",
-                    }
-                )
+        if tool_name in called_this_step:
+            action_type = "finish_step"
+            updates["events"].append(
+                {
+                    "step": "executor.duplicate_tool_skipped",
+                    "tool": tool_name,
+                    "message": "Tool was already called for this step; finishing instead of overriding the model choice.",
+                }
+            )
+        elif step_call_count >= max_per_step:
+            action_type = "finish_step"
+            updates["events"].append(
+                {
+                    "step": "executor.tool_limit_reached",
+                    "message": "Maximum tool calls for this step reached; finishing step.",
+                }
+            )
 
     if action_type == "search_tools":
         query = str(action.get("query") or step_query)
@@ -502,44 +447,31 @@ def executor_node(
                 "tools": [c["name"] for c in candidate_dicts[:7]],
             }
         )
-        picked = _pick_coerced_tool(
-            candidate_dicts,
-            current_step=current_step,
-            user_query=str(state.get("user_query") or ""),
-        )
-        tool_name = str(picked.get("name") or "")
-        updates["events"].append(
-            {
-                "step": "executor.coerced",
-                "message": f"Calling {tool_name} immediately after tool discovery",
-            }
-        )
-        arguments = _default_tool_arguments(tool_name, state=state, current_step=current_step)
-        if not _default_arguments_ready(tool_name, arguments):
-            updates["events"].append(
-                {"step": "executor.coerced", "message": f"Tool {tool_name} needs explicit arguments; asking executor to continue"}
+        return updates
+
+    if action_type == "call_tool":
+        tool_name = str(action.get("name") or "")
+        arguments = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+        candidate_names = {str(tool.get("name") or "") for tool in candidate_tools}
+        if candidate_tools and tool_name not in candidate_names:
+            errors = [f"tool was not discovered for this step: {tool_name}"]
+        else:
+            schema = _schema_for_tool(tool_name, candidate_tools)
+            errors = _validate_tool_arguments(tool_name, arguments, schema)
+        if errors:
+            return _record_invalid_tool_arguments(
+                state=state,
+                updates=updates,
+                iteration=iteration,
+                tool_name=tool_name,
+                arguments=arguments,
+                errors=errors,
             )
-            return updates
         return _execute_tool_call_action(
             state=state,
             config=config,
             tools=tools,
             action={"action": "call_tool", "name": tool_name, "arguments": arguments},
-            updates=updates,
-            iteration=iteration,
-            step_index=step_index,
-            step_query=step_query,
-            on_tool_call=on_tool_call,
-            on_artifact=on_artifact,
-            on_destructive_action=on_destructive_action,
-        )
-
-    if action_type == "call_tool":
-        return _execute_tool_call_action(
-            state=state,
-            config=config,
-            tools=tools,
-            action=action,
             updates=updates,
             iteration=iteration,
             step_index=step_index,

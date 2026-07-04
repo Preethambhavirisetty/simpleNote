@@ -7,18 +7,29 @@ from app.agent_workflow.streaming import HostCallbacks, RunRequest
 
 
 class MockTools(ToolProvider):
+    def __init__(self):
+        self.searches: list[str] = []
+        self.calls: list[tuple[str, dict]] = []
+
     def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+        self.searches.append(query)
         return [
             ToolCandidate(
                 name="search_documents",
                 title="Search Documents",
                 description="Search docs",
                 score=0.9,
-                input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+                input_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
             )
         ]
 
     def call_tool(self, name: str, arguments: dict) -> dict:
+        self.calls.append((name, arguments))
         return {
             "ok": True,
             "doc_id": "doc-1",
@@ -42,8 +53,10 @@ class MockLlm(LlmProvider):
         if self.calls == 2:
             return '{"action":"search_tools","query":"SLA documents"}'
         if self.calls == 3:
-            return '{"action":"finish_step"}'
+            return '{"action":"call_tool","name":"search_documents","arguments":{"query":"SLA documents"}}'
         if self.calls == 4:
+            return '{"action":"finish_step"}'
+        if self.calls == 5:
             return '{"action":"draft_answer","answer":"Found SLA in doc-1 page 2."}'
         return (
             "### Verdict\nAPPROVE\n### Issues found\nNone\n### Missing evidence\nNone\n"
@@ -65,3 +78,53 @@ def test_graph_smoke_approve_path():
     assert "SLA" in result.answer
     assert result.review.get("verdict") == "APPROVE"
     assert result.artifacts
+
+
+class BadArgsLlm(LlmProvider):
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        return '{"action":"call_tool","name":"search_documents","arguments":{}}'
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_executor_validates_discovered_tool_schema_before_calling():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.executor import executor_node
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    tools = MockTools()
+    state = {
+        "user_query": "Find SLA mentions",
+        "phase": "executing",
+        "iteration": {},
+        "current_step_index": 0,
+        "plan": {
+            "goal": "Find SLA",
+            "steps": [{"title": "Search", "action": "search", "tool_hint": "search_documents"}],
+        },
+        "candidate_tools": [
+            {
+                "name": "search_documents",
+                "title": "Search Documents",
+                "description": "Search docs",
+                "score": 0.9,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            }
+        ],
+        "tool_calls": [],
+        "artifacts": [],
+    }
+
+    updates = executor_node(state, config=config, llm=BadArgsLlm(), tools=tools)
+
+    assert tools.calls == []
+    assert updates["tool_calls"][-1]["status"] == "invalid_args"
+    assert "missing required argument: query" in updates["tool_calls"][-1]["error"]

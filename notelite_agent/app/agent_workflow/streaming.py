@@ -83,8 +83,19 @@ def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str,
                     "tools": tools,
                 }
             )
-        elif step == "executor.coerced":
+        elif step in {
+            "executor.tool_candidates_available",
+            "executor.duplicate_tool_skipped",
+            "executor.tool_limit_reached",
+        }:
             events.append({"type": "debug", "message": entry.get("message", "")})
+        elif step == "executor.tool_args_invalid":
+            events.append(
+                {
+                    "type": "debug",
+                    "message": f"Invalid arguments for {entry.get('tool')}: {entry.get('error')}",
+                }
+            )
         elif step == "executor.approval_required":
             events.append(
                 {
