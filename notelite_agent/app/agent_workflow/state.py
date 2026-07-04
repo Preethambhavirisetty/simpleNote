@@ -66,6 +66,7 @@ class AgentState(TypedDict, total=False):
     plan: Plan
     current_step_index: int
     candidate_tools: list[dict[str, Any]]
+    tool_discovery_cache: dict[str, list[dict[str, Any]]]
     artifacts: list[Artifact]
     tool_calls: list[ToolCallRecord]
     draft_answer: str

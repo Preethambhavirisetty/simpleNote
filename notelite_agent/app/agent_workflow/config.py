@@ -50,6 +50,10 @@ class AgentPolicy:
     max_review_cycles: int = 2
     max_tool_calls_per_step: int = 4
     max_context_tokens: int = 12000
+    max_retained_artifacts: int = 24
+    max_retained_tool_calls: int = 40
+    max_retained_events: int = 80
+    tool_discovery_cache_size: int = 16
     reject_action: str = "replan"  # replan | abort
     destructive_tools: list[str] = field(default_factory=list)
     require_destructive_confirmation: bool = True
@@ -110,6 +114,10 @@ def load_agent_config(path: str | Path) -> AgentConfig:
         max_review_cycles=int(policy_raw.get("max_review_cycles", 2)),
         max_tool_calls_per_step=int(policy_raw.get("max_tool_calls_per_step", 4)),
         max_context_tokens=int(policy_raw.get("max_context_tokens", 12000)),
+        max_retained_artifacts=int(policy_raw.get("max_retained_artifacts", 24)),
+        max_retained_tool_calls=int(policy_raw.get("max_retained_tool_calls", 40)),
+        max_retained_events=int(policy_raw.get("max_retained_events", 80)),
+        tool_discovery_cache_size=int(policy_raw.get("tool_discovery_cache_size", 16)),
         reject_action=str(policy_raw.get("reject_action", "replan")),
         destructive_tools=list(policy_raw.get("destructive_tools") or []),
         require_destructive_confirmation=bool(

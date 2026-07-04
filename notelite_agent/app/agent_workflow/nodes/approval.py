@@ -47,7 +47,7 @@ def approval_node(
         "events": [{"step": "approval.approved" if approved else "approval.denied", "tool": tool_name}],
     }
     if not approved:
-        _record_denial(state, updates, tool_name, arguments)
+        _record_denial(state, config, updates, tool_name, arguments)
         return updates
 
     return _run_tool_and_record(

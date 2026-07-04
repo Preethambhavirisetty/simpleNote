@@ -160,6 +160,98 @@ def test_graph_stream_emits_answer_deltas_before_done():
     assert "".join(event.get("content", "") for _i, event in delta_events) == events[done_index]["answer"]
 
 
+class SearchOnlyLlm(LlmProvider):
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        return '{"action":"search_tools","query":"SLA documents"}'
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+def _executor_state(**overrides):
+    state = {
+        "user_query": "Find SLA mentions",
+        "phase": "executing",
+        "iteration": {},
+        "current_step_index": 0,
+        "plan": {
+            "goal": "Find SLA",
+            "steps": [{"title": "Search", "action": "search", "tool_hint": "search_documents"}],
+        },
+        "candidate_tools": [],
+        "tool_discovery_cache": {},
+        "tool_calls": [],
+        "artifacts": [],
+        "events": [],
+    }
+    state.update(overrides)
+    return state
+
+
+def test_executor_reuses_tool_discovery_cache_without_second_search():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.executor import executor_node
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    tools = MockTools()
+
+    first = executor_node(_executor_state(), config=config, llm=SearchOnlyLlm(), tools=tools)
+    second = executor_node(
+        _executor_state(tool_discovery_cache=first["tool_discovery_cache"]),
+        config=config,
+        llm=SearchOnlyLlm(),
+        tools=tools,
+    )
+
+    assert tools.searches == ["SLA documents"]
+    assert first["events"][-1]["cache_hit"] is False
+    assert second["events"][-1]["cache_hit"] is True
+    assert second["candidate_tools"] == first["candidate_tools"]
+
+
+def test_executor_prunes_retained_artifacts_and_tool_calls():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.executor import _run_tool_and_record
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    config.policy.max_retained_artifacts = 2
+    config.policy.max_retained_tool_calls = 2
+    state = _executor_state(
+        artifacts=[
+            {"id": "old-low", "tool": "t", "summary": "old", "composite_score": 0.1, "step_index": 0},
+            {"id": "old-high", "tool": "t", "summary": "old", "composite_score": 0.9, "step_index": 0},
+        ],
+        tool_calls=[
+            {"name": "old1", "args_preview": "{}", "status": "ok", "latency_ms": 1, "error": None},
+            {"name": "old2", "args_preview": "{}", "status": "ok", "latency_ms": 1, "error": None},
+        ],
+    )
+    updates = {"events": []}
+
+    _run_tool_and_record(
+        state=state,
+        config=config,
+        tools=MockTools(),
+        tool_name="search_documents",
+        arguments={"query": "SLA"},
+        updates=updates,
+        iteration={},
+        step_index=0,
+        step_query="SLA",
+        on_tool_call=None,
+        on_artifact=None,
+    )
+
+    assert len(updates["artifacts"]) == 2
+    assert "old-low" not in {artifact["id"] for artifact in updates["artifacts"]}
+    assert len(updates["tool_calls"]) == 2
+    assert [record["name"] for record in updates["tool_calls"]] == ["old2", "search_documents"]
+
+
 def test_executor_validates_discovered_tool_schema_before_calling():
     from pathlib import Path
 

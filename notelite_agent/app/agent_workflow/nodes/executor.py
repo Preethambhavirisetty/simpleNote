@@ -26,6 +26,42 @@ def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
     }
 
 
+def _cache_key(query: str) -> str:
+    return " ".join(query.lower().split())[:300]
+
+
+def _prune_tool_calls(records: list[ToolCallRecord], *, config: AgentConfig) -> list[ToolCallRecord]:
+    limit = max(0, int(config.policy.max_retained_tool_calls))
+    return records[-limit:] if limit else []
+
+
+def _prune_artifacts(artifacts: list[Artifact], *, config: AgentConfig) -> list[Artifact]:
+    limit = max(0, int(config.policy.max_retained_artifacts))
+    if not limit:
+        return []
+    if len(artifacts) <= limit:
+        return artifacts
+    ranked = sorted(
+        enumerate(artifacts),
+        key=lambda item: (float(item[1].get("composite_score") or 0.0), int(item[0])),
+        reverse=True,
+    )[:limit]
+    keep_indexes = {idx for idx, _artifact in ranked}
+    return [artifact for idx, artifact in enumerate(artifacts) if idx in keep_indexes]
+
+
+def _prune_tool_discovery_cache(
+    cache: dict[str, list[dict[str, Any]]],
+    *,
+    config: AgentConfig,
+) -> dict[str, list[dict[str, Any]]]:
+    limit = max(0, int(config.policy.tool_discovery_cache_size))
+    if not limit:
+        return {}
+    items = list(cache.items())[-limit:]
+    return dict(items)
+
+
 def _schema_for_tool(tool_name: str, candidate_tools: list[dict[str, Any]]) -> dict[str, Any]:
     for tool in candidate_tools:
         if tool.get("name") == tool_name:
@@ -88,6 +124,7 @@ def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any], schema: 
 def _record_invalid_tool_arguments(
     *,
     state: AgentState,
+    config: AgentConfig,
     updates: dict[str, Any],
     iteration: dict[str, Any],
     tool_name: str,
@@ -103,6 +140,7 @@ def _record_invalid_tool_arguments(
     }
     tool_calls = list(state.get("tool_calls") or [])
     tool_calls.append(record)
+    tool_calls = _prune_tool_calls(tool_calls, config=config)
     iteration["tool_calls"] = int(iteration.get("tool_calls") or 0) + 1
     updates["tool_calls"] = tool_calls
     updates["iteration"] = iteration
@@ -136,7 +174,13 @@ def _was_denied(state: AgentState, tool_name: str) -> bool:
     )
 
 
-def _record_denial(state: AgentState, updates: dict[str, Any], tool_name: str, arguments: dict[str, Any]) -> None:
+def _record_denial(
+    state: AgentState,
+    config: AgentConfig,
+    updates: dict[str, Any],
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> None:
     record: ToolCallRecord = {
         "name": tool_name,
         "args_preview": json.dumps(arguments)[:300],
@@ -146,6 +190,7 @@ def _record_denial(state: AgentState, updates: dict[str, Any], tool_name: str, a
     }
     tool_calls = list(updates.get("tool_calls") or state.get("tool_calls") or [])
     tool_calls.append(record)
+    tool_calls = _prune_tool_calls(tool_calls, config=config)
     updates["tool_calls"] = tool_calls
 
 
@@ -180,7 +225,7 @@ def _execute_tool_call_action(
         if on_destructive_action is not None:
             # Host supplied a synchronous approver (e.g. interactive CLI).
             if not on_destructive_action(tool_name, arguments):
-                _record_denial(state, updates, tool_name, arguments)
+                _record_denial(state, config, updates, tool_name, arguments)
                 updates["events"].append({"step": "executor.destructive_denied", "tool": tool_name})
                 return updates
         else:
@@ -257,6 +302,7 @@ def _run_tool_and_record(
     }
     tool_calls = list(state.get("tool_calls") or [])
     tool_calls.append(record)
+    tool_calls = _prune_tool_calls(tool_calls, config=config)
     iteration["tool_calls"] = int(iteration.get("tool_calls") or 0) + 1
     updates["tool_calls"] = tool_calls
     updates["iteration"] = iteration
@@ -288,7 +334,7 @@ def _run_tool_and_record(
     }
     artifacts = list(state.get("artifacts") or [])
     artifacts.append(artifact)
-    updates["artifacts"] = artifacts
+    updates["artifacts"] = _prune_artifacts(artifacts, config=config)
     if on_artifact:
         on_artifact(artifact)
     updates["events"].append(
@@ -411,27 +457,36 @@ def executor_node(
 
     if action_type == "search_tools":
         query = str(action.get("query") or step_query)
-        try:
-            candidates = tools.search_tools(query)
-        except Exception as exc:  # noqa: BLE001
-            return {
-                "error": str(exc),
-                "phase": "reviewing",
-                "draft_answer": f"Tool search failed: {exc}",
-                "iteration": iteration,
-                "events": updates["events"],
-            }
+        key = _cache_key(query)
+        discovery_cache = dict(state.get("tool_discovery_cache") or {})
+        candidate_dicts = list(discovery_cache.get(key) or [])
+        cache_hit = bool(candidate_dicts)
 
-        candidate_dicts = [
-            {
-                "name": c.name,
-                "title": c.title,
-                "description": c.description,
-                "score": c.score,
-                "input_schema": c.input_schema,
-            }
-            for c in candidates
-        ]
+        if not candidate_dicts:
+            try:
+                candidates = tools.search_tools(query)
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "error": str(exc),
+                    "phase": "reviewing",
+                    "draft_answer": f"Tool search failed: {exc}",
+                    "iteration": iteration,
+                    "events": updates["events"],
+                }
+
+            candidate_dicts = [
+                {
+                    "name": c.name,
+                    "title": c.title,
+                    "description": c.description,
+                    "score": c.score,
+                    "input_schema": c.input_schema,
+                }
+                for c in candidates
+            ]
+            if candidate_dicts:
+                discovery_cache[key] = candidate_dicts
+                updates["tool_discovery_cache"] = _prune_tool_discovery_cache(discovery_cache, config=config)
         if not candidate_dicts:
             return {
                 "error": f"No tools matched: {query}",
@@ -451,6 +506,7 @@ def executor_node(
             {
                 "step": "executor.search_tools",
                 "query": query,
+                "cache_hit": cache_hit,
                 "tool_count": len(candidate_dicts),
                 "tools": [c["name"] for c in candidate_dicts[:7]],
             }
@@ -469,6 +525,7 @@ def executor_node(
         if errors:
             return _record_invalid_tool_arguments(
                 state=state,
+                config=config,
                 updates=updates,
                 iteration=iteration,
                 tool_name=tool_name,

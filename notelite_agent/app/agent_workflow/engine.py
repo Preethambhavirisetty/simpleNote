@@ -36,10 +36,11 @@ _ARITHMETIC_EXPR_RE = re.compile(r"\d\s*[+\-*/xX]\s*\d")
 _GREETING_RE = re.compile(r"^(hi|hello|hey|thanks|thank you|ok|okay|yes|no)[!.\s]*$", re.IGNORECASE)
 
 
-def _merge_state(state: AgentState, update: dict[str, Any]) -> AgentState:
+def _merge_state(state: AgentState, update: dict[str, Any], *, max_events: int = 80) -> AgentState:
     merged = {**state, **update}
     if "events" in update:
-        merged["events"] = list(state.get("events") or []) + list(update["events"])
+        events = list(state.get("events") or []) + list(update["events"])
+        merged["events"] = events[-max_events:] if max_events > 0 else []
     return merged
 
 
@@ -207,6 +208,7 @@ class AgentEngine:
             plan=plan,
             current_step_index=0,
             candidate_tools=[],
+            tool_discovery_cache={},
             artifacts=[],
             tool_calls=[],
             draft_answer="",
@@ -314,7 +316,11 @@ class AgentEngine:
                         self.callbacks.on_event(event)
                     yield event
 
-                holder["state"] = _merge_state(holder["state"], update)
+                holder["state"] = _merge_state(
+                    holder["state"],
+                    update,
+                    max_events=self.config.policy.max_retained_events,
+                )
 
     @staticmethod
     def _pending_approval_event(state: AgentState, thread_id: str) -> dict[str, Any] | None:

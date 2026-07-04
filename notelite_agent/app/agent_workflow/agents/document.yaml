@@ -14,6 +14,10 @@ policy:
   max_executor_iterations: 15
   max_review_cycles: 2
   max_context_tokens: 14000
+  max_retained_artifacts: 24
+  max_retained_tool_calls: 40
+  max_retained_events: 80
+  tool_discovery_cache_size: 16
   reject_action: replan
   destructive_tools:
     - delete_document
