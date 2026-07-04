@@ -13,6 +13,7 @@ from dateparser.search import search_dates
 from llama_index.core import Document as LlamaDocument
 
 from app.core.config import (
+    HYDE_ENABLED,
     HYDE_MAX_TOKENS,
     HYDE_TIMEOUT,
     LLM_SUMMARIZER_MODEL,
@@ -124,6 +125,8 @@ def preprocess_query(
 
 def generate_hyde(prepared: PreparedQuery) -> tuple[str | None, str]:
     """Generate a hypothetical note passage, falling back cleanly on failure."""
+    if not HYDE_ENABLED:
+        return None, "disabled"
     prompt = (
         "Write a brief note excerpt that would directly answer this question. "
         "Write as a note excerpt, not a letter. Do not include a salutation, signature, "

@@ -47,7 +47,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c \
         "import urllib.request, sys; \
-         r = urllib.request.urlopen('http://localhost:8000/api/stats', timeout=5); \
+         r = urllib.request.urlopen('http://localhost:8000/api/health', timeout=5); \
          sys.exit(0 if r.status == 200 else 1)" \
         || exit 1
 

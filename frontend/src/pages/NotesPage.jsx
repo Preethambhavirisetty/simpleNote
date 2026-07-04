@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Underline from '@tiptap/extension-underline'
 import Placeholder from '@tiptap/extension-placeholder'
 import { useNoteStore } from '@/stores/noteStore'
 import { useFolderStore } from '@/stores/folderStore'
@@ -220,7 +219,6 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTa
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
-      Underline,
       Placeholder.configure({ placeholder: 'Start writing your idea...' }),
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },

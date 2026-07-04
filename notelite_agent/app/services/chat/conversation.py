@@ -4,6 +4,7 @@ import logging
 import time
 from typing import Any
 
+from app.logger import get_trace_id
 from app.services.chat.schema import ChatRequest
 from app.services.ingestion.workers.celery_app import CONVERSATION_TASK, celery_app
 from app.shared.backend_conversation_client import BackendConversationClient
@@ -106,6 +107,8 @@ def persist_assistant_message(
         "tokens_used": usage.get("total_tokens"),
         "sources_used": references,
         "error_message": error_message,
+        # Correlate the async persistence with the originating chat request.
+        "trace_id": get_trace_id(),
     }
     try:
         celery_app.send_task(CONVERSATION_TASK, args=[payload])

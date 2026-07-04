@@ -50,6 +50,10 @@ _load_aws_secrets()
 SECRET_KEY = require_env("SECRET_KEY")
 BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
+# Capacity of the threadpool that runs sync routes and sync streaming responses.
+# Each active chat stream holds one thread for its full duration, so the anyio
+# default of 40 caps concurrent chats; raise/lower to match expected concurrency.
+SYNC_WORKER_LIMIT = int(require_env("SYNC_WORKER_LIMIT", "100"))
 # Synchronous, blocking debug ingestion endpoint. Off by default; enable only in dev.
 ENABLE_DIRECT_INGEST = require_env("ENABLE_DIRECT_INGEST", "false").lower() == "true"
 
@@ -114,6 +118,12 @@ INGESTION_TASK_STRING = require_env("INGESTION_TASK_STRING")
 INGESTION_QUEUE = require_env("INGESTION_QUEUE", "ingestion")
 CONVERSATION_QUEUE = require_env("CONVERSATION_QUEUE", "conversation")
 
+# Postgres<->Qdrant reconciliation (celery beat): re-ingests notes whose index is
+# missing/stale and removes documents whose note is gone. Batch cap keeps a large
+# backlog from flooding the ingestion queue in one sweep.
+RECONCILE_INTERVAL_SECONDS = int(require_env("RECONCILE_INTERVAL_SECONDS", "3600"))
+RECONCILE_BATCH_LIMIT = int(require_env("RECONCILE_BATCH_LIMIT", "200"))
+
 
 # Database — read-only version guard checks, one query per upsert task
 POSTGRES_DB_URL = require_env("POSTGRES_DB_URL")
@@ -127,9 +137,16 @@ RERANKER_MIN_RELEVANCE_SCORE = float(
     require_env("RERANKER_MIN_RELEVANCE_SCORE", "0.0")
 )
 
-# Retrieval pipeline
-HYDE_TIMEOUT = float(require_env("HYDE_TIMEOUT", "2"))
-HYDE_MAX_TOKENS = int(require_env("HYDE_MAX_TOKENS", "150"))
+# Retrieval pipeline.
+# HyDE runs as a non-streaming completion on the query path, so its timeout must
+# cover the full token budget: 80 tokens at a conservative ~20 tok/s needs ~4s.
+# (The old 2s/150-token pairing timed out on nearly every query, adding 2s of
+# latency for a passage that was then discarded.) HYDE_ENABLED=false removes the
+# call entirely for latency-sensitive deployments — retrieval falls back to the
+# original-query searches, same as any HyDE failure.
+HYDE_ENABLED = require_env("HYDE_ENABLED", "true").lower() == "true"
+HYDE_TIMEOUT = float(require_env("HYDE_TIMEOUT", "4"))
+HYDE_MAX_TOKENS = int(require_env("HYDE_MAX_TOKENS", "80"))
 RETRIEVAL_SEARCH_WORKERS = int(require_env("RETRIEVAL_SEARCH_WORKERS", "5"))
 RETRIEVAL_RRF_K = int(require_env("RETRIEVAL_RRF_K", "60"))
 RETRIEVAL_RRF_TOP_K = int(require_env("RETRIEVAL_RRF_TOP_K", "30"))

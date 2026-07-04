@@ -2,18 +2,19 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-import jwt
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from fastapi import FastAPI, Request, Response
 
 from app.api.v1.api import api_router
-from app.core.config import POSTGRES_DB_URL, SECRET_KEY, HASH_ALGORITHM
+from app.core.config import AGENT_API_KEY, POSTGRES_DB_URL
 from app.db.postgres.session import dispose_postgres, init_postgres
+from app.deps.internal import internal_key_matches
 from app.exceptions.handlers import register_exceptions
 from app.logger import setup_logging, logger
 from app.metrics import REQUEST_COUNT, REQUEST_LATENCY, render_metrics
 from app.core.openapi import OPENAPI_TAGS, configure_openapi
+from app.services.token import TokenService
 
 
 @asynccontextmanager
@@ -40,16 +41,25 @@ configure_openapi(app)
 register_exceptions(app)
 
 
+_token_service = TokenService()
+
+
 def _extract_user_id(request: Request) -> str:
-    """Best-effort user_id: JWT cookie > X-User-Id header > anonymous."""
+    """Best-effort user_id for log attribution: JWT cookie > trusted internal header.
+
+    X-User-Id is honored only alongside a valid X-Internal-Key — otherwise any
+    public client could stamp arbitrary user ids into the logs.
+    """
     internal_uid = request.headers.get("x-user-id")
-    if internal_uid:
+    internal_key = request.headers.get("x-internal-key")
+    if internal_uid and internal_key_matches(internal_key, expected_key=AGENT_API_KEY):
         return internal_uid
 
     token = request.cookies.get("access_token")
     if token:
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[HASH_ALGORITHM])
+            # decode_jwt_token strips the "Bearer " prefix the auth cookie carries.
+            payload = _token_service.decode_jwt_token(token)
             return payload.get("sub", "anonymous")
         except Exception:
             pass
@@ -57,11 +67,23 @@ def _extract_user_id(request: Request) -> str:
     return "anonymous"
 
 
+def _trusted_trace_id(request: Request) -> str:
+    """Reuse an inbound trace id only from internal callers (valid X-Internal-Key).
+
+    nginx also strips X-Trace-Id at the edge; this guards direct in-network calls
+    so public clients can never inject arbitrary or colliding ids into the logs.
+    """
+    inbound = request.headers.get("x-trace-id")
+    internal_key = request.headers.get("x-internal-key")
+    if inbound and internal_key_matches(internal_key, expected_key=AGENT_API_KEY):
+        return inbound
+    return str(uuid.uuid4())
+
+
 @app.middleware("http")
 async def request_middleware(request: Request, call_next):
     clear_contextvars()
-    # Reuse an inbound trace id so a request keeps one id across services; else start one.
-    trace_id = request.headers.get("x-trace-id") or str(uuid.uuid4())
+    trace_id = _trusted_trace_id(request)
     user_id = _extract_user_id(request)
     bind_contextvars(trace_id=trace_id, user_id=user_id)
 

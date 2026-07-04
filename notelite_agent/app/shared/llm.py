@@ -16,6 +16,17 @@ DEFAULT_TIMEOUT = 120.0
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_TEMPERATURE = 0.1
 
+# One connection pool for all non-streaming LLM calls (httpx.Client is
+# thread-safe); per-call timeouts are passed on each request.
+_http: httpx.Client | None = None
+
+
+def _http_client() -> httpx.Client:
+    global _http
+    if _http is None:
+        _http = httpx.Client(timeout=DEFAULT_TIMEOUT)
+    return _http
+
 
 def llm_call_direct(prompt: str) -> str:
     return llm_call_general([{"role": "user", "content": prompt}])
@@ -37,7 +48,7 @@ def llm_call_general(
         "stream": False,
     }
 
-    response = httpx.post(
+    response = _http_client().post(
         _chat_completions_url(),
         headers=_headers(),
         json=body,

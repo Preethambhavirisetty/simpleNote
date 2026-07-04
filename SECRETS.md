@@ -55,6 +55,35 @@ treated as compromised for production and rotated:
    compromised.
 7. **`LLM_API_KEY` / `EMBEDDING_API_KEY`** — rotate if the provider keys were shared.
 
+## Rotation status (2026-07-03)
+
+Items 1–5 were regenerated **locally in the `.env` files** (new random values via
+`openssl rand`; `AGENT_API_KEY` kept identical across backend/agent, the two
+`SECRET_KEY`s made independent — the agent never verifies backend JWTs). Not yet applied
+to any running environment. Still pending, outside this repo's control:
+
+- **TLS certificate reissue** (item 6) — external CA / operator action.
+- **`LLM_API_KEY` / `EMBEDDING_API_KEY` / `RERANKER_API_KEY`** (item 7) — provider-side
+  (RunPod) credentials; rotating only the local value would break inference/embedding
+  auth. Rotate at the provider, then update `notelite_agent/.env`.
+
+### Applying the rotation to an already-running stack
+
+The previous values are preserved in git-ignored `*.env.pre-rotation.bak` files —
+**delete them once the steps below are done.** Fresh environments need none of this.
+
+1. **Postgres:** the container only reads `POSTGRES_PASSWORD` when initialising an empty
+   volume. For an existing volume, log in with the *old* password and run
+   `ALTER USER postgres WITH PASSWORD '<new value from .env>';`
+2. **Redis:** `--requirepass` is read at start — `podman-compose up -d redis` (recreate)
+   picks up the new password.
+3. **Grafana:** the admin password env var only applies on first run. For an existing
+   volume: `grafana-cli admin reset-admin-password <new value>` inside the container.
+4. **Services:** recreate `backend`, `agent`, `agent-celery` so they
+   load the new `SECRET_KEY` / `AGENT_API_KEY` / URLs together (the internal key must
+   change on both sides in one step). All user sessions are invalidated (expected).
+5. Delete the `*.env.pre-rotation.bak` files.
+
 ## Provisioning
 
 - **Dev:** copy `*.env.example` → `.env` for each service and fill in values.

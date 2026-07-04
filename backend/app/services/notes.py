@@ -6,21 +6,26 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.celery import celery_app
-from app.core.config import INGESTION_TASK_STRING, NOTE_SIZE_QUEUE, NOTE_SIZE_TASK_STRING
+from app.core.config import INGESTION_TASK_STRING
 from app.core.tiptap import extract_text
 from app.db.postgres.repos.folder import FolderRepository
 from app.db.postgres.repos.note import NoteRepository
 from app.db.postgres.repos.tag import TagRepository
 from app.exceptions.base import AppException
+from app.logger import get_trace_id
 from app.schema.base import ErrorCode
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 
 
 def _dispatch_ingest(payload: dict) -> None:
-    """Send an upsert ingestion task to the notelite_agent queue."""
+    """Send an upsert ingestion task to the notelite_agent queue.
+
+    trace_id carries the originating request's correlation id into the worker,
+    which binds it before processing (see agent ingestion_tasks).
+    """
     celery_app.send_task(
         INGESTION_TASK_STRING,
-        kwargs={"action": "upsert", **payload},
+        kwargs={"action": "upsert", "trace_id": get_trace_id(), **payload},
     )
 
 
@@ -28,16 +33,7 @@ def _dispatch_delete(payload: dict) -> None:
     """Send a delete ingestion task to remove the vector from the store."""
     celery_app.send_task(
         INGESTION_TASK_STRING,
-        kwargs={"action": "delete", **payload},
-    )
-
-
-def _dispatch_compute_size(note_id: UUID, content_text: str) -> None:
-    """Offload note_size computation to the backend's own Celery worker."""
-    celery_app.send_task(
-        NOTE_SIZE_TASK_STRING,
-        kwargs={"note_id": str(note_id), "content_text": content_text},
-        queue=NOTE_SIZE_QUEUE,
+        kwargs={"action": "delete", "trace_id": get_trace_id(), **payload},
     )
 
 
@@ -56,6 +52,17 @@ class NoteService:
                 error_code=ErrorCode.NOT_FOUND,
             )
         return note
+
+    def _folder_or_404(self, db: Session, folder_id: UUID, user_id: UUID):
+        """Resolve a folder owned by this user; 404 hides other users' folders."""
+        folder = self.folder_repo.get_by_id(db, folder_id, user_id)
+        if not folder:
+            raise AppException(
+                message="Folder not found",
+                status_code=404,
+                error_code=ErrorCode.NOT_FOUND,
+            )
+        return folder
 
     def _ingestion_payload(self, db: Session, note, user_role: list[str]) -> dict:
         """Build the full payload sent to the ingestion queue.
@@ -83,16 +90,17 @@ class NoteService:
         }
 
     def create(self, db: Session, user_id: UUID, payload: NoteCreate, user_role: list[str]):
+        self._folder_or_404(db, payload.folder_id, user_id)
         content_text = extract_text(payload.content)
         note = self.repo.create(db, user_id, payload, content_text)
         # Version 1 marks the first persisted state of the note.
         note.version = 1
+        note.note_size = len(content_text.encode("utf-8"))
         db.commit()           # commit first — note must exist before workers run
         db.refresh(note)
 
         if content_text:
             _dispatch_ingest(self._ingestion_payload(db, note, user_role))
-            _dispatch_compute_size(note.id, content_text)
         return note
 
     def list(
@@ -119,6 +127,8 @@ class NoteService:
 
     def update(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteUpdate, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
+        if payload.folder_id is not None and payload.folder_id != note.folder_id:
+            self._folder_or_404(db, payload.folder_id, user_id)
         content_text = extract_text(payload.content) if payload.content is not None else None
         content_changed = (
             content_text is not None and content_text != note.content_text
@@ -126,6 +136,7 @@ class NoteService:
 
         if content_changed:
             note.version += 1
+            note.note_size = len(content_text.encode("utf-8"))
 
         self.repo.update(db, note, payload, content_text)
         db.commit()
@@ -134,7 +145,6 @@ class NoteService:
         if content_changed:
             if content_text.strip():
                 _dispatch_ingest(self._ingestion_payload(db, note, user_role))
-                _dispatch_compute_size(note.id, content_text)
             else:
                 _dispatch_delete({
                     "userid": str(note.user_id),
@@ -148,13 +158,7 @@ class NoteService:
 
     def move(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteMoveRequest, user_role: list[str]):
         note = self._get_or_404(db, note_id, user_id)
-        folder = self.folder_repo.get_by_id(db, payload.folder_id, user_id)
-        if not folder:
-            raise AppException(
-                message="Folder not found",
-                status_code=404,
-                error_code=ErrorCode.NOT_FOUND,
-            )
+        self._folder_or_404(db, payload.folder_id, user_id)
         note.folder_id = payload.folder_id
         db.commit()
         db.refresh(note)

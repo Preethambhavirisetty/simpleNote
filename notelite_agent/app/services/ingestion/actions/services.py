@@ -139,7 +139,9 @@ class IngestionActionServices:
 
     @staticmethod
     def _doc_id(payload: Any) -> str:
-        return f"{payload.user_id}-{payload.folder_id}-{payload.note_id}"
+        # Must match IngestionOrchestrator._doc_id: user + note only, so debug
+        # actions inspect the same document the live pipeline writes.
+        return f"{payload.user_id}-{payload.note_id}"
 
     def _require_vector_store(self) -> QdrantVectorStore:
         if self.vector_store is None:

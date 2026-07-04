@@ -152,29 +152,13 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
       AGENT_INTERNAL_URL:     http://agent:8000
+      # Auth cookies only over HTTPS — the containerized stack is served via nginx TLS.
+      # `environment:` overrides env_file, so a stale backend/.env cannot disable this.
+      COOKIE_SECURE:          "true"
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
     expose:
       - "8000"
-    networks:
-      - notelite-net
-
-  # Backend Celery worker — note_size queue
-  backend-celery:
-    env_file:
-      - ./backend/.env
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: notelite-backend-celery
-    restart: unless-stopped
-    command: ["python", "-m", "celery", "-A", "app.core.celery.celery_app", "worker",
-              "--loglevel=info", "-Q", "note_size", "-c", "2", "-n", "backend-celery@%h",
-              "--include", "app.tasks.notes"]
-    environment:
-      POSTGRES_DB_URL:        *pg-url
-      MESSAGE_BROKER_URL:     *redis-url
-      CELERY_RESULT_BACKEND:  *redis-url
     networks:
       - notelite-net
 
@@ -219,8 +203,10 @@ services:
       dockerfile: Dockerfile
     container_name: notelite-agent-celery
     restart: unless-stopped
+    # -B embeds celery beat (drives the periodic reconciliation task). Fine for a
+    # single worker container; use a dedicated beat process if this is scaled out.
     command: ["python", "-m", "celery", "-A", "app.services.ingestion.workers.celery_app:celery_app", "worker",
-              "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h"]
+              "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h", "-B"]
     environment:
       LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
       HF_HOME:                /app/.cache/huggingface
@@ -233,6 +219,8 @@ services:
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
+      # Migrations run only in the agent API container; the worker must not race it.
+      RUN_MIGRATIONS:         "false"
     volumes:
       - ./notelite_agent/app:/app/app:ro
       - agent-model-cache:/app/.cache

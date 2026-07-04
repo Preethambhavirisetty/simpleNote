@@ -17,6 +17,16 @@ log = logging.getLogger(__name__)
 
 _TIMEOUT = 30.0
 
+# Shared connection pool; the timeout is passed per request.
+_http: httpx.Client | None = None
+
+
+def _http_client() -> httpx.Client:
+    global _http
+    if _http is None:
+        _http = httpx.Client()
+    return _http
+
 
 def rerank(
     query: str,
@@ -39,7 +49,7 @@ def rerank(
 
     texts = [doc.text for doc, _ in chunks]
     try:
-        resp = httpx.post(
+        resp = _http_client().post(
             f"{RERANKER_API_BASE}/rerank",
             json={"query": query, "documents": texts, "top_n": top_k},
             headers={"Authorization": f"Bearer {RERANKER_API_KEY}", "Content-Type": "application/json"},

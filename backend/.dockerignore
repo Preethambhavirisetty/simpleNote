@@ -1,31 +1,58 @@
-# Virtual environment
-.venv/
-venv/
+# Git / Docker metadata
+.git
+.gitignore
+Dockerfile
+.dockerignore
 
-# Local secrets – never bake into the image
+# Local secrets - never bake into the image
 .env
 .env.*
+!.env.example
+!*.env.example
 
-# Test artefacts
+# Virtual environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+**/env/
+
+# Python cache / test artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Local caches / logs
+.cache/
+**/.cache/
+*.log
+logs/
+
+# Tests and local-only files
 tests/
 pytest.ini
 requirements-dev.txt
-.coverage
-htmlcov/
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.mypy_cache/
-.pytest_cache/
 
 # Editor / OS
 .DS_Store
-*.swp
+Thumbs.db
 .idea/
 .vscode/
+*.swp
+*.swo
 
 # Docs
 *.md

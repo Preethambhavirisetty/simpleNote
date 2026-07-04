@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
+from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
 
@@ -11,10 +13,14 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.config import ACTIVE_CHAT_SYSTEM_VERSION, LLM_REASONER_MODEL
+from app.core.feature_flags import is_enabled
 from app.logger import logger
 from app.services.chat import conversation, llm_client, retriever
 from app.shared.prompts import prompt
 from app.services.chat.schema import ChatRequest
+from app.agent_workflow.adapters.orchestrator import engine_event_to_sse
+from app.agent_workflow.engine import AgentEngine
+from app.agent_workflow.streaming import RunRequest
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.backend_conversation_client import BackendConversationClient
 from app.shared.utils import count_tokens
@@ -47,8 +53,159 @@ class StreamingService:
         *,
         model: str = LLM_REASONER_MODEL,
     ):
-        self.conversation_client = conversation_client or BackendConversationClient()
+        # StreamingService is a module-level singleton, so a single conversation
+        # client here would be shared by concurrent streams and their event logs
+        # would cross-contaminate. Hold only an optional injected client (tests);
+        # each stream() call otherwise builds its own.
+        self._injected_conversation_client = conversation_client
         self.model = model
+
+    def _conversation_client(self) -> BackendConversationClient:
+        return self._injected_conversation_client or BackendConversationClient()
+
+
+    def _stream_agent_workflow(
+        self,
+        *,
+        request: ChatRequest,
+        query: str,
+        conversation_id: str,
+        user_message_id: str,
+        assistant_message_id: str,
+        history: list[dict[str, Any]],
+        conversation_client: BackendConversationClient,
+        events: list[str],
+        started_at: float,
+    ) -> StreamingResponse:
+        config_path = Path(
+            os.getenv(
+                "AGENT_WORKFLOW_CONFIG",
+                str(Path(__file__).resolve().parents[3] / "agent_workflow" / "agents" / "document.yaml"),
+            )
+        )
+        engine = AgentEngine.from_config(config_path)
+
+        def event_stream() -> Iterator[str]:
+            yield _sse("meta", {
+                "conversation_id": conversation_id,
+                "message_id": assistant_message_id,
+                "user_message_id": user_message_id,
+                "model": self.model,
+                "mode": "agent_workflow",
+                "sources": [],
+                "references": [],
+            })
+
+            answer_parts: list[str] = []
+            error_message: str | None = None
+            tool_call_count = 0
+            artifact_count = 0
+            review: dict[str, Any] | None = None
+            events.append("agent_workflow.started")
+
+            try:
+                run_request = RunRequest(
+                    query=query,
+                    session_id=conversation_id,
+                    history=history,
+                    runtime_context={
+                        "user_id": request.user_id,
+                        "tenant_id": request.user_id,
+                        "role": request.role,
+                        "conversation_id": conversation_id,
+                    },
+                )
+                for engine_event in engine.stream(run_request):
+                    mapped = engine_event_to_sse(engine_event)
+                    if engine_event.get("type") == "agent_activity":
+                        tool = engine_event.get("tool", "tool")
+                        phase = engine_event.get("phase", "running")
+                        events.append(f"agent_workflow.tool {tool} {phase}")
+                    if engine_event.get("type") == "done":
+                        answer = str(engine_event.get("answer") or "")
+                        if not answer_parts and answer:
+                            answer_parts.append(answer)
+                            yield _sse("delta", {"content": answer})
+                        review = engine_event.get("review") if isinstance(engine_event.get("review"), dict) else None
+                        tool_call_count = int(engine_event.get("tool_call_count") or 0)
+                        artifact_count = int(engine_event.get("artifact_count") or 0)
+                        if engine_event.get("error"):
+                            error_message = str(engine_event.get("error"))
+                        continue
+                    if mapped is None:
+                        continue
+                    event_name, payload = mapped
+                    if event_name == "delta":
+                        content = str(payload.get("content") or "")
+                        if content:
+                            answer_parts.append(content)
+                            yield _sse("delta", {"content": content})
+                    elif event_name in {"agent_activity", "status"}:
+                        yield _sse(event_name, payload)
+            except Exception as exc:  # noqa: BLE001
+                error_message = str(exc)
+                events.append("agent_workflow.failed")
+                log.warning("agent workflow stream failed", exc_info=True)
+                yield _sse("error", {"message": error_message})
+            finally:
+                answer = "".join(answer_parts)
+                latency_ms = _elapsed_ms(started_at)
+                completion_tokens = count_tokens(answer) if answer else 0
+                events.append("agent_workflow.completed" if not error_message else "agent_workflow.failed")
+                logger.info(
+                    "chat.completed",
+                    outcome="failed" if error_message else "completed",
+                    model=self.model,
+                    mode="agent_workflow",
+                    total_ms=latency_ms,
+                    completion_tokens=completion_tokens,
+                    tool_call_count=tool_call_count,
+                    artifact_count=artifact_count,
+                    inference_error=bool(error_message),
+                    events=events,
+                )
+
+                conversation.persist_assistant_message(
+                    request=request,
+                    conversation_id=conversation_id,
+                    assistant_message_id=assistant_message_id,
+                    answer=answer,
+                    model=self.model,
+                    usage={
+                        "prompt_tokens": 0,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": completion_tokens,
+                    },
+                    latency_ms=latency_ms,
+                    error_message=error_message,
+                    references=[],
+                    events=events,
+                    status=None,
+                )
+
+            yield _sse("done", {
+                "conversation_id": conversation_id,
+                "message_id": assistant_message_id,
+                "latency_ms": _elapsed_ms(started_at),
+                "events": events,
+                "sources": [],
+                "references": [],
+                "has_error": error_message is not None,
+                "error": error_message,
+                "review": review,
+                "artifact_count": artifact_count,
+                "tool_call_count": tool_call_count,
+                "mode": "agent_workflow",
+            })
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     def stream(
         self,
@@ -63,17 +220,18 @@ class StreamingService:
         started_at = time.perf_counter()
         events: list[str] = ["chat stream started"]
         latencies_ms: dict[str, int] = {}
+        conversation_client = self._conversation_client()
 
         # ── Conversation setup ────────────────────────────────────────────────
         try:
             conversation_id, user_message_id, assistant_message_id = (
                 conversation.init_conversation(
-                    self.conversation_client, request, query, self.model,
+                    conversation_client, request, query, self.model,
                     events, latencies_ms,
                 )
             )
             history = conversation.load_history(
-                self.conversation_client,
+                conversation_client,
                 request.user_id,
                 conversation_id,
                 {user_message_id, assistant_message_id},
@@ -82,6 +240,19 @@ class StreamingService:
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        if is_enabled("chat.agent_workflow"):
+            return self._stream_agent_workflow(
+                request=request,
+                query=query,
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                assistant_message_id=assistant_message_id,
+                history=history,
+                conversation_client=conversation_client,
+                events=events,
+                started_at=started_at,
+            )
 
         # ── Retrieval ─────────────────────────────────────────────────────────
         context_texts: list[str] = []

@@ -1,0 +1,21 @@
+name: default-agent
+prompts:
+  planner: prompts/planner.md
+  executor: prompts/executor.md
+  reviewer: prompts/reviewer.md
+mcp:
+  url: ${MCP_URL}
+  auth_token: ${MCP_AUTH_TOKEN}
+policy:
+  max_executor_iterations: 12
+  max_review_cycles: 2
+  max_tool_calls_per_step: 4
+  max_context_tokens: 12000
+  reject_action: replan
+  truncation:
+    max_artifact_chars: 2500
+    score_weights:
+      relevance: 0.4
+      freshness: 0.2
+      uniqueness: 0.2
+      actionability: 0.2

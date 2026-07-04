@@ -1,4 +1,3 @@
-import secrets
 from typing import Optional
 from uuid import UUID
 
@@ -7,11 +6,11 @@ from sqlalchemy.orm import Session
 
 from app.schema.responses import ApiResponse, ConversationData, ConversationDetailData, MessageData
 
-from app.core.config import AGENT_API_KEY
 from app.core.feature_flags import require_feature
 from app.db.postgres.models.conversation import Conversation, Message
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
+from app.deps.internal import verify_internal_key
 from app.exceptions.base import AppException
 from app.exceptions.handlers import success_response
 from app.schema.base import ErrorCode
@@ -38,34 +37,10 @@ def _resolve_user_id(
     if current_user:
         return current_user.id
     if x_internal_key and x_user_id:
-        if not secrets.compare_digest(x_internal_key, AGENT_API_KEY):
-            raise AppException(
-                message="Invalid credentials",
-                status_code=401,
-                error_code=ErrorCode.UNAUTHORIZED,
-            )
+        verify_internal_key(x_internal_key)
         return UUID(x_user_id)
     raise AppException(
         message="Authentication required",
-        status_code=401,
-        error_code=ErrorCode.NOT_AUTHENTICATED,
-    )
-
-
-async def get_auth_user_id(
-    x_internal_key: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
-    db: Session = Depends(get_postgres_session),
-) -> UUID:
-    """Accepts either cookie JWT or X-Internal-Key + X-User-Id headers."""
-    if x_internal_key:
-        return _resolve_user_id(x_internal_key=x_internal_key, x_user_id=x_user_id)
-    from app.deps.auth import get_current_user as _get_user
-    from fastapi import Request
-    # fall through to JWT — import inline to avoid circular dep at module level
-    # This path is hit only for FE requests with cookies
-    raise AppException(
-        message="Use cookie auth or X-Internal-Key header",
         status_code=401,
         error_code=ErrorCode.NOT_AUTHENTICATED,
     )

@@ -10,6 +10,35 @@ from app.schema.base import ErrorCode
 from app.schema.users import UserLoginRequest, UserRegisterRequest
 from tests.conftest import make_user
 
+# ── TokenService cookie flags ─────────────────────────────────────────────────
+
+class TestAuthCookieSecureFlag:
+    """The auth cookie's Secure attribute must follow the COOKIE_SECURE setting."""
+
+    def _set_cookie_header(self):
+        from fastapi.responses import Response
+
+        from app.services.token import TokenService
+
+        response = Response()
+        assert TokenService().create_assign_http_only_cookie(
+            response, user_id="user-1", email="test@example.com", role=["standard_user"]
+        )
+        return response.headers["set-cookie"]
+
+    def test_secure_attribute_set_when_enabled(self):
+        with patch("app.services.token.COOKIE_SECURE", True):
+            header = self._set_cookie_header()
+        assert "secure" in header.lower()
+        assert "httponly" in header.lower()
+
+    def test_secure_attribute_absent_when_disabled_for_local_dev(self):
+        with patch("app.services.token.COOKIE_SECURE", False):
+            header = self._set_cookie_header()
+        assert "secure" not in header.lower()
+        assert "httponly" in header.lower()
+
+
 # ── AuthService unit tests ────────────────────────────────────────────────────
 
 @pytest.fixture

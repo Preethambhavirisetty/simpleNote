@@ -53,6 +53,9 @@ class PostgresArtifactStore:
                 created_at=created_at,
                 updated_at=updated_at,
                 timestamp_fallback=timestamp_fallback,
+                # -1 when the producer sent no version (e.g. dev ingest routes);
+                # such rows stay eligible for reconciliation re-ingest.
+                indexed_version=int(payload.get("version") or -1),
             ))
             session.execute(delete(ChunkDateRecord).where(ChunkDateRecord.doc_id == doc_id))
             session.execute(delete(SkippedChunkRecord).where(SkippedChunkRecord.doc_id == doc_id))

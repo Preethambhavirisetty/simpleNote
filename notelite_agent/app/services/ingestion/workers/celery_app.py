@@ -9,9 +9,11 @@ from app.core.config import (
     INGESTION_QUEUE,
     INGESTION_TASK_STRING,
     MESSAGE_BROKER_URL,
+    RECONCILE_INTERVAL_SECONDS,
 )
 
 CONVERSATION_TASK = "tasks.persist_message"
+RECONCILE_TASK = "tasks.reconcile_index"
 
 celery_app = Celery(
     "tasks",
@@ -30,8 +32,21 @@ celery_app.conf.update(
     task_routes={
         INGESTION_TASK_STRING: {"queue": INGESTION_QUEUE},
         CONVERSATION_TASK: {"queue": CONVERSATION_QUEUE},
+        RECONCILE_TASK: {"queue": INGESTION_QUEUE},
     },
-    imports=("app.services.ingestion.workers.ingestion_tasks",),
+    imports=(
+        "app.services.ingestion.workers.ingestion_tasks",
+        "app.services.ingestion.workers.reconciliation",
+    ),
+    # Driven by the embedded beat (-B) in the single agent-celery worker; if the
+    # worker is ever scaled out, move beat to a dedicated process so the schedule
+    # isn't duplicated.
+    beat_schedule={
+        "reconcile-index": {
+            "task": RECONCILE_TASK,
+            "schedule": RECONCILE_INTERVAL_SECONDS,
+        },
+    },
 )
 
 

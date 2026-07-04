@@ -1,6 +1,8 @@
 import logging
 from typing import Optional
 
+import httpx
+
 from app.core.config import BACKEND_INTERNAL_URL_BASE, AGENT_API_KEY
 from app.logger import get_trace_id
 from app.shared.api_client import APIClient
@@ -10,10 +12,28 @@ log = logging.getLogger(__name__)
 
 TIMEOUT = 10
 
+# One connection pool for all backend calls; httpx.Client is thread-safe. Each
+# BackendConversationClient instance keeps its own APIClient (and events) on top,
+# so this must never be closed by an instance.
+_shared_http: httpx.Client | None = None
+
+
+def _shared_http_client() -> httpx.Client:
+    global _shared_http
+    if _shared_http is None:
+        _shared_http = httpx.Client(base_url=BACKEND_INTERNAL_URL_BASE, timeout=TIMEOUT)
+    return _shared_http
+
 
 class BackendConversationClient:
+    """Backend conversation API wrapper.
+
+    Construct one per request/task: `events` accumulate per instance and are
+    drained by the owner, so instances must never be shared across requests.
+    """
+
     def __init__(self):
-        self.api_client = APIClient(BACKEND_INTERNAL_URL_BASE)
+        self.api_client = APIClient(BACKEND_INTERNAL_URL_BASE, client=_shared_http_client())
 
     def get_headers(self, user_id):
         headers = {

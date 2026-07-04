@@ -19,6 +19,9 @@
             },
             "query_rewrite": {
                 "enabled": false
+            },
+            "agent_workflow": {
+                "enabled": true
             }
         }
     },

@@ -14,8 +14,8 @@ target_metadata = Base.metadata
 # Keep the backend's revision bookkeeping in its own table so the two never collide.
 VERSION_TABLE = "backend_alembic_version"
 
-# Distinct from the agent's advisory lock so backend instances only serialize with
-# each other (backend + backend-celery start together).
+# Distinct from the agent's advisory lock so backend instances only serialize
+# with each other (e.g. multiple API replicas starting together).
 MIGRATION_LOCK_ID = 731946285
 
 

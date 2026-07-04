@@ -92,8 +92,7 @@ def make_tag(**kwargs) -> SimpleNamespace:
 def no_celery():
     """Prevent any Celery task dispatch from reaching Redis during tests."""
     with patch("app.services.notes._dispatch_ingest"), \
-         patch("app.services.notes._dispatch_delete"), \
-         patch("app.services.notes._dispatch_compute_size"):
+         patch("app.services.notes._dispatch_delete"):
         yield
 
 

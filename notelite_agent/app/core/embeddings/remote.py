@@ -14,6 +14,19 @@ class EmbeddingBatch:
     sparse: list[dict[str, list[float] | list[int]]]
 
 
+# One connection pool shared by every RemoteEmbeddingService instance (the
+# semantic chunker builds its own instance with a shorter timeout — timeouts are
+# per-request, so instances can share the pool).
+_http: httpx.Client | None = None
+
+
+def _http_client() -> httpx.Client:
+    global _http
+    if _http is None:
+        _http = httpx.Client()
+    return _http
+
+
 class RemoteEmbeddingService:
     """HTTP client for the RunPod embedding service."""
 
@@ -39,7 +52,7 @@ class RemoteEmbeddingService:
         if not clean_texts:
             return EmbeddingBatch(dense=[], sparse=[])
 
-        response = httpx.post(
+        response = _http_client().post(
             f"{self.base_url}/embed",
             headers=self._headers(),
             json={"texts": clean_texts},
@@ -68,7 +81,7 @@ class RemoteEmbeddingService:
         if not clean_texts:
             return []
 
-        response = httpx.post(
+        response = _http_client().post(
             f"{self.base_url}/v1/embeddings",
             headers=self._headers(),
             json={"model": self.model, "input": clean_texts},

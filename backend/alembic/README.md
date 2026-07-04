@@ -23,14 +23,21 @@ Inspect state:
     alembic current
     alembic history
 
-## Adopting an existing database (one-time)
+## Adopting an existing database
 
-If the database was created by the old `create_all` path, the tables already
-exist. Baseline it once so Alembic does not try to recreate them:
+Handled automatically: the container entrypoint runs `python -m app.db.migrate`,
+which detects a populated database with no version bookkeeping (the old
+`create_all` path), stamps it with the **baseline revision** (`20260703_01`, not
+`head` — so any migrations added later still apply), then upgrades normally.
 
-    alembic stamp head
+To adopt manually instead (e.g. outside the container):
 
-After stamping, use `alembic upgrade head` normally for all future changes.
+    alembic stamp 20260703_01
+    alembic upgrade head
+
+Only the API container runs migrations; Celery workers start with
+`RUN_MIGRATIONS=false` (see podman-compose.yml). Concurrent runners are
+serialized by the advisory lock in `env.py`.
 
 ## Notes
 

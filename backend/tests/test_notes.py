@@ -61,6 +61,8 @@ class TestNoteServiceCreate:
         assert result.title == "T"
         # version must be set to 1 after first creation
         assert result.version == 1
+        # note_size is computed inline at write time (UTF-8 bytes of the text)
+        assert result.note_size == len("Hello world".encode("utf-8"))
 
     def test_create_with_empty_doc_extracts_empty_text(self, note_service, mock_db, current_user):
         folder_id = uuid4()
@@ -73,6 +75,30 @@ class TestNoteServiceCreate:
         call_args = note_service.repo.create.call_args
         content_text_arg = call_args.args[3]
         assert content_text_arg == ""
+
+    def test_create_in_unowned_folder_raises_404(self, note_service, mock_db, current_user):
+        """A folder owned by another user resolves to None for this user_id."""
+        note_service.folder_repo.get_by_id.return_value = None
+
+        payload = NoteCreate(title="T", folder_id=uuid4(), content=_SIMPLE_DOC)
+        with pytest.raises(AppException) as exc:
+            note_service.create(mock_db, current_user.id, payload, current_user.role)
+
+        assert exc.value.status_code == 404
+        note_service.repo.create.assert_not_called()
+        mock_db.commit.assert_not_called()
+
+    def test_create_checks_folder_with_requesting_user_id(self, note_service, mock_db, current_user):
+        """Ownership is enforced by querying the folder scoped to the caller."""
+        folder_id = uuid4()
+        note_service.repo.create.return_value = make_note(
+            user_id=current_user.id, folder_id=folder_id, content=_SIMPLE_DOC
+        )
+
+        payload = NoteCreate(title="T", folder_id=folder_id, content=_SIMPLE_DOC)
+        note_service.create(mock_db, current_user.id, payload, current_user.role)
+
+        note_service.folder_repo.get_by_id.assert_any_call(mock_db, folder_id, current_user.id)
 
 
 class TestNoteServiceGet:
@@ -116,6 +142,8 @@ class TestNoteServiceUpdate:
         assert content_text_arg == "Hello world"
         # version must be bumped before commit
         assert note.version == 2
+        # note_size recomputed inline when content changes
+        assert note.note_size == len("Hello world".encode("utf-8"))
 
     def test_update_without_content_passes_none_text(self, note_service, mock_db, current_user):
         note = make_note(user_id=current_user.id)
@@ -127,6 +155,30 @@ class TestNoteServiceUpdate:
         update_call = note_service.repo.update.call_args
         content_text_arg = update_call.args[3]
         assert content_text_arg is None
+
+    def test_update_to_unowned_folder_raises_404(self, note_service, mock_db, current_user):
+        """PATCH can change folder_id too — it must pass the same ownership guard."""
+        note = make_note(user_id=current_user.id)
+        note_service.repo.get_by_id.return_value = note
+        note_service.folder_repo.get_by_id.return_value = None
+
+        payload = NoteUpdate(folder_id=uuid4())
+        with pytest.raises(AppException) as exc:
+            note_service.update(mock_db, note.id, current_user.id, payload, current_user.role)
+
+        assert exc.value.status_code == 404
+        note_service.repo.update.assert_not_called()
+        mock_db.commit.assert_not_called()
+
+    def test_update_keeping_same_folder_skips_folder_lookup(self, note_service, mock_db, current_user):
+        note = make_note(user_id=current_user.id)
+        note_service.repo.get_by_id.return_value = note
+        note_service.folder_repo.get_by_id.return_value = None  # would 404 if consulted
+
+        payload = NoteUpdate(title="New Title", folder_id=note.folder_id)
+        note_service.update(mock_db, note.id, current_user.id, payload, current_user.role)
+
+        note_service.repo.update.assert_called_once()
 
 
 class TestNoteServiceMove:

@@ -1,7 +1,42 @@
-.venv
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Virtual environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+**/env/
+
+# Local env / secrets
 .env
-.mypy_cache
-__pycache__
-_others
-*.pyc
-.DS_STORE
+.env.*
+!.env.example
+!*.env.example
+
+# Local caches / logs
+.cache/
+**/.cache/
+*.log
+logs/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

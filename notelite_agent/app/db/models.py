@@ -25,6 +25,9 @@ class DocumentRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     timestamp_fallback: Mapped[bool] = mapped_column(default=False)
+    # Note version this index state reflects; -1 = unknown (pre-tracking rows).
+    # Compared against notes.version by the reconciliation task to detect drift.
+    indexed_version: Mapped[int] = mapped_column(Integer, default=-1, server_default="-1")
 
 
 class ChunkDateRecord(Base):

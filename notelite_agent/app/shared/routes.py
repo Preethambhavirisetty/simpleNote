@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import secrets
 from fastapi import APIRouter, Depends, Header, HTTPException
 
-from app.core.config import AGENT_API_KEY
+from app.core.internal_auth import verify_internal_key
 from app.shared.api_models import PromptDefinition, PromptPreviewData, PromptPreviewRequest
 from app.shared.prompts.prompt_manager import PromptError, prompt_manager
 from app.shared.schema import ApiResponse
@@ -12,8 +11,7 @@ from app.shared.schema import ApiResponse
 def require_internal_key(
     x_internal_key: str | None = Header(default=None, alias="X-Internal-Key"),
 ) -> None:
-    if x_internal_key is None or not secrets.compare_digest(x_internal_key, AGENT_API_KEY):
-        raise HTTPException(status_code=401, detail="Invalid internal API key.")
+    verify_internal_key(x_internal_key)
 
 
 router = APIRouter(

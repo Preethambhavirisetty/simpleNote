@@ -8,6 +8,10 @@ from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+import anyio.to_thread
+
+from app.core.config import AGENT_API_KEY, SYNC_WORKER_LIMIT
+from app.core.internal_auth import internal_key_matches
 from app.services.ingestion.routes import router as ingestion_router
 from app.services.ingestion.actions.routes import router as actions_router
 from app.services.chat.routes import router as chat_router
@@ -27,6 +31,9 @@ log = logger
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Sync routes and sync streaming generators each hold one threadpool token;
+    # the anyio default (40) is the hard cap on concurrent chat streams.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = SYNC_WORKER_LIMIT
     init_llama_index_settings()
     QdrantVectorStore().validate_collection_dimensions()
     yield
@@ -79,11 +86,23 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 # ── Request logging middleware ─────────────────────────────────────────────────
 
+def _trusted_trace_id(request: Request) -> str:
+    """Reuse an inbound trace id only from authenticated internal callers.
+
+    The backend proxy authenticates with X-API-Key; anything else gets a fresh id
+    so a stray caller can't inject arbitrary or colliding ids into the logs.
+    """
+    inbound = request.headers.get("x-trace-id")
+    api_key = request.headers.get("x-api-key")
+    if inbound and internal_key_matches(api_key, expected_key=AGENT_API_KEY):
+        return inbound
+    return str(uuid.uuid4())
+
+
 @app.middleware("http")
 async def request_middleware(request: Request, call_next):
     clear_contextvars()
-    # Reuse an inbound trace id so a request keeps one id across services; else start one.
-    trace_id = request.headers.get("x-trace-id") or str(uuid.uuid4())
+    trace_id = _trusted_trace_id(request)
     bind_contextvars(trace_id=trace_id)
 
     start = time.monotonic()

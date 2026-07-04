@@ -64,7 +64,11 @@ class IngestionOrchestrator:
         document_build_end = time.perf_counter()
         events.extend(chunk_builder.events)
 
-        # Step 4: Replace and index chunk vectors before note-level summarization
+        # Step 4: Replace and index chunk vectors before note-level summarization.
+        # Re-check freshness right before writing: steps 1-3 take seconds of LLM
+        # work, long enough for a newer version's task to have completed.
+        if self._is_stale_upsert(payload):
+            return self._skipped_result(action, payload, stage="pre_chunk_write")
         self.vector_store.replace_index_chunks(doc_id, index_chunks)
         chunk_ingestion_end = time.perf_counter()
         events.extend(self.vector_store.events)
@@ -75,7 +79,12 @@ class IngestionOrchestrator:
         summary_end = time.perf_counter()
         events.extend(document_summary.events)
 
-        # Step 6: Build and index summary/question artifacts
+        # Step 6: Build and index summary/question artifacts. Re-check freshness
+        # again: summarization is the longest stage. If stale now, the chunks
+        # written in step 4 are already superseded — the newer version's own
+        # replace overwrites them — so stop before writing summary artifacts.
+        if self._is_stale_upsert(payload):
+            return self._skipped_result(action, payload, stage="pre_summary_write")
         summary_builder = SummaryBuilder(payload, doc_id, top_kw, top_ent)
         summary_artifacts = summary_builder.build(document_summary)
         events.extend(summary_builder.events)
@@ -166,18 +175,20 @@ class IngestionOrchestrator:
         logger.info("ingestion.deleted", note_id=result["note_id"])
         return result
 
-    def _skipped_result(self, action: str, payload: dict) -> dict:
+    def _skipped_result(self, action: str, payload: dict, stage: str = "pre_pipeline") -> dict:
         logger.info(
             "ingestion.skipped",
             action=action,
             note_id=payload.get("note_id"),
             reason="stale_version",
+            stage=stage,
         )
         return {
             "action": action,
             "status": "skipped",
             "note_id": payload.get("note_id"),
             "reason": "stale_version",
+            "stage": stage,
         }
 
     def _is_stale_upsert(self, payload: dict) -> bool:
@@ -217,7 +228,10 @@ class IngestionOrchestrator:
         missing = [f for f in required_fields if not payload.get(f)]
         if missing:
             raise ValueError(f"Missing required fields: {', '.join(missing)}")
-        return f"{payload['user_id']}-{payload['folder_id']}-{payload['note_id']}"
+        # Identity is user + note only. folder_id is mutable metadata (notes move
+        # between folders); including it in the id would orphan the previous
+        # folder's vectors on every move. See docs/doc-id-migration.md.
+        return f"{payload['user_id']}-{payload['note_id']}"
 
     @property
     def vector_store(self) -> QdrantVectorStore:

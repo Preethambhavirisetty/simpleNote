@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import ENABLE_DIRECT_INGEST
 from app.core.dependencies import get_postgres_db, get_qdrant_store, require_api_key
-from app.logger import logger
+from app.logger import get_trace_id, logger
 from app.services.ingestion.orchestrator import IngestionOrchestrator
 from app.services.ingestion.schema import (
     IngestionDeletedData,
@@ -56,7 +56,9 @@ def ingest_note(payload: IngestionRequest):
     Validates required fields before queuing so bad jobs never enter the queue.
     Poll GET /api/ingest/status/{job_id} for the result.
     """
-    task = ingest_in_background.delay(payload.model_dump(exclude_none=True))
+    task = ingest_in_background.delay(
+        {**payload.model_dump(exclude_none=True), "trace_id": get_trace_id()}
+    )
     return ApiResponse.ok({"job_id": task.id, "status": "queued"})
 
 
