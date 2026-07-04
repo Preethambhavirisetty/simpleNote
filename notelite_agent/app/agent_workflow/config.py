@@ -53,6 +53,9 @@ class AgentPolicy:
     reject_action: str = "replan"  # replan | abort
     destructive_tools: list[str] = field(default_factory=list)
     require_destructive_confirmation: bool = True
+    enable_fast_path: bool = True
+    enable_planner: bool = True
+    enable_reviewer: bool = True
     truncation: TruncationPolicy = field(default_factory=TruncationPolicy)
     model: str | None = None
     instructions: str = ""
@@ -102,6 +105,9 @@ def load_agent_config(path: str | Path) -> AgentConfig:
         require_destructive_confirmation=bool(
             policy_raw.get("require_destructive_confirmation", True)
         ),
+        enable_fast_path=bool(policy_raw.get("enable_fast_path", True)),
+        enable_planner=bool(policy_raw.get("enable_planner", True)),
+        enable_reviewer=bool(policy_raw.get("enable_reviewer", True)),
         truncation=TruncationPolicy(
             max_artifact_chars=int(trunc_raw.get("max_artifact_chars", 2500)),
             score_weights=dict(

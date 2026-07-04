@@ -44,11 +44,14 @@ class DefaultLlmProvider:
         return _with_transient_retries(lambda: llm_call_general(messages, **kwargs))
 
     def stream(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> Iterator[str]:
-        from app.shared.llm import stream_llm_general
+        from app.services.chat.llm_client import stream_llm
 
         kwargs: dict[str, Any] = {"max_tokens": max_tokens}
         if self.model:
             kwargs["model"] = self.model
-        for item in stream_llm_general(messages, **kwargs):
-            if item.get("type") == "content_delta":
+        for item in stream_llm(messages, **kwargs):
+            item_type = item.get("type")
+            if item_type == "content_delta":
                 yield item.get("content") or ""
+            elif item_type == "error":
+                raise RuntimeError(str(item.get("message") or "LLM stream failed"))

@@ -162,6 +162,8 @@ class AgentEngine:
         stream: Iterator[dict[str, Any]],
         holder: dict[str, Any],
         thread_id: str,
+        *,
+        emit_done: bool = True,
     ) -> Iterator[dict[str, Any]]:
         """Translate raw graph updates into host events while folding state."""
         for step in stream:
@@ -181,6 +183,8 @@ class AgentEngine:
 
                 for event in map_graph_update(update, holder["state"]):
                     if event.get("type") == "done":
+                        if not emit_done:
+                            continue
                         event["thread_id"] = thread_id
                     if self.callbacks.on_event:
                         self.callbacks.on_event(event)
@@ -210,7 +214,7 @@ class AgentEngine:
         )
 
     def _final_event(self, state: AgentState, thread_id: str) -> dict[str, Any] | None:
-        """Terminal event for runs the graph did not close out itself."""
+        """Build the single terminal event emitted by stream/resume_stream."""
         pending = state.get("pending_destructive")
         if state.get("phase") == "awaiting_approval" and pending:
             return {
@@ -223,17 +227,68 @@ class AgentEngine:
                 "pending_approval": dict(pending),
                 "thread_id": thread_id,
             }
-        if state.get("phase") != "done":
-            return {
-                "type": "done",
-                "answer": state.get("final_answer") or state.get("draft_answer") or "",
-                "review": state.get("review"),
-                "artifact_count": len(state.get("artifacts") or []),
-                "tool_call_count": len(state.get("tool_calls") or []),
-                "error": state.get("error"),
-                "thread_id": thread_id,
-            }
-        return None
+        return {
+            "type": "done",
+            "answer": state.get("final_answer") or state.get("draft_answer") or "",
+            "review": state.get("review"),
+            "artifact_count": len(state.get("artifacts") or []),
+            "tool_call_count": len(state.get("tool_calls") or []),
+            "error": state.get("error"),
+            "thread_id": thread_id,
+        }
+
+    def _terminal_answer_messages(self, state: AgentState) -> list[dict[str, str]]:
+        approved = str(state.get("final_answer") or state.get("draft_answer") or "").strip()
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "You are the final answer renderer for an agent workflow. "
+                    "Write only the final user-facing answer. Preserve the approved meaning, "
+                    "do not add unsupported claims, and do not mention the review process."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"User request:\n{state.get('user_query', '')}\n\n"
+                    f"Approved answer or best available draft:\n{approved}\n\n"
+                    "Return only the answer text."
+                ),
+            },
+        ]
+
+    def _stream_terminal_answer(self, state: AgentState, thread_id: str) -> Iterator[dict[str, Any]]:
+        if state.get("phase") != "done" or state.get("pending_destructive"):
+            return
+        existing = str(state.get("final_answer") or state.get("draft_answer") or "").strip()
+        if not existing:
+            return
+
+        parts: list[str] = []
+        try:
+            for token in self.llm.stream(self._terminal_answer_messages(state), max_tokens=2000):
+                if not token:
+                    continue
+                parts.append(token)
+                event = {"type": "delta", "content": token, "thread_id": thread_id}
+                if self.callbacks.on_event:
+                    self.callbacks.on_event(event)
+                yield event
+        except Exception as exc:  # noqa: BLE001
+            if not parts:
+                parts.append(existing)
+                event = {"type": "delta", "content": existing, "thread_id": thread_id}
+                if self.callbacks.on_event:
+                    self.callbacks.on_event(event)
+                yield event
+            debug = {"type": "debug", "message": f"Answer stream failed; used fallback text: {exc}"}
+            if self.callbacks.on_event:
+                self.callbacks.on_event(debug)
+            yield debug
+
+        if parts:
+            state["final_answer"] = "".join(parts)
 
     def _result_from_state(self, state: AgentState, thread_id: str) -> RunResult:
         pending = state.get("pending_destructive")
@@ -278,7 +333,7 @@ class AgentEngine:
             stream = self.graph.stream(
                 holder["state"], stream_mode="updates", config=self._thread_config(thread_id)
             )
-            for event in self._pump(stream, holder, thread_id):
+            for event in self._pump(stream, holder, thread_id, emit_done=False):
                 if event.get("type") == "pending_approval":
                     yielded_pending_approval = True
                 yield event
@@ -293,6 +348,9 @@ class AgentEngine:
                 self.callbacks.on_event(pending_event)
             yield pending_event
 
+        if pending_event is None:
+            yield from self._stream_terminal_answer(holder["state"], thread_id)
+
         final = self._final_event(holder["state"], thread_id)
         if final is not None:
             if self.callbacks.on_event:
@@ -306,7 +364,10 @@ class AgentEngine:
         if last_event and last_event.get("error"):
             return self._error_result(thread_id, str(last_event["error"]))
         state = dict(self.graph.get_state(self._thread_config(thread_id)).values or {})
-        return self._result_from_state(state, thread_id)
+        result = self._result_from_state(state, thread_id)
+        if last_event and last_event.get("type") == "done" and last_event.get("answer"):
+            result.answer = str(last_event["answer"])
+        return result
 
     def resume_stream(self, thread_id: str, *, approved: bool) -> Iterator[dict[str, Any]]:
         """Continue a run paused on a destructive-approval interrupt."""
@@ -333,11 +394,14 @@ class AgentEngine:
             stream = self.graph.stream(
                 Command(resume={"approved": approved}), stream_mode="updates", config=config
             )
-            yield from self._pump(stream, holder, thread_id)
+            yield from self._pump(stream, holder, thread_id, emit_done=False)
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
             return
+
+        if not holder["state"].get("pending_destructive"):
+            yield from self._stream_terminal_answer(holder["state"], thread_id)
 
         final = self._final_event(holder["state"], thread_id)
         if final is not None:

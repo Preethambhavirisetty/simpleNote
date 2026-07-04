@@ -154,9 +154,6 @@ def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str,
     if update.get("error") and merged.get("phase") == "reviewing":
         events.append({"type": "debug", "message": f"Error: {update['error']}"})
 
-    if update.get("draft_answer") and merged.get("phase") == "reviewing":
-        events.append({"type": "delta", "content": str(update["draft_answer"])[:500]})
-
     if merged.get("final_answer") and merged.get("phase") == "done":
         events.append(
             {
