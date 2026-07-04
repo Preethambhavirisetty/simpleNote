@@ -32,8 +32,9 @@ class LlmProvider(Protocol):
 
 
 class DefaultLlmProvider:
-    def __init__(self, *, model: str | None = None):
+    def __init__(self, *, model: str | None = None, timeout_seconds: float | None = None):
         self.model = model
+        self.timeout_seconds = timeout_seconds
 
     def complete(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> str:
         from app.shared.llm import llm_call_general
@@ -41,6 +42,8 @@ class DefaultLlmProvider:
         kwargs: dict[str, Any] = {"max_tokens": max_tokens}
         if self.model:
             kwargs["model"] = self.model
+        if self.timeout_seconds is not None:
+            kwargs["timeout"] = self.timeout_seconds
         return _with_transient_retries(lambda: llm_call_general(messages, **kwargs))
 
     def stream(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> Iterator[str]:
@@ -49,6 +52,8 @@ class DefaultLlmProvider:
         kwargs: dict[str, Any] = {"max_tokens": max_tokens}
         if self.model:
             kwargs["model"] = self.model
+        if self.timeout_seconds is not None:
+            kwargs["timeout"] = self.timeout_seconds
         for item in stream_llm(messages, **kwargs):
             item_type = item.get("type")
             if item_type == "content_delta":

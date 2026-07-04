@@ -12,6 +12,7 @@ from app.agent_workflow.context import (
     score_artifact,
     truncate_tool_result,
 )
+from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.parsing import parse_executor_action
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
@@ -161,7 +162,14 @@ def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: Llm
         "\n\nAll plan steps are complete. Write the final user-facing answer using the artifacts above.\n"
         'Return ONLY JSON: {"action":"draft_answer","answer":"..."}'
     )
-    raw = llm.complete(messages, max_tokens=2000)
+    try:
+        raw = run_with_deadline(
+            lambda: llm.complete(messages, max_tokens=2000),
+            timeout_seconds=config.policy.llm_timeout_seconds,
+            label="executor answer synthesis LLM call",
+        )
+    except DeadlineExceeded:
+        return _fallback_answer(state)
     action = parse_executor_action(raw)
     answer = str(action.get("answer") or raw).strip()
     return answer or _fallback_answer(state)
@@ -284,7 +292,11 @@ def _run_tool_and_record(
     error: str | None = None
     result: Any = None
     try:
-        result = tools.call_tool(tool_name, arguments)
+        result = run_with_deadline(
+            lambda: tools.call_tool(tool_name, arguments),
+            timeout_seconds=config.policy.tool_timeout_seconds,
+            label=f"tool call {tool_name}",
+        )
         if on_tool_call:
             on_tool_call(tool_name, arguments, result)
     except Exception as exc:  # noqa: BLE001
@@ -406,7 +418,25 @@ def executor_node(
         '{"action":"draft_answer","answer":"..."}'
     )
 
-    raw = llm.complete(messages, max_tokens=1200)
+    try:
+        raw = run_with_deadline(
+            lambda: llm.complete(messages, max_tokens=1200),
+            timeout_seconds=config.policy.llm_timeout_seconds,
+            label="executor LLM call",
+        )
+    except DeadlineExceeded as exc:
+        draft = state.get("draft_answer") or _fallback_answer(state)
+        phase = "reviewing" if config.policy.enable_reviewer else "done"
+        result = {
+            "phase": phase,
+            "draft_answer": draft,
+            "iteration": iteration,
+            "error": str(exc),
+            "events": [{"step": "executor.timeout", "error": str(exc)}],
+        }
+        if phase == "done":
+            result["final_answer"] = draft
+        return result
     action = parse_executor_action(raw)
     action_type = str(action.get("action") or "").lower()
 

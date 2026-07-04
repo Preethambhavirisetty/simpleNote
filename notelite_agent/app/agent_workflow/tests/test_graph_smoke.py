@@ -252,6 +252,68 @@ def test_executor_prunes_retained_artifacts_and_tool_calls():
     assert [record["name"] for record in updates["tool_calls"]] == ["old2", "search_documents"]
 
 
+class SlowLlm(LlmProvider):
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        import time
+
+        time.sleep(0.05)
+        return "too late"
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+class SlowTools(MockTools):
+    def call_tool(self, name: str, arguments: dict) -> dict:
+        import time
+
+        time.sleep(0.05)
+        return super().call_tool(name, arguments)
+
+
+def test_planner_deadline_returns_timeout_result():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    config.policy.llm_timeout_seconds = 0.01
+    engine = AgentEngine(config=config, llm=SlowLlm(), tools=MockTools(), callbacks=HostCallbacks())
+
+    result = engine.run(RunRequest(query="Find SLA mentions"))
+
+    assert result.error and "planner LLM call exceeded" in result.error
+    assert "timed out" in result.answer.lower()
+
+
+def test_tool_deadline_records_error_artifact():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.executor import _run_tool_and_record
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    config.policy.tool_timeout_seconds = 0.01
+    updates = {"events": []}
+
+    _run_tool_and_record(
+        state=_executor_state(),
+        config=config,
+        tools=SlowTools(),
+        tool_name="search_documents",
+        arguments={"query": "SLA"},
+        updates=updates,
+        iteration={},
+        step_index=0,
+        step_query="SLA",
+        on_tool_call=None,
+        on_artifact=None,
+    )
+
+    assert updates["tool_calls"][-1]["status"] == "error"
+    assert "tool call search_documents exceeded" in updates["tool_calls"][-1]["error"]
+
+
 def test_executor_validates_discovered_tool_schema_before_calling():
     from pathlib import Path
 

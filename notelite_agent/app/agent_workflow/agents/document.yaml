@@ -14,6 +14,8 @@ policy:
   max_executor_iterations: 15
   max_review_cycles: 2
   max_context_tokens: 14000
+  llm_timeout_seconds: 60
+  tool_timeout_seconds: 120
   max_retained_artifacts: 24
   max_retained_tool_calls: 40
   max_retained_events: 80

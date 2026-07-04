@@ -61,7 +61,14 @@ def build_graph(
             "executor": "executor",
         },
     )
-    graph.add_edge("planner", "executor")
+    graph.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {
+            "executor": "executor",
+            END: END,
+        },
+    )
 
     graph.add_conditional_edges(
         "executor",
@@ -89,6 +96,10 @@ def build_graph(
     )
 
     return graph.compile(checkpointer=checkpointer)
+
+
+def route_after_planner(state: AgentState) -> str:
+    return END if (state.get("phase") or "") == "done" else "executor"
 
 
 def route_after_start(state: AgentState) -> str:

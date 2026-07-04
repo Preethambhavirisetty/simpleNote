@@ -4,6 +4,7 @@ from typing import Any
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.context import ContextBuilder
+from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.parsing import parse_review_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
@@ -17,7 +18,21 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
     messages = builder.build(state, "reviewer")
     messages[-1]["content"] += "\n\nRespond using the reviewer markdown sections from your instructions."
 
-    raw = llm.complete(messages, max_tokens=1200)
+    try:
+        raw = run_with_deadline(
+            lambda: llm.complete(messages, max_tokens=1200),
+            timeout_seconds=config.policy.llm_timeout_seconds,
+            label="reviewer LLM call",
+        )
+    except DeadlineExceeded as exc:
+        return {
+            "phase": "done",
+            "final_answer": state.get("draft_answer") or "The request timed out during review.",
+            "review": {"verdict": "SKIPPED", "reason": "review_timeout"},
+            "iteration": iteration,
+            "error": str(exc),
+            "events": [{"step": "reviewer.timeout", "error": str(exc)}],
+        }
     review = parse_review_markdown(raw)
 
     updates: dict[str, Any] = {

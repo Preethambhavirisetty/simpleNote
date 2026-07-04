@@ -82,7 +82,10 @@ class AgentEngine:
         checkpointer: Any = None,
     ) -> "AgentEngine":
         config = load_agent_config(path)
-        llm = DefaultLlmProvider(model=config.policy.model)
+        llm = DefaultLlmProvider(
+            model=config.policy.model,
+            timeout_seconds=config.policy.llm_timeout_seconds,
+        )
         tools = create_tool_provider(config.mcp)
         return cls(
             config=config,
@@ -467,6 +470,7 @@ class AgentEngine:
 
         yield {"type": "status", "message": "Planning...", "thread_id": thread_id}
 
+        stream = None
         try:
             stream = self.graph.stream(
                 holder["state"], stream_mode="updates", config=self._thread_config(thread_id)
@@ -475,6 +479,12 @@ class AgentEngine:
                 if event.get("type") == "pending_approval":
                     yielded_pending_approval = True
                 yield event
+        except GeneratorExit:
+            if stream is not None and hasattr(stream, "close"):
+                stream.close()
+            if self.callbacks.on_event:
+                self.callbacks.on_event({"type": "debug", "message": "Run cancelled by client disconnect", "thread_id": thread_id})
+            raise
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
