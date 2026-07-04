@@ -19,6 +19,9 @@ policy:
     - delete_document
     - update_document
   require_destructive_confirmation: true
+  enable_fast_path: true
+  enable_planner: true
+  enable_reviewer: true
   truncation:
     max_artifact_chars: 3000
     score_weights:

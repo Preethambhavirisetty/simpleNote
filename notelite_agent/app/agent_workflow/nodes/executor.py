@@ -318,24 +318,32 @@ def executor_node(
     iteration["executor_turns"] = int(iteration.get("executor_turns") or 0) + 1
     if iteration["executor_turns"] > config.policy.max_executor_iterations:
         draft = state.get("draft_answer") or _synthesize_draft_answer(state, config=config, llm=llm)
-        return {
-            "phase": "reviewing",
+        phase = "reviewing" if config.policy.enable_reviewer else "done"
+        result = {
+            "phase": phase,
             "draft_answer": draft,
             "iteration": iteration,
             "events": [{"step": "executor.iteration_limit", "synthesized": True}],
         }
+        if phase == "done":
+            result["final_answer"] = draft
+        return result
 
     plan = state.get("plan") or {}
     steps = plan.get("steps") or []
     step_index = int(state.get("current_step_index") or 0)
     if step_index >= len(steps) and not state.get("draft_answer"):
         draft = _synthesize_draft_answer(state, config=config, llm=llm)
-        return {
-            "phase": "reviewing",
+        phase = "reviewing" if config.policy.enable_reviewer else "done"
+        result = {
+            "phase": phase,
             "draft_answer": draft,
             "iteration": iteration,
             "events": [{"step": "executor.draft_answer", "synthesized": True}],
         }
+        if phase == "done":
+            result["final_answer"] = draft
+        return result
 
     current_step = steps[step_index] if step_index < len(steps) else {}
     step_query = " ".join(
@@ -492,7 +500,12 @@ def executor_node(
 
     answer = str(action.get("answer") or raw).strip()
     updates["draft_answer"] = answer
-    updates["phase"] = "reviewing"
+    if config.policy.enable_reviewer:
+        updates["phase"] = "reviewing"
+    else:
+        updates["phase"] = "done"
+        updates["final_answer"] = answer
+        updates["review"] = {"verdict": "SKIPPED", "reason": "reviewer_disabled"}
     updates["events"].append({"step": "executor.draft_answer"})
     return updates
 

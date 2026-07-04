@@ -64,7 +64,62 @@ class MockLlm(LlmProvider):
         )
 
     def stream(self, messages, *, max_tokens: int = 1024):
-        yield self.complete(messages, max_tokens=max_tokens)
+        yield "Found "
+        yield "SLA in doc-1 page 2."
+
+
+class DirectLlm(LlmProvider):
+    def __init__(self):
+        self.complete_calls = 0
+        self.stream_calls = 0
+
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        self.complete_calls += 1
+        return "4"
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        self.stream_calls += 1
+        yield "4"
+
+
+def test_fast_path_answers_simple_query_without_tools_or_graph_loop():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    llm = DirectLlm()
+    tools = MockTools()
+    engine = AgentEngine(config=config, llm=llm, tools=tools, callbacks=HostCallbacks())
+
+    result = engine.run(RunRequest(query="What is 2+2?"))
+
+    assert result.answer == "4"
+    assert result.review.get("verdict") == "SKIPPED"
+    assert result.events[-1]["step"] == "router.fast_path"
+    assert llm.complete_calls == 1
+    assert tools.searches == []
+    assert tools.calls == []
+
+
+def test_fast_path_streams_direct_answer_without_graph_loop():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    llm = DirectLlm()
+    tools = MockTools()
+    engine = AgentEngine(config=config, llm=llm, tools=tools, callbacks=HostCallbacks())
+
+    events = list(engine.stream(RunRequest(query="2+2")))
+
+    assert [event.get("type") for event in events] == ["debug", "delta", "done"]
+    assert events[-1]["answer"] == "4"
+    assert llm.stream_calls == 1
+    assert llm.complete_calls == 0
+    assert tools.searches == []
+    assert tools.calls == []
 
 
 def test_graph_smoke_approve_path():
@@ -86,6 +141,23 @@ class BadArgsLlm(LlmProvider):
 
     def stream(self, messages, *, max_tokens: int = 1024):
         yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_graph_stream_emits_answer_deltas_before_done():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    engine = AgentEngine(config=config, llm=MockLlm(), tools=MockTools(), callbacks=HostCallbacks())
+    events = list(engine.stream(RunRequest(query="Find SLA mentions")))
+
+    done_index = next(i for i, event in enumerate(events) if event.get("type") == "done")
+    delta_events = [(i, event) for i, event in enumerate(events) if event.get("type") == "delta"]
+
+    assert delta_events
+    assert all(i < done_index for i, _event in delta_events)
+    assert "".join(event.get("content", "") for _i, event in delta_events) == events[done_index]["answer"]
 
 
 def test_executor_validates_discovered_tool_schema_before_calling():

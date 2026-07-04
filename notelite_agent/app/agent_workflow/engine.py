@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -17,6 +18,22 @@ from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.streaming import HostCallbacks, RunRequest, RunResult, map_graph_update
+
+
+_TOOL_INTENT_RE = re.compile(
+    r"\b(note|notes|document|documents|doc|docs|folder|folders|search|find|locate|summari[sz]e|"
+    r"list|retrieve|cite|citation|source|page|chunk|upload|delete|update|create|edit|workflow|"
+    r"database|record|file|files|mcp|tool)\b",
+    re.IGNORECASE,
+)
+_COMPLEX_INTENT_RE = re.compile(
+    r"\b(compare|analy[sz]e|investigate|research|plan|multi[- ]?step|all|every|across|audit|"
+    r"trace|debug|integrate|deploy|production|architecture)\b",
+    re.IGNORECASE,
+)
+_SIMPLE_MATH_RE = re.compile(r"^[\s\d+\-*/().,%=^xX]+$")
+_ARITHMETIC_EXPR_RE = re.compile(r"\d\s*[+\-*/xX]\s*\d")
+_GREETING_RE = re.compile(r"^(hi|hello|hey|thanks|thank you|ok|okay|yes|no)[!.\s]*$", re.IGNORECASE)
 
 
 def _merge_state(state: AgentState, update: dict[str, Any]) -> AgentState:
@@ -74,13 +91,120 @@ class AgentEngine:
             checkpointer=checkpointer,
         )
 
+    def _can_fast_path(self, request: RunRequest) -> tuple[bool, str]:
+        if not self.config.policy.enable_fast_path:
+            return False, "disabled"
+        query = request.query.strip()
+        if not query:
+            return False, "empty_query"
+        runtime = request.runtime_context or {}
+        if runtime.get("force_agent") or runtime.get("require_tools"):
+            return False, "forced_agent"
+        if request.history and len(query.split()) > 8:
+            return False, "conversation_context"
+        if len(query) > 180 or len(query.split()) > 24:
+            return False, "too_long"
+        if _TOOL_INTENT_RE.search(query) or _COMPLEX_INTENT_RE.search(query):
+            return False, "tool_or_complex_intent"
+        if _GREETING_RE.match(query) or _SIMPLE_MATH_RE.match(query):
+            return True, "simple_heuristic"
+        if _ARITHMETIC_EXPR_RE.search(query) and len(query.split()) <= 8:
+            return True, "simple_arithmetic"
+        if query.endswith("?") and len(query.split()) <= 10:
+            return True, "short_question"
+        return False, "not_simple"
+
+    def _direct_answer_messages(self, request: RunRequest) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = [
+            {
+                "role": "system",
+                "content": (
+                    "Answer the user's simple request directly and concisely. "
+                    "Do not claim to have searched notes, documents, tools, or external systems."
+                ),
+            }
+        ]
+        for item in request.history[-4:]:
+            role = str(item.get("role") or "user")
+            if role not in {"system", "user", "assistant"}:
+                role = "user"
+            messages.append({"role": role, "content": str(item.get("content") or "")[:1000]})
+        messages.append({"role": "user", "content": request.query.strip()})
+        return messages
+
+    def _fast_path_result(self, request: RunRequest, thread_id: str, reason: str) -> RunResult:
+        answer = self.llm.complete(self._direct_answer_messages(request), max_tokens=512).strip()
+        return RunResult(
+            answer=answer,
+            review={"verdict": "SKIPPED", "reason": reason},
+            artifacts=[],
+            tool_calls=[],
+            events=[{"step": "router.fast_path", "reason": reason}],
+            thread_id=thread_id,
+        )
+
+    def _emit_fast_path_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        if self.callbacks.on_event:
+            self.callbacks.on_event(event)
+        return event
+
+    def _stream_fast_path(self, request: RunRequest, thread_id: str, reason: str) -> Iterator[dict[str, Any]]:
+        yield self._emit_fast_path_event(
+            {
+                "type": "debug",
+                "message": f"Fast path selected: {reason}",
+                "thread_id": thread_id,
+            }
+        )
+        parts: list[str] = []
+        try:
+            for token in self.llm.stream(self._direct_answer_messages(request), max_tokens=512):
+                if not token:
+                    continue
+                parts.append(token)
+                yield self._emit_fast_path_event({"type": "delta", "content": token, "thread_id": thread_id})
+        except Exception as exc:  # noqa: BLE001
+            if not parts:
+                answer = self.llm.complete(self._direct_answer_messages(request), max_tokens=512).strip()
+                parts.append(answer)
+                yield self._emit_fast_path_event({"type": "delta", "content": answer, "thread_id": thread_id})
+            yield self._emit_fast_path_event(
+                {"type": "debug", "message": f"Fast-path stream fell back to complete: {exc}", "thread_id": thread_id}
+            )
+        yield self._emit_fast_path_event(
+            {
+                "type": "done",
+                "answer": "".join(parts),
+                "review": {"verdict": "SKIPPED", "reason": reason},
+                "artifact_count": 0,
+                "tool_call_count": 0,
+                "error": None,
+                "thread_id": thread_id,
+            }
+        )
+
     def _initial_state(self, request: RunRequest) -> AgentState:
+        plan = {}
+        phase = "planning"
+        if not self.config.policy.enable_planner:
+            plan = {
+                "goal": request.query.strip(),
+                "steps": [
+                    {
+                        "title": "Execute request",
+                        "action": request.query.strip(),
+                        "tool_hint": "auto",
+                    }
+                ],
+            }
+            phase = "executing"
+
         return AgentState(
             messages=list(request.history),
             user_query=request.query.strip(),
             session_id=request.session_id,
             runtime_context=dict(request.runtime_context),
-            plan={},
+            plan=plan,
             current_step_index=0,
             candidate_tools=[],
             artifacts=[],
@@ -90,7 +214,7 @@ class AgentEngine:
             review_feedback="",
             iteration={"executor_turns": 0, "review_cycles": 0, "tool_calls": 0},
             events=[],
-            phase="planning",
+            phase=phase,
             final_answer="",
             error=None,
             pending_destructive=None,
@@ -311,6 +435,9 @@ class AgentEngine:
 
     def run(self, request: RunRequest) -> RunResult:
         thread_id = self._new_thread_id(request.session_id)
+        fast_path, reason = self._can_fast_path(request)
+        if fast_path:
+            return self._fast_path_result(request, thread_id, reason)
         holder = {"state": self._initial_state(request)}
         try:
             stream = self.graph.stream(
@@ -324,6 +451,11 @@ class AgentEngine:
 
     def stream(self, request: RunRequest) -> Iterator[dict[str, Any]]:
         thread_id = self._new_thread_id(request.session_id)
+        fast_path, reason = self._can_fast_path(request)
+        if fast_path:
+            yield from self._stream_fast_path(request, thread_id, reason)
+            return
+
         holder = {"state": self._initial_state(request)}
         yielded_pending_approval = False
 

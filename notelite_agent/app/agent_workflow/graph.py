@@ -53,12 +53,19 @@ def build_graph(
     graph.add_node("approval", _approval)
     graph.add_node("reviewer", _reviewer)
 
-    graph.add_edge(START, "planner")
+    graph.add_conditional_edges(
+        START,
+        route_after_start,
+        {
+            "planner": "planner",
+            "executor": "executor",
+        },
+    )
     graph.add_edge("planner", "executor")
 
     graph.add_conditional_edges(
         "executor",
-        route_after_executor,
+        lambda state: route_after_executor(state, config=config),
         {
             "executor": "executor",
             "approval": "approval",
@@ -84,12 +91,18 @@ def build_graph(
     return graph.compile(checkpointer=checkpointer)
 
 
-def route_after_executor(state: AgentState) -> str:
+def route_after_start(state: AgentState) -> str:
+    return "executor" if (state.get("phase") or "") == "executing" else "planner"
+
+
+def route_after_executor(state: AgentState, *, config: AgentConfig) -> str:
     phase = state.get("phase") or ""
     if phase == "awaiting_approval":
         return "approval"
+    if phase == "reviewing" and not config.policy.enable_reviewer:
+        return END
     if state.get("error") and phase != "executing":
-        return "reviewer"
+        return "reviewer" if config.policy.enable_reviewer else END
     if phase == "reviewing":
         return "reviewer"
     if phase == "executing":
