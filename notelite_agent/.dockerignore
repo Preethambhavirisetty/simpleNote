@@ -1,0 +1,55 @@
+# Git / Docker metadata
+.git
+.gitignore
+Dockerfile
+.dockerignore
+
+# Local secrets - never bake into the image
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# Virtual environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+**/env/
+
+# Python cache / test artifacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Local caches / generated artifacts
+.cache/
+**/.cache/
+/db/
+dist/
+build/
+*.log
+logs/
+*.examples.json
+augumented_examples.txt
+low_confidence_queries.jsonl
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

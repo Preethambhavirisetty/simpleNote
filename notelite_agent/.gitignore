@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Virtual environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+**/env/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# Local caches / generated artifacts
+.cache/
+**/.cache/
+*.log
+logs/
+*.examples.json
+augumented_examples.txt
+low_confidence_queries.jsonl
+services/intent_service/model/
+services/intent_service/low_confidence_queries.jsonl
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

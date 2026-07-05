@@ -1,0 +1,169 @@
+import time
+import uuid
+from contextlib import asynccontextmanager
+
+from structlog.contextvars import bind_contextvars, clear_contextvars
+
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+import anyio.to_thread
+
+from app.core.config import AGENT_API_KEY, SYNC_WORKER_LIMIT
+from app.core.internal_auth import internal_key_matches
+from app.services.ingestion.routes import router as ingestion_router
+from app.services.ingestion.actions.routes import router as actions_router
+from app.services.chat.routes import router as chat_router
+from app.core.openapi import OPENAPI_TAGS, configure_openapi
+from app.core.settings import init_llama_index_settings
+from app.services.ingestion.storage.vector_store import QdrantVectorStore
+from app.shared.api_models import HealthData
+from app.shared.routes import router as shared_router
+from app.shared.schema import ApiResponse
+from app.logger import logger, setup_logging
+from app.metrics import REQUEST_COUNT, REQUEST_LATENCY, render_metrics
+
+
+setup_logging(service="agent")
+log = logger
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Sync routes and sync streaming generators each hold one threadpool token;
+    # the anyio default (40) is the hard cap on concurrent chat streams.
+    anyio.to_thread.current_default_thread_limiter().total_tokens = SYNC_WORKER_LIMIT
+    init_llama_index_settings()
+    QdrantVectorStore().validate_collection_dimensions()
+    yield
+
+
+app = FastAPI(
+    title="Notelite Agent API",
+    description="RAG ingestion, chat streaming, diagnostics, and prompt preview API.",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    openapi_tags=OPENAPI_TAGS,
+    swagger_ui_parameters={"displayRequestDuration": True, "filter": True, "persistAuthorization": True},
+    lifespan=lifespan,
+)
+configure_openapi(app)
+
+
+# ── Uniform error responses ────────────────────────────────────────────────────
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ApiResponse.fail(str(exc.detail)).model_dump(),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = "; ".join(
+        f"{' → '.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+        for err in exc.errors()
+    )
+    return JSONResponse(
+        status_code=422,
+        content=ApiResponse.fail(f"Validation error: {errors}").model_dump(),
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    log.error("unhandled_exception", path=request.url.path, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content=ApiResponse.fail("Internal server error").model_dump(),
+    )
+
+
+# ── Request logging middleware ─────────────────────────────────────────────────
+
+def _trusted_trace_id(request: Request) -> str:
+    """Reuse an inbound trace id only from authenticated internal callers.
+
+    The backend proxy authenticates with X-API-Key; anything else gets a fresh id
+    so a stray caller can't inject arbitrary or colliding ids into the logs.
+    """
+    inbound = request.headers.get("x-trace-id")
+    api_key = request.headers.get("x-api-key")
+    if inbound and internal_key_matches(api_key, expected_key=AGENT_API_KEY):
+        return inbound
+    return str(uuid.uuid4())
+
+
+@app.middleware("http")
+async def request_middleware(request: Request, call_next):
+    clear_contextvars()
+    trace_id = _trusted_trace_id(request)
+    bind_contextvars(trace_id=trace_id)
+
+    start = time.monotonic()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.monotonic() - start) * 1000, 2)
+        log.error(
+            "request_error",
+            method=request.method,
+            path=request.url.path,
+            duration_ms=duration_ms,
+            exc_info=True,
+        )
+        raise
+
+    duration_ms = round((time.monotonic() - start) * 1000, 2)
+
+    # Metrics: label by the matched route template (not the raw path) to bound cardinality.
+    route = request.scope.get("route")
+    path_label = getattr(route, "path", None) or "unmatched"
+    if request.url.path != "/metrics":
+        REQUEST_LATENCY.labels(request.method, path_label).observe((time.monotonic() - start))
+        REQUEST_COUNT.labels(request.method, path_label, str(response.status_code)).inc()
+
+    # Expose the correlation id so callers (and error reports) can be tied back to logs.
+    response.headers["X-Trace-Id"] = trace_id
+
+    log_kw = dict(
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+    )
+
+    if response.status_code >= 500:
+        log.error("request", **log_kw)
+    elif response.status_code >= 400:
+        log.warning("request", **log_kw)
+    else:
+        log.info("request", **log_kw)
+
+    return response
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/health", response_model=ApiResponse[HealthData], tags=["health"], summary="Check agent health")
+def health():
+    """Return a lightweight agent liveness response."""
+    return ApiResponse.ok({"status": "ok"})
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    """Prometheus scrape endpoint."""
+    payload, content_type = render_metrics()
+    return Response(content=payload, media_type=content_type)
+
+
+app.include_router(ingestion_router)
+app.include_router(actions_router)
+app.include_router(chat_router)
+app.include_router(shared_router)

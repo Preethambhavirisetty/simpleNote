@@ -1,0 +1,1 @@
+"""Notelite MCP application package."""

@@ -1,0 +1,230 @@
+# notelite v2 — full-stack compose
+#
+# Usage:
+#   podman-compose up -d               # start everything
+#   podman-compose logs -f backend     # tail logs for one service
+#   podman-compose down                # stop and remove containers
+#
+# Inference: run natively on the host (uses Metal, loads models in ~30s):
+#   cd notelite_inference/build && ./inference_api
+#
+# Frontend: run on the host (Vite HMR doesn't work well in containers):
+#   cd frontend && npm install && npm run dev
+#
+# NOTE: depends_on is intentionally omitted — podman-compose blocks forever
+# waiting for service_started/service_healthy conditions. Services use
+# restart: unless-stopped to recover if a dependency isn't ready yet.
+#
+# Secrets come from the root .env file (same directory as this file).
+
+x-redis-url: &redis-url "redis://:${REDIS_PASSWORD}@redis:6379/0"
+x-pg-url:    &pg-url    "postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@postgres:5432/notelite"
+
+networks:
+  notelite-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  qdrant-data:
+  agent-model-cache:
+  loki-data:
+  grafana-data:
+  prometheus-data:
+
+services:
+
+  # ── Frontend (React + nginx) ────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: notelite-frontend
+    restart: unless-stopped
+    volumes:
+      - ./certs/notelite.org/fullchain.pem:/etc/nginx/certs/fullchain.pem:ro
+      - ./certs/notelite.org/privkey.pem:/etc/nginx/certs/privkey.pem:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - notelite-net
+
+  # ── Infrastructure ───────────────────────────────────────────────────────────
+
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: notelite-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    expose:
+      - "6379"
+    networks:
+      - notelite-net
+
+  postgres:
+    image: docker.io/library/postgres:16
+    container_name: notelite-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: notelite
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - notelite-net
+
+  qdrant:
+    image: docker.io/qdrant/qdrant:latest
+    container_name: notelite-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    expose:
+      - "6333"
+    networks:
+      - notelite-net
+
+  # ── Observability ────────────────────────────────────────────────────────────
+
+  loki:
+    image: docker.io/grafana/loki:2.9.0
+    container_name: notelite-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./logging/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    expose:
+      - "3100"
+    networks:
+      - notelite-net
+
+  grafana:
+    image: docker.io/grafana/grafana:10.2.0
+    container_name: notelite-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./logging/grafana/provisioning:/etc/grafana/provisioning:ro
+    expose:
+      - "3000"
+    networks:
+      - notelite-net
+
+  prometheus:
+    image: docker.io/prom/prometheus:v2.54.1
+    container_name: notelite-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./logging/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    expose:
+      - "9090"
+    networks:
+      - notelite-net
+
+  # ── Backend (FastAPI) ────────────────────────────────────────────────────────
+
+  backend:
+    env_file:
+      - ./backend/.env
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: notelite-backend
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB_URL:        *pg-url
+      MESSAGE_BROKER_URL:     *redis-url
+      CELERY_RESULT_BACKEND:  *redis-url
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
+      AGENT_INTERNAL_URL:     http://agent:8000
+      # Auth cookies only over HTTPS — the containerized stack is served via nginx TLS.
+      # `environment:` overrides env_file, so a stale backend/.env cannot disable this.
+      COOKIE_SECURE:          "true"
+    volumes:
+      - ./feature_flags.json:/app/feature_flags.json:ro
+    expose:
+      - "8000"
+    networks:
+      - notelite-net
+
+  # ── Agent (FastAPI RAG service) ──────────────────────────────────────────────
+
+  agent:
+    env_file:
+      - ./notelite_agent/.env
+    build:
+      context: ./notelite_agent
+      dockerfile: Dockerfile
+    container_name: notelite-agent
+    restart: unless-stopped
+    environment:
+      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
+      HF_HOME:                /app/.cache/huggingface
+      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
+      QDRANT_URL:             http://qdrant:6333
+      BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
+      MESSAGE_BROKER_URL:     *redis-url
+      CELERY_RESULT_BACKEND:  *redis-url
+      POSTGRES_DB_URL:        *pg-url
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
+    volumes:
+      - ./notelite_agent/app:/app/app:ro
+      - agent-model-cache:/app/.cache
+      - ./feature_flags.json:/app/feature_flags.json:ro
+      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
+    expose:
+      - "8000"
+    networks:
+      - notelite-net
+
+  # Agent Celery worker — ingestion + conversation queues
+  agent-celery:
+    env_file:
+      - ./notelite_agent/.env
+    build:
+      context: ./notelite_agent
+      dockerfile: Dockerfile
+    container_name: notelite-agent-celery
+    restart: unless-stopped
+    # -B embeds celery beat (drives the periodic reconciliation task). Fine for a
+    # single worker container; use a dedicated beat process if this is scaled out.
+    command: ["python", "-m", "celery", "-A", "app.services.ingestion.workers.celery_app:celery_app", "worker",
+              "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h", "-B"]
+    environment:
+      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
+      HF_HOME:                /app/.cache/huggingface
+      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
+      QDRANT_URL:             http://qdrant:6333
+      BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
+      MESSAGE_BROKER_URL:     *redis-url
+      CELERY_RESULT_BACKEND:  *redis-url
+      POSTGRES_DB_URL:        *pg-url
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
+      # Migrations run only in the agent API container; the worker must not race it.
+      RUN_MIGRATIONS:         "false"
+    volumes:
+      - ./notelite_agent/app:/app/app:ro
+      - agent-model-cache:/app/.cache
+      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./feature_flags.json:/app/feature_flags.json:ro
+    networks:
+      - notelite-net

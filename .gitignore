@@ -1,12 +1,66 @@
-__pycache__
-.venv
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.coverage
+coverage/
+htmlcov/
+*.egg-info/
+
+# Virtual environments
+.venv/
+**/.venv/
+venv/
+**/venv/
+env/
+**/env/
+
+# Node / frontend
+node_modules/
+**/node_modules/
+dist/
+dist-ssr/
+build/
+
+# Local caches and generated data
+.cache/
+**/.cache/
+*.log
+logs/
+*.tmp
+*.temp
+*.backup
+_backup/
+
+# Secrets: never commit real values. Templates (*.env.example) stay tracked. See SECRETS.md.
 .env
-*.pyc
-_others
-# docs/
-decisions/
-.DS_STORE
-# notelite_inference - decoupled
-_backup
+.env.*
+!.env.example
+!*.env.example
+
+# TLS material and private keys
 certs/
+*.pem
+*.key
+*.crt
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Local/archive directories
+_others/
+decisions/
 v2_/

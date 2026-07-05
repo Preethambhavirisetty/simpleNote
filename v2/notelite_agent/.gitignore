@@ -1,5 +1,0 @@
-__pycache__/
-.venv/
-.env
-services/intent_service/model/
-services/intent_service/low_confidence_queries.jsonl
