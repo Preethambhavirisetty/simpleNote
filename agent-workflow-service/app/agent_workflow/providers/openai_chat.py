@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import httpx
 
 from app.agent_workflow.config import AgentConfig
-from app.agent_workflow.util.http import raise_for_workflow_status
+from app.agent_workflow.util.http import is_transient_http_error, raise_for_workflow_status
 from app.agent_workflow.util.retry import with_transient_retries
 
 
@@ -69,8 +70,24 @@ class OpenAiChatCompletionsProvider:
 
     def stream(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> Iterator[str]:
         body = self._request_body(messages, max_tokens=max_tokens, stream=True)
-        for chunk in with_transient_retries(lambda: list(self._stream_once(body))):
-            yield chunk
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            emitted = False
+            try:
+                for chunk in self._stream_once(body):
+                    emitted = True
+                    yield chunk
+                return
+            except Exception as exc:  # noqa: BLE001
+                # Only retry before the first chunk reaches the caller; a retry
+                # after that would duplicate already-yielded tokens.
+                if emitted or not is_transient_http_error(exc) or attempt == max_attempts - 1:
+                    raise
+                retry_after = getattr(exc, "retry_after", None)
+                if isinstance(retry_after, (int, float)) and retry_after >= 0:
+                    time.sleep(retry_after)
+                else:
+                    time.sleep(0.2 * (2**attempt))
 
     def usage_totals(self) -> dict[str, int]:
         with self._usage_lock:
@@ -110,6 +127,11 @@ class OpenAiChatCompletionsProvider:
             headers=self._headers(),
             json={k: v for k, v in body.items() if v is not None},
         ) as response:
+            if response.is_error:
+                # A streamed error body must be read before .text is accessible;
+                # without this the status check raises ResponseNotRead instead of
+                # a typed transient/permanent error and defeats the retry.
+                response.read()
             raise_for_workflow_status(response, service="LLM")
             for line in response.iter_lines():
                 if not line or not line.startswith("data:"):

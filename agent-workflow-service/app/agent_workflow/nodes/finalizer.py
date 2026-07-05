@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
+
+
+def _stream_writer() -> Callable[[Any], None] | None:
+    try:
+        from langgraph.config import get_stream_writer
+
+        return get_stream_writer()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
@@ -18,9 +27,23 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     if not config.policy.render_final_answer:
         return {"final_answer": existing}
 
+    writer = _stream_writer()
+    messages = _terminal_answer_messages(state, existing)
+
+    def _render() -> str:
+        if writer is None:
+            return llm.complete(messages, max_tokens=2000)
+        parts: list[str] = []
+        for token in llm.stream(messages, max_tokens=2000):
+            if not token:
+                continue
+            parts.append(token)
+            writer({"type": "delta", "content": token})
+        return "".join(parts)
+
     try:
         rendered = run_with_deadline(
-            lambda: llm.complete(_terminal_answer_messages(state, existing), max_tokens=2000),
+            _render,
             timeout_seconds=config.policy.llm_timeout_seconds,
             label="final answer render LLM call",
         ).strip()

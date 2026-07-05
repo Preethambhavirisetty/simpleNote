@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from app.services.agent_workflow.runtime import stream_sse
-from app.services.agent_workflow.schema import AgentWorkflowRunRequest
+from app.api.runtime import stream_sse
+from app.api.schema import AgentWorkflowRunRequest
 
 
 class _FakeEngine:
@@ -26,7 +26,7 @@ class _FakeEngine:
 
 
 def test_stream_sse_emits_meta_and_done_events(monkeypatch):
-    monkeypatch.setattr("app.services.agent_workflow.runtime.resolve_engine", lambda payload: _FakeEngine())
+    monkeypatch.setattr("app.api.runtime.resolve_engine", lambda payload: _FakeEngine())
     payload = AgentWorkflowRunRequest(query="test")
     frames = list(stream_sse(payload))
     joined = "".join(frames)

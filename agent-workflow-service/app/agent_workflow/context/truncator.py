@@ -40,10 +40,13 @@ def truncate_tool_result(
                     parts = [f"{k}={v}" for k, v in item.items() if v is not None][:4]
                     lines.append("- " + ", ".join(parts))
             if lines:
+                # The line summary is what the model sees; it is only truncated
+                # when rows were actually hidden, regardless of the JSON-payload
+                # heuristic above.
+                truncated = len(tool_result) > visible
                 summary = "\n".join(lines)
                 if len(tool_result) > visible:
                     summary += f"\n... and {len(tool_result) - visible} more"
-                    truncated = True
                 if len(summary) > policy.max_artifact_chars:
                     summary = _truncate_text(summary, policy.max_artifact_chars)
                     truncated = True

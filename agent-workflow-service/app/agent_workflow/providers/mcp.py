@@ -38,13 +38,16 @@ def create_tool_provider(mcp: McpConfig) -> ToolProvider:
 def _server_configs(mcp: McpConfig) -> list[McpServerConfig]:
     configs = [server for server in (mcp.servers or []) if server.url]
     if not configs:
-        url = (mcp.url or os.getenv("MCP_URL", "")).strip()
+        # Env resolution happens at config parse time (parse_agent_config maps
+        # MCP_URL/MCP_AUTH_TOKEN); an empty McpConfig here stays empty so tests
+        # and library callers are not surprised by ambient environment.
+        url = (mcp.url or "").strip()
         if url:
             configs = [
                 McpServerConfig(
                     name="default",
                     url=url,
-                    auth_token=mcp.auth_token or os.getenv("MCP_AUTH_TOKEN", ""),
+                    auth_token=mcp.auth_token,
                     timeout_seconds=mcp.timeout_seconds,
                     verify_ssl=mcp.verify_ssl,
                 )
@@ -125,7 +128,7 @@ class MultiMcpToolProvider:
             provider.close()
 
     def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
-        configs = [provider.config for provider in self.providers]
+        configs = [provider.config for provider in self.providers if hasattr(provider, "config")]
         indexed = _search_via_tool_index(configs, query, limit=limit)
         if indexed:
             return indexed

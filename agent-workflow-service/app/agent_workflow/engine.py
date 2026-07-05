@@ -67,7 +67,15 @@ class AgentEngine:
 
     def __post_init__(self) -> None:
         signature = self.config.signature()
-        cache_signature = signature if self.checkpointer is None else f"{signature}:checkpointer:{id(self.checkpointer)}"
+        # The compiled graph closes over the llm/tools instances, so provider
+        # identity must be part of the key: two engines with the same config but
+        # different injected providers must not share a graph. The cached graph
+        # keeps its providers alive, so these ids cannot be recycled while the
+        # entry exists. (from_config/from_dict reuse cached providers per
+        # signature, so the compile-once behavior for API traffic is unchanged.)
+        cache_signature = f"{signature}:llm:{id(self.llm)}:tools:{id(self.tools)}"
+        if self.checkpointer is not None:
+            cache_signature = f"{cache_signature}:checkpointer:{id(self.checkpointer)}"
 
         def _build_cached() -> tuple[Any, Any]:
             checkpointer = self.checkpointer or MemorySaver()
@@ -399,6 +407,19 @@ class AgentEngine:
     ) -> Iterator[dict[str, Any]]:
         """Translate raw graph updates into host events while folding state."""
         for step in stream:
+            # With stream_mode=["updates", "custom"] each item is (mode, payload).
+            if isinstance(step, tuple) and len(step) == 2:
+                mode, payload = step
+                if mode == "custom":
+                    if isinstance(payload, dict) and payload.get("type") == "delta":
+                        event = {**payload, "thread_id": thread_id}
+                        if self.callbacks.on_event:
+                            self.callbacks.on_event(event)
+                        yield event
+                    continue
+                step = payload
+            if not isinstance(step, dict):
+                continue
             for node_name, update in step.items():
                 if node_name == "__interrupt__":
                     yield from self._pending_events_from_interrupt(update, thread_id)
@@ -473,57 +494,6 @@ class AgentEngine:
             "thread_id": thread_id,
         }
 
-    def _terminal_answer_messages(self, state: AgentState) -> list[dict[str, str]]:
-        approved = str(state.get("final_answer") or state.get("draft_answer") or "").strip()
-        return [
-            {
-                "role": "system",
-                "content": (
-                    "You are the final answer renderer for an agent workflow. "
-                    "Write only the final user-facing answer. Preserve the approved meaning, "
-                    "do not add unsupported claims, and do not mention the review process."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"User request:\n{state.get('user_query', '')}\n\n"
-                    f"Approved answer or best available draft:\n{approved}\n\n"
-                    "Return only the answer text."
-                ),
-            },
-        ]
-
-    def _stream_terminal_answer(self, state: AgentState, thread_id: str) -> Iterator[dict[str, Any]]:
-        if state.get("phase") != "done" or state.get("pending_destructive"):
-            return
-        existing = str(state.get("final_answer") or state.get("draft_answer") or "").strip()
-        if not existing:
-            return
-
-        parts: list[str] = []
-        try:
-            for token in self.llm.stream(self._terminal_answer_messages(state), max_tokens=2000):
-                if not token:
-                    continue
-                parts.append(token)
-                event = {"type": "delta", "content": token, "thread_id": thread_id}
-                if self.callbacks.on_event:
-                    self.callbacks.on_event(event)
-                yield event
-        except Exception as exc:  # noqa: BLE001
-            if not parts:
-                parts.append(existing)
-                event = {"type": "delta", "content": existing, "thread_id": thread_id}
-                if self.callbacks.on_event:
-                    self.callbacks.on_event(event)
-                yield event
-            debug = {"type": "debug", "message": f"Answer stream failed; used fallback text: {exc}"}
-            if self.callbacks.on_event:
-                self.callbacks.on_event(debug)
-            yield debug
-
-
     def _cleanup_thread_if_terminal(self, state: AgentState, thread_id: str) -> None:
         if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
             return
@@ -573,7 +543,8 @@ class AgentEngine:
         thread_id = self._new_thread_id(request.session_id)
         fast_path, reason = self._can_fast_path(request)
         if fast_path:
-            return self._fast_path_result(request, thread_id, reason)
+            usage_start = self._llm_usage_snapshot()
+            return self._attach_usage_event(self._fast_path_result(request, thread_id, reason), usage_start)
         holder = {"state": self._initial_state(request)}
         usage_start = self._llm_usage_snapshot()
         try:
@@ -603,27 +574,32 @@ class AgentEngine:
         holder = {"state": self._initial_state(request)}
         usage_start = self._llm_usage_snapshot()
         yielded_pending_approval = False
+        streamed_answer = False
 
         yield {"type": "status", "message": "Planning...", "thread_id": thread_id}
 
         stream = None
         try:
             stream = self.graph.stream(
-                holder["state"], stream_mode="updates", config=self._thread_config(thread_id)
+                holder["state"], stream_mode=["updates", "custom"], config=self._thread_config(thread_id)
             )
             for event in self._pump(stream, holder, thread_id, emit_done=False):
                 if event.get("type") == "pending_approval":
                     yielded_pending_approval = True
+                if event.get("type") == "delta":
+                    streamed_answer = True
                 yield event
         except GeneratorExit:
             if stream is not None and hasattr(stream, "close"):
                 stream.close()
             if self.callbacks.on_event:
                 self.callbacks.on_event({"type": "debug", "message": "Run cancelled by client disconnect", "thread_id": thread_id})
+            self._cleanup_thread_if_terminal(holder["state"], thread_id)
             raise
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
+            self._cleanup_thread_if_terminal(holder["state"], thread_id)
             return
 
         pending_event = self._pending_approval_event(holder["state"], thread_id)
@@ -632,7 +608,7 @@ class AgentEngine:
                 self.callbacks.on_event(pending_event)
             yield pending_event
 
-        if pending_event is None:
+        if pending_event is None and not streamed_answer:
             answer = str(holder["state"].get("final_answer") or holder["state"].get("draft_answer") or "")
             if answer:
                 event = {"type": "delta", "content": answer, "thread_id": thread_id}
@@ -685,17 +661,23 @@ class AgentEngine:
 
         holder = {"state": state}
         usage_start = self._llm_usage_snapshot()
+        streamed_answer = False
         try:
             stream = self.graph.stream(
-                Command(resume={"approved": approved}), stream_mode="updates", config=config
+                Command(resume={"approved": approved}), stream_mode=["updates", "custom"], config=config
             )
-            yield from self._pump(stream, holder, thread_id, emit_done=False)
+            for event in self._pump(stream, holder, thread_id, emit_done=False):
+                if event.get("type") == "delta":
+                    streamed_answer = True
+                yield event
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
+            if cleanup_terminal:
+                self._cleanup_thread_if_terminal(holder["state"], thread_id)
             return
 
-        if not holder["state"].get("pending_destructive"):
+        if not holder["state"].get("pending_destructive") and not streamed_answer:
             answer = str(holder["state"].get("final_answer") or holder["state"].get("draft_answer") or "")
             if answer:
                 event = {"type": "delta", "content": answer, "thread_id": thread_id}
