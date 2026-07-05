@@ -1,23 +1,36 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.agent_workflow.deadlines import shutdown_deadline_executor
 from app.api.api_response import ApiResponse
+from app.api.checkpointer import close_runtime_checkpointer
 from app.api.config import SERVICE_PORT
 from app.api.routes import router as agent_workflow_router
 
 
 log = logging.getLogger(__name__)
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:
+        yield
+    finally:
+        close_runtime_checkpointer()
+        shutdown_deadline_executor()
+
+
 app = FastAPI(
     title="Agent Workflow Service",
     version="1.0.0",
     description="Standalone HTTP runtime for planner/executor/reviewer agent workflows.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(

@@ -18,5 +18,7 @@ def with_transient_retries(operation: Callable[[], T], *, max_attempts: int = 3,
             last_exc = exc
             if not is_transient_http_error(exc) or attempt == max_attempts - 1:
                 raise
-            time.sleep(base_sleep_seconds * (2**attempt))
+            retry_after = getattr(exc, "retry_after", None)
+            sleep_seconds = retry_after if isinstance(retry_after, (int, float)) and retry_after >= 0 else base_sleep_seconds * (2**attempt)
+            time.sleep(sleep_seconds)
     raise RuntimeError("Operation failed after retries") from last_exc

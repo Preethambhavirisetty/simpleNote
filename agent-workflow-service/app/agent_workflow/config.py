@@ -117,6 +117,8 @@ class AgentPolicy:
     destructive_tools: list[str] = field(default_factory=list)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True
+    render_final_answer: bool = True
+    enforce_grounding: bool = False
     enable_planner: bool = True
     enable_reviewer: bool = True
     truncation: TruncationPolicy = field(default_factory=TruncationPolicy)
@@ -239,6 +241,8 @@ class AgentConfig:
                 "destructive_tools": list(policy.destructive_tools),
                 "require_destructive_confirmation": policy.require_destructive_confirmation,
                 "enable_fast_path": policy.enable_fast_path,
+                "render_final_answer": policy.render_final_answer,
+                "enforce_grounding": policy.enforce_grounding,
                 "enable_planner": policy.enable_planner,
                 "enable_reviewer": policy.enable_reviewer,
                 "truncation": {
@@ -269,6 +273,12 @@ class AgentConfig:
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
+
+
+def _transport_timeout(deadline_seconds: float, *, margin_seconds: float = 1.0) -> float:
+    if deadline_seconds <= margin_seconds:
+        return max(0.1, deadline_seconds * 0.8)
+    return max(0.1, deadline_seconds - margin_seconds)
 
 def _default_score_weights() -> dict[str, float]:
     return {
@@ -305,6 +315,8 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         destructive_tools=list(policy_raw.destructive_tools or []),
         require_destructive_confirmation=_as_bool(policy_raw.require_destructive_confirmation, True),
         enable_fast_path=_as_bool(policy_raw.enable_fast_path, True),
+        render_final_answer=_as_bool(policy_raw.render_final_answer, True),
+        enforce_grounding=_as_bool(policy_raw.enforce_grounding, False),
         enable_planner=planner_enabled,
         enable_reviewer=reviewer_enabled,
         truncation=TruncationPolicy(
@@ -336,6 +348,8 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
     )
 
     llm_raw = model.llm
+    tool_transport_timeout = _transport_timeout(policy.tool_timeout_seconds)
+
     llm = LlmConfig(
         base_url=str(llm_raw.base_url).strip(),
         api_key=str(llm_raw.api_key).strip(),
@@ -354,7 +368,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
             name=str(entry.name).strip() or f"server{idx + 1}",
             url=str(entry.url or "").strip(),
             auth_token=str(entry.auth_token or "").strip(),
-            timeout_seconds=_as_float(entry.timeout_seconds, _as_float(mcp_raw.timeout_seconds, 120.0)),
+            timeout_seconds=min(_as_float(entry.timeout_seconds, _as_float(mcp_raw.timeout_seconds, tool_transport_timeout)), tool_transport_timeout),
             verify_ssl=_as_bool(entry.verify_ssl, _as_bool(mcp_raw.verify_ssl, True)),
             proxy_url=str(getattr(entry, "proxy_url", "") or "").strip(),
             tool_discovery=ToolDiscoveryConfig(
@@ -371,7 +385,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
     mcp = McpConfig(
         url=str(mcp_raw.url or os.getenv("MCP_URL", "")).strip(),
         auth_token=str(mcp_raw.auth_token or os.getenv("MCP_AUTH_TOKEN", "")).strip(),
-        timeout_seconds=_as_float(mcp_raw.timeout_seconds, 120.0),
+        timeout_seconds=min(_as_float(mcp_raw.timeout_seconds, tool_transport_timeout), tool_transport_timeout),
         verify_ssl=_as_bool(mcp_raw.verify_ssl, True),
         servers=servers,
     )
@@ -453,6 +467,8 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "destructive_tools": list(base.policy.destructive_tools),
             "require_destructive_confirmation": base.policy.require_destructive_confirmation,
             "enable_fast_path": base.policy.enable_fast_path,
+            "render_final_answer": base.policy.render_final_answer,
+            "enforce_grounding": base.policy.enforce_grounding,
             "enable_planner": base.policy.enable_planner,
             "enable_reviewer": base.policy.enable_reviewer,
             "truncation": {

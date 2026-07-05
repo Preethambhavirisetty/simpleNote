@@ -92,6 +92,7 @@ def resume_agent_workflow(payload: AgentWorkflowResumeRequest):
         AgentWorkflowRunRequest(
             query="resume",
             session_id=payload.thread_id,
+            config_name=payload.config_name,
             config_path=payload.config_path,
             config=payload.config,
             runtime_overrides=payload.runtime_overrides,

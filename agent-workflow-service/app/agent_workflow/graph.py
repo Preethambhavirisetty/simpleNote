@@ -5,7 +5,7 @@ from typing import Any, Callable
 from langgraph.graph import END, START, StateGraph
 
 from app.agent_workflow.config import AgentConfig
-from app.agent_workflow.nodes import approval_node, executor_node, planner_node, reviewer_node
+from app.agent_workflow.nodes import approval_node, executor_node, finalizer_node, planner_node, reviewer_node
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.state import AgentState, Artifact
@@ -47,11 +47,15 @@ def build_graph(
     def _reviewer(state: AgentState) -> dict[str, Any]:
         return reviewer_node(state, config=config, llm=llm)
 
+    def _finalizer(state: AgentState) -> dict[str, Any]:
+        return finalizer_node(state, config=config, llm=llm)
+
     graph = StateGraph(AgentState)
     graph.add_node("planner", _planner)
     graph.add_node("executor", _executor)
     graph.add_node("approval", _approval)
     graph.add_node("reviewer", _reviewer)
+    graph.add_node("finalizer", _finalizer)
 
     graph.add_conditional_edges(
         START,
@@ -66,6 +70,7 @@ def build_graph(
         route_after_planner,
         {
             "executor": "executor",
+            "finalizer": "finalizer",
             END: END,
         },
     )
@@ -77,6 +82,7 @@ def build_graph(
             "executor": "executor",
             "approval": "approval",
             "reviewer": "reviewer",
+            "finalizer": "finalizer",
             END: END,
         },
     )
@@ -91,15 +97,18 @@ def build_graph(
         {
             "executor": "executor",
             "planner": "planner",
+            "finalizer": "finalizer",
             END: END,
         },
     )
+
+    graph.add_edge("finalizer", END)
 
     return graph.compile(checkpointer=checkpointer)
 
 
 def route_after_planner(state: AgentState) -> str:
-    return END if (state.get("phase") or "") == "done" else "executor"
+    return "finalizer" if (state.get("phase") or "") == "done" else "executor"
 
 
 def route_after_start(state: AgentState) -> str:
@@ -112,13 +121,15 @@ def route_after_executor(state: AgentState, *, config: AgentConfig) -> str:
     if phase == "awaiting_approval":
         return "approval"
     if phase == "reviewing" and not reviewer_enabled:
-        return END
+        return "finalizer"
     if state.get("error") and phase != "executing":
-        return "reviewer" if reviewer_enabled else END
+        return "reviewer" if reviewer_enabled else "finalizer"
     if phase == "reviewing":
         return "reviewer"
     if phase == "executing":
         return "executor"
+    if phase == "done":
+        return "finalizer"
     return END
 
 
@@ -131,4 +142,4 @@ def route_after_reviewer(state: AgentState) -> str:
         return "planner"
     if phase == "executing" and verdict == "REVISE":
         return "executor"
-    return END
+    return "finalizer"

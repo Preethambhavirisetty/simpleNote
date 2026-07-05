@@ -93,6 +93,8 @@ class AgentPolicyModel(BaseModel):
     destructive_tools: list[str] = Field(default_factory=list, max_length=256)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True
+    render_final_answer: bool = True
+    enforce_grounding: bool = False
     enable_planner: bool = True
     enable_reviewer: bool = True
     truncation: TruncationPolicyModel = Field(default_factory=TruncationPolicyModel)

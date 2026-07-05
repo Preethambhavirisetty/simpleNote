@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from app.agent_workflow.config import AgentConfig
+from app.agent_workflow.util.http import raise_for_workflow_status
 from app.agent_workflow.util.retry import with_transient_retries
 
 
@@ -33,6 +35,9 @@ class OpenAiChatCompletionsProvider:
     top_k: int = 40
     seed: int = 0xFFFFFFFF
     default_max_tokens: int = 1024
+    _client: httpx.Client | None = field(default=None, init=False, repr=False)
+    _usage_totals: dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, init=False, repr=False)
+    _usage_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @classmethod
     def from_agent_config(cls, config: AgentConfig) -> "OpenAiChatCompletionsProvider":
@@ -48,7 +53,7 @@ class OpenAiChatCompletionsProvider:
             model=normalize_inference_model(model),
             api_key=llm.api_key,
             send_auth_header=llm.send_auth_header,
-            timeout_seconds=config.policy.llm_timeout_seconds,
+            timeout_seconds=max(0.1, config.policy.llm_timeout_seconds - 1.0),
             temperature=llm.temperature,
             top_p=llm.top_p,
             top_k=llm.top_k,
@@ -59,31 +64,22 @@ class OpenAiChatCompletionsProvider:
     def complete(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> str:
         body = self._request_body(messages, max_tokens=max_tokens, stream=False)
         data = with_transient_retries(lambda: self._post_json(body))
+        self._record_usage(data.get("usage"))
         return self._extract_message_content(data)
 
     def stream(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> Iterator[str]:
         body = self._request_body(messages, max_tokens=max_tokens, stream=True)
-        with httpx.Client(timeout=self.timeout_seconds) as client:
-            with client.stream("POST", self._chat_completions_url(), headers=self._headers(), json=body) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    raw = line.removeprefix("data:").strip()
-                    if raw == "[DONE]":
-                        break
-                    data = json.loads(raw)
-                    if "error" in data:
-                        err = data["error"]
-                        message = err if isinstance(err, str) else str(err.get("message", err))
-                        raise RuntimeError(message)
-                    choices = data.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
-                    if content:
-                        yield str(content)
+        for chunk in with_transient_retries(lambda: list(self._stream_once(body))):
+            yield chunk
+
+    def usage_totals(self) -> dict[str, int]:
+        with self._usage_lock:
+            return dict(self._usage_totals)
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
 
     def _request_body(self, messages: Sequence[dict[str, Any]], *, max_tokens: int, stream: bool) -> dict[str, Any]:
         return {
@@ -99,28 +95,55 @@ class OpenAiChatCompletionsProvider:
         }
 
     def _post_json(self, body: dict[str, Any]) -> dict[str, Any]:
-        response = httpx.post(
+        response = self._http_client().post(
             self._chat_completions_url(),
             headers=self._headers(),
             json={k: v for k, v in body.items() if v is not None},
-            timeout=self.timeout_seconds,
         )
-        if response.is_error:
-            detail = response.text.strip()
-            try:
-                payload = response.json()
-                if isinstance(payload, dict):
-                    err = payload.get("error")
-                    if isinstance(err, str) and err:
-                        detail = err
-                    elif isinstance(err, dict) and err.get("message"):
-                        detail = str(err["message"])
-            except Exception:  # noqa: BLE001
-                pass
-            raise RuntimeError(
-                f"LLM request failed ({response.status_code}): {detail or response.reason_phrase}"
-            ) from None
+        raise_for_workflow_status(response, service="LLM")
         return response.json()
+
+    def _stream_once(self, body: dict[str, Any]) -> Iterator[str]:
+        with self._http_client().stream(
+            "POST",
+            self._chat_completions_url(),
+            headers=self._headers(),
+            json={k: v for k, v in body.items() if v is not None},
+        ) as response:
+            raise_for_workflow_status(response, service="LLM")
+            for line in response.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                raw = line.removeprefix("data:").strip()
+                if raw == "[DONE]":
+                    break
+                data = json.loads(raw)
+                self._record_usage(data.get("usage"))
+                if "error" in data:
+                    err = data["error"]
+                    message = err if isinstance(err, str) else str(err.get("message", err))
+                    raise RuntimeError(message)
+                choices = data.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield str(content)
+
+    def _http_client(self) -> httpx.Client:
+        if self._client is None:
+            self._client = httpx.Client(timeout=self.timeout_seconds)
+        return self._client
+
+    def _record_usage(self, usage: Any) -> None:
+        if not isinstance(usage, dict):
+            return
+        with self._usage_lock:
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                value = usage.get(key)
+                if isinstance(value, int):
+                    self._usage_totals[key] = self._usage_totals.get(key, 0) + value
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}

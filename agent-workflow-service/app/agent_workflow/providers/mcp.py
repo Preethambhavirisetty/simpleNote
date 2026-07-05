@@ -15,7 +15,7 @@ import httpx
 from app.agent_workflow.config import McpConfig, McpServerConfig, ToolDiscoveryConfig
 from app.agent_workflow.providers.tool_index import HttpToolIndexProvider
 from app.agent_workflow.providers.tools import ToolCandidate, ToolProvider
-from app.agent_workflow.util.http import is_transient_http_error
+from app.agent_workflow.util.http import is_transient_http_error, raise_for_workflow_status
 
 log = logging.getLogger(__name__)
 
@@ -322,12 +322,16 @@ class RemoteMcpToolProvider:
         for attempt in range(3):
             try:
                 response = self._client.post(self.config.url, headers=headers, json=payload)
-                response.raise_for_status()
+                raise_for_workflow_status(response, service="MCP")
                 return _parse_jsonrpc_response(response.text)
-            except httpx.HTTPError as exc:
+            except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if not is_transient_http_error(exc) or attempt == 2:
                     raise
+                retry_after = getattr(exc, "retry_after", None)
+                if isinstance(retry_after, (int, float)) and retry_after >= 0:
+                    time.sleep(retry_after)
+                    continue
                 time.sleep(0.2 * (2 ** attempt))
         raise RuntimeError("MCP request failed") from last_exc
 

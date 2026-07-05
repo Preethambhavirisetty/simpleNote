@@ -64,11 +64,26 @@ class ContextBuilder:
         chosen: list[str] = []
         for _priority, text in ordered:
             tokens = count_tokens(text)
-            if used + tokens > max_tokens:
+            if used + tokens <= max_tokens:
+                chosen.append(text)
+                used += tokens
                 continue
-            chosen.append(text)
-            used += tokens
+            remaining = max_tokens - used
+            if text.startswith("Artifacts:\n") and remaining >= 200:
+                trimmed = self._trim_section_to_token_budget(text, remaining)
+                if trimmed:
+                    chosen.append(trimmed)
+                    used += count_tokens(trimmed)
         return "\n\n---\n\n".join(chosen)
+
+    @staticmethod
+    def _trim_section_to_token_budget(text: str, token_budget: int) -> str:
+        if token_budget <= 0:
+            return ""
+        max_chars = max(200, token_budget * 4)
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars].rsplit("\n- ", 1)[0].rstrip() + "\n- [truncated] additional artifacts omitted due to context budget"
 
     def _format_plan(self, plan: dict[str, Any], step_index: int, role: Role) -> str:
         lines = [f"Goal: {plan.get('goal', '')}"]
