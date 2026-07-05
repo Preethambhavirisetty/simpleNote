@@ -1,0 +1,19 @@
+name: agent-workflow-service
+
+services:
+  agent-workflow:
+    image: localhost/agent-workflow-service:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-workflow-service
+    restart: unless-stopped
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    environment:
+      LLM_API_BASE_GENERAL: http://host.containers.internal:8001/v1
+      MCP_URL: http://host.containers.internal:8970/mcp
+    ports:
+      - "5453:5453"
