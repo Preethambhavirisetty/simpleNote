@@ -12,23 +12,21 @@ from app.schema.conversation import ChatStreamRequest
 router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(require_feature("chat"))])
 
 
-@router.post("/stream", summary="Stream an authenticated RAG chat response")
-async def stream_chat(
-    payload: ChatStreamRequest,
-    current_user=Depends(get_current_user),
-) -> StreamingResponse:
-    """Authenticate the browser request and stream the trusted request through the agent."""
+def _agent_payload(payload: ChatStreamRequest, current_user) -> dict:
     role_values = {getattr(role, "value", str(role)).lower() for role in current_user.role}
     agent_payload = payload.model_dump(mode="json", exclude_none=True)
     agent_payload.update({
         "user_id": str(current_user.id),
         "role": "admin" if role_values.intersection({"admin", "admin_user"}) else "user",
     })
+    return agent_payload
 
+
+async def _proxy_agent_stream(agent_payload: dict) -> StreamingResponse:
     headers = {"X-API-Key": AGENT_API_KEY}
     trace_id = get_trace_id()
     if trace_id:
-        headers["X-Trace-Id"] = trace_id  # propagate the correlation id to the agent
+        headers["X-Trace-Id"] = trace_id
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(None, connect=5.0))
     try:
@@ -65,3 +63,25 @@ async def stream_chat(
         media_type=response.headers.get("content-type", "text/event-stream"),
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/stream", summary="Stream an authenticated RAG chat response")
+async def stream_chat(
+    payload: ChatStreamRequest,
+    current_user=Depends(get_current_user),
+) -> StreamingResponse:
+    """Authenticate the browser request and stream the trusted request through the agent."""
+    return await _proxy_agent_stream(_agent_payload(payload, current_user))
+
+
+@router.post(
+    "/agent-stream",
+    summary="Stream an authenticated agent-workflow chat response",
+    dependencies=[Depends(require_feature("chat.agent_workflow"))],
+)
+async def stream_agent_chat(
+    payload: ChatStreamRequest,
+    current_user=Depends(get_current_user),
+) -> StreamingResponse:
+    """Feature-flagged route for agent-workflow rollout through the Notelite agent."""
+    return await _proxy_agent_stream(_agent_payload(payload, current_user))

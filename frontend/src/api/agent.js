@@ -2,12 +2,12 @@
  * SSE streaming through the cookie-authenticated backend proxy.
  * Events: meta, delta, error, done.
  */
-export async function streamChat({ body, signal, onMeta, onDelta, onDone, onError }) {
+export async function streamChat({ body, signal, endpoint = '/api/chat/stream', onMeta, onDelta, onDone, onError }) {
   let reader
   let doneFired = false
 
   try {
-    const response = await fetch('/api/chat/stream', {
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

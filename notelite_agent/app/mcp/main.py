@@ -169,18 +169,11 @@ _TOOL_CATALOG: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "access_token": {
-                    "type": "string",
-                    "description": "Backend access_token cookie value for the current user.",
-                },
+                "user_id": {"type": "string", "description": "Tenant/user scope for folders."},
                 "skip": {"type": "integer", "minimum": 0, "default": 0},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
-                "backend_base_url": {
-                    "type": "string",
-                    "description": "Optional backend API base URL, for example http://backend:8000/api.",
-                },
             },
-            "required": ["access_token"],
+            "required": ["user_id"],
         },
         "annotations": {
             "title": "List Folders",
@@ -200,10 +193,7 @@ _TOOL_CATALOG: list[dict[str, Any]] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "access_token": {
-                    "type": "string",
-                    "description": "Backend access_token cookie value for the current user.",
-                },
+                "user_id": {"type": "string", "description": "Tenant/user scope for notes."},
                 "folder_id": {"type": "string", "description": "Optional folder filter."},
                 "pinned_only": {"type": "boolean", "default": False},
                 "search": {"type": "string", "description": "Optional backend note search query."},
@@ -214,12 +204,8 @@ _TOOL_CATALOG: list[dict[str, Any]] = [
                     "default": False,
                     "description": "Include content and content_text in results.",
                 },
-                "backend_base_url": {
-                    "type": "string",
-                    "description": "Optional backend API base URL, for example http://backend:8000/api.",
-                },
             },
-            "required": ["access_token"],
+            "required": ["user_id"],
         },
         "annotations": {
             "title": "List Notes",
@@ -317,39 +303,19 @@ def _backend_api_base(backend_base_url: str | None = None) -> str:
     return str(configured).rstrip("/")
 
 
-def _require_access_token(access_token: str) -> str:
-    value = str(access_token or "").strip()
-    if not value:
-        raise ValueError("access_token is required for backend note and folder tools")
-    return value
-
-
-def _backend_get(
-    endpoint: str,
-    *,
-    access_token: str,
-    params: Mapping[str, Any] | None = None,
-    backend_base_url: str | None = None,
-) -> dict[str, Any]:
-    import httpx
-
-    base_url = _backend_api_base(backend_base_url)
-    cookies = {"access_token": _require_access_token(access_token)}
-    with httpx.Client(base_url=base_url, timeout=20.0, cookies=cookies) as client:
-        response = client.get(endpoint, params={k: v for k, v in (params or {}).items() if v is not None})
-        response.raise_for_status()
-        body = response.json()
-    if isinstance(body, dict) and "data" in body:
-        return body
-    return {"success": True, "data": body, "message": "Backend response returned"}
-
-
 def _clamped_limit(limit: int, default: int = 50) -> int:
     try:
         value = int(limit or default)
     except (TypeError, ValueError):
         value = default
     return max(1, min(200, value))
+
+
+def _json_ready(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value.isoformat() if hasattr(value, "isoformat") else value
+        for key, value in row.items()
+    }
 
 
 def _public_note(note: Mapping[str, Any], *, include_content: bool) -> dict[str, Any]:
@@ -604,59 +570,81 @@ def locate_notes(
 
 @mcp.tool()
 def list_folders(
-    access_token: str,
+    user_id: str,
     skip: int = 0,
     limit: int = 50,
-    backend_base_url: str | None = None,
 ) -> dict[str, Any]:
-    """List folders for the authenticated backend user."""
-    response = _backend_get(
-        "/folders/",
-        access_token=access_token,
-        params={"skip": max(0, int(skip or 0)), "limit": _clamped_limit(limit)},
-        backend_base_url=backend_base_url,
-    )
-    return {
-        "ok": True,
-        "folders": response.get("data") or [],
-        "message": response.get("message", "Folders retrieved"),
-    }
+    """List folders for a server-authenticated user scope."""
+    from sqlalchemy import text
+
+    from app.db.postgres import DatabaseManager
+
+    with DatabaseManager.get_session_factory()() as session:
+        rows = session.execute(
+            text(
+                """
+                SELECT id::text AS id, user_id::text AS user_id, name, is_pinned,
+                       created_at, updated_at
+                FROM folders
+                WHERE user_id::text = :user_id
+                ORDER BY is_pinned DESC, updated_at DESC
+                OFFSET :skip
+                LIMIT :limit
+                """
+            ),
+            {"user_id": _require_user_id(user_id), "skip": max(0, int(skip or 0)), "limit": _clamped_limit(limit)},
+        ).mappings().all()
+    return {"ok": True, "folders": [_json_ready(dict(row)) for row in rows], "message": "Folders retrieved"}
 
 
 @mcp.tool()
 def list_notes(
-    access_token: str,
+    user_id: str,
     folder_id: str | None = None,
     pinned_only: bool = False,
     search: str | None = None,
     skip: int = 0,
     limit: int = 50,
     include_content: bool = False,
-    backend_base_url: str | None = None,
 ) -> dict[str, Any]:
-    """List notes for the authenticated backend user with optional filters."""
-    response = _backend_get(
-        "/notes/",
-        access_token=access_token,
-        params={
-            "folder_id": folder_id,
-            "pinned_only": bool(pinned_only),
-            "search": search,
-            "skip": max(0, int(skip or 0)),
-            "limit": _clamped_limit(limit),
-        },
-        backend_base_url=backend_base_url,
-    )
-    notes = [
-        _public_note(note, include_content=include_content)
-        for note in (response.get("data") or [])
-        if isinstance(note, Mapping)
-    ]
-    return {
-        "ok": True,
-        "notes": notes,
-        "message": response.get("message", "Notes retrieved"),
+    """List notes for a server-authenticated user scope with optional filters."""
+    from sqlalchemy import text
+
+    from app.db.postgres import DatabaseManager
+
+    where = ["n.user_id::text = :user_id"]
+    params: dict[str, Any] = {
+        "user_id": _require_user_id(user_id),
+        "skip": max(0, int(skip or 0)),
+        "limit": _clamped_limit(limit),
     }
+    if folder_id:
+        where.append("n.folder_id::text = :folder_id")
+        params["folder_id"] = str(folder_id)
+    if pinned_only:
+        where.append("n.is_pinned IS TRUE")
+    if search:
+        where.append("(n.title ILIKE :search OR coalesce(n.content_text, '') ILIKE :search)")
+        params["search"] = f"%{search}%"
+
+    query = text(
+        f"""
+        SELECT n.id::text AS id, n.user_id::text AS user_id, n.folder_id::text AS folder_id,
+               n.title, coalesce(n.description, '') AS description, n.content_text,
+               n.version, n.note_size, n.is_pinned, n.is_memory_included,
+               n.created_at, n.updated_at, f.name AS folder
+        FROM notes n
+        JOIN folders f ON f.id = n.folder_id
+        WHERE {' AND '.join(where)}
+        ORDER BY n.is_pinned DESC, n.updated_at DESC
+        OFFSET :skip
+        LIMIT :limit
+        """
+    )
+    with DatabaseManager.get_session_factory()() as session:
+        rows = session.execute(query, params).mappings().all()
+    notes = [_public_note(_json_ready(dict(row)), include_content=include_content) for row in rows]
+    return {"ok": True, "notes": notes, "message": "Notes retrieved"}
 
 
 @mcp.tool()

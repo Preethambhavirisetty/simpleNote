@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
-from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
 
@@ -12,15 +10,18 @@ import httpx
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
-from app.core.config import ACTIVE_CHAT_SYSTEM_VERSION, LLM_REASONER_MODEL
+from app.core.config import (
+    ACTIVE_CHAT_SYSTEM_VERSION,
+    AGENT_WORKFLOW_API_KEY,
+    AGENT_WORKFLOW_CONFIG_NAME,
+    AGENT_WORKFLOW_INTERNAL_URL,
+    LLM_REASONER_MODEL,
+)
 from app.core.feature_flags import is_enabled
 from app.logger import logger
 from app.services.chat import conversation, llm_client, retriever
 from app.shared.prompts import prompt
 from app.services.chat.schema import ChatRequest
-from app.agent_workflow.adapters.orchestrator import engine_event_to_sse
-from app.agent_workflow.engine import AgentEngine
-from app.agent_workflow.streaming import RunRequest
 from app.services.ingestion.storage.vector_store import QdrantVectorStore
 from app.shared.backend_conversation_client import BackendConversationClient
 from app.shared.utils import count_tokens
@@ -35,6 +36,37 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 
 def _elapsed_ms(started_at: float) -> int:
     return int((time.perf_counter() - started_at) * 1000)
+
+
+def _iter_sse(lines: Iterator[str]) -> Iterator[tuple[str, dict[str, Any]]]:
+    event_name = "message"
+    data_lines: list[str] = []
+    for line in lines:
+        if line == "":
+            if data_lines:
+                raw = "\n".join(data_lines)
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    payload = {"raw": raw}
+                yield event_name, payload if isinstance(payload, dict) else {"data": payload}
+            event_name = "message"
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("event:"):
+            event_name = line.split(":", 1)[1].strip() or "message"
+        elif line.startswith("data:"):
+            data_lines.append(line.split(":", 1)[1].lstrip())
+
+    if data_lines:
+        raw = "\n".join(data_lines)
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = {"raw": raw}
+        yield event_name, payload if isinstance(payload, dict) else {"data": payload}
 
 
 class StreamingService:
@@ -77,13 +109,20 @@ class StreamingService:
         events: list[str],
         started_at: float,
     ) -> StreamingResponse:
-        config_path = Path(
-            os.getenv(
-                "AGENT_WORKFLOW_CONFIG",
-                str(Path(__file__).resolve().parents[3] / "agent_workflow" / "agents" / "document.yaml"),
-            )
-        )
-        engine = AgentEngine.from_config(config_path)
+        bounded_history = history[-10:]
+        workflow_payload = {
+            "query": query,
+            "session_id": conversation_id,
+            "history": bounded_history,
+            "config_name": AGENT_WORKFLOW_CONFIG_NAME,
+            "runtime_context": {
+                "user_id": request.user_id,
+                "tenant_id": request.user_id,
+                "role": request.role,
+                "conversation_id": conversation_id,
+                "history": bounded_history,
+            },
+        }
 
         def event_stream() -> Iterator[str]:
             yield _sse("meta", {
@@ -98,6 +137,7 @@ class StreamingService:
 
             answer_parts: list[str] = []
             error_message: str | None = None
+            was_cancelled = False
             tool_call_count = 0
             artifact_count = 0
             review: dict[str, Any] | None = None
@@ -106,49 +146,58 @@ class StreamingService:
             events.append("agent_workflow.started")
 
             try:
-                run_request = RunRequest(
-                    query=query,
-                    session_id=conversation_id,
-                    history=history,
-                    runtime_context={
-                        "user_id": request.user_id,
-                        "tenant_id": request.user_id,
-                        "role": request.role,
-                        "conversation_id": conversation_id,
-                    },
-                )
-                for engine_event in engine.stream(run_request):
-                    mapped = engine_event_to_sse(engine_event)
-                    if engine_event.get("type") == "agent_activity":
-                        tool = engine_event.get("tool", "tool")
-                        phase = engine_event.get("phase", "running")
-                        events.append(f"agent_workflow.tool {tool} {phase}")
-                    if engine_event.get("type") == "pending_approval":
-                        events.append(f"agent_workflow.approval_required {engine_event.get('tool')}")
-                    if engine_event.get("type") == "done":
-                        answer = str(engine_event.get("answer") or "")
-                        if not answer_parts and answer:
-                            answer_parts.append(answer)
-                            yield _sse("delta", {"content": answer})
-                        review = engine_event.get("review") if isinstance(engine_event.get("review"), dict) else None
-                        tool_call_count = int(engine_event.get("tool_call_count") or 0)
-                        artifact_count = int(engine_event.get("artifact_count") or 0)
-                        if isinstance(engine_event.get("pending_approval"), dict):
-                            pending_approval = engine_event["pending_approval"]
-                        thread_id = engine_event.get("thread_id") or thread_id
-                        if engine_event.get("error"):
-                            error_message = str(engine_event.get("error"))
-                        continue
-                    if mapped is None:
-                        continue
-                    event_name, payload = mapped
-                    if event_name == "delta":
-                        content = str(payload.get("content") or "")
-                        if content:
-                            answer_parts.append(content)
-                            yield _sse("delta", {"content": content})
-                    elif event_name in {"agent_activity", "status", "approval_required"}:
-                        yield _sse(event_name, payload)
+                with httpx.Client(timeout=httpx.Timeout(None, connect=5.0)) as client:
+                    with client.stream(
+                        "POST",
+                        f"{AGENT_WORKFLOW_INTERNAL_URL.rstrip('/')}/api/agent-workflow/stream",
+                        json=workflow_payload,
+                        headers={"X-API-Key": AGENT_WORKFLOW_API_KEY},
+                    ) as response:
+                        response.raise_for_status()
+                        for event_name, payload in _iter_sse(response.iter_lines()):
+                            if event_name == "delta":
+                                content = str(payload.get("content") or "")
+                                if content:
+                                    answer_parts.append(content)
+                                    yield _sse("delta", {"content": content})
+                            elif event_name == "agent_activity":
+                                tool = payload.get("tool", "tool")
+                                phase = payload.get("phase", "running")
+                                events.append(f"agent_workflow.tool {tool} {phase}")
+                                yield _sse("agent_activity", payload)
+                            elif event_name in {"status", "review"}:
+                                if event_name == "review" and isinstance(payload, dict):
+                                    review = payload
+                                yield _sse(event_name, payload)
+                            elif event_name in {"approval_required", "pending_approval"}:
+                                pending_approval = payload
+                                events.append(f"agent_workflow.approval_required {payload.get('tool')}")
+                                error_message = "Agent workflow paused for tool approval."
+                                yield _sse("error", {"message": error_message})
+                                break
+                            elif event_name == "done":
+                                answer = str(payload.get("answer") or "")
+                                if not answer_parts and answer:
+                                    answer_parts.append(answer)
+                                    yield _sse("delta", {"content": answer})
+                                review = payload.get("review") if isinstance(payload.get("review"), dict) else review
+                                tool_call_count = int(payload.get("tool_call_count") or tool_call_count or 0)
+                                artifact_count = int(payload.get("artifact_count") or artifact_count or 0)
+                                if isinstance(payload.get("pending_approval"), dict):
+                                    pending_approval = payload["pending_approval"]
+                                thread_id = payload.get("thread_id") or thread_id
+                                if payload.get("error"):
+                                    error_message = str(payload.get("error"))
+                                break
+            except GeneratorExit:
+                was_cancelled = True
+                events.append("client.disconnected")
+                raise
+            except httpx.HTTPError as exc:
+                error_message = str(exc)
+                events.append("agent_workflow.http_error")
+                log.warning("agent workflow stream HTTP error", exc_info=True)
+                yield _sse("error", {"message": error_message})
             except Exception as exc:  # noqa: BLE001
                 error_message = str(exc)
                 events.append("agent_workflow.failed")
@@ -158,16 +207,21 @@ class StreamingService:
                 answer = "".join(answer_parts)
                 latency_ms = _elapsed_ms(started_at)
                 completion_tokens = count_tokens(answer) if answer else 0
-                events.append("agent_workflow.completed" if not error_message else "agent_workflow.failed")
+                events.append(
+                    "agent_workflow.cancelled" if was_cancelled
+                    else "agent_workflow.completed" if not error_message
+                    else "agent_workflow.failed"
+                )
                 logger.info(
                     "chat.completed",
-                    outcome="failed" if error_message else "completed",
+                    outcome="cancelled" if was_cancelled else "failed" if error_message else "completed",
                     model=self.model,
                     mode="agent_workflow",
                     total_ms=latency_ms,
                     completion_tokens=completion_tokens,
                     tool_call_count=tool_call_count,
                     artifact_count=artifact_count,
+                    cancelled=was_cancelled,
                     inference_error=bool(error_message),
                     events=events,
                 )
@@ -187,7 +241,7 @@ class StreamingService:
                     error_message=error_message,
                     references=[],
                     events=events,
-                    status=None,
+                    status="partial" if was_cancelled else None,
                 )
 
             yield _sse("done", {
@@ -203,8 +257,6 @@ class StreamingService:
                 "artifact_count": artifact_count,
                 "tool_call_count": tool_call_count,
                 "mode": "agent_workflow",
-                # Present when the run paused on a destructive-tool approval;
-                # resume via AgentEngine.resume(thread_id, approved=...).
                 "pending_approval": pending_approval,
                 "thread_id": thread_id,
             })

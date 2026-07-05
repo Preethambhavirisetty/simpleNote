@@ -152,6 +152,9 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
       AGENT_INTERNAL_URL:     http://agent:8000
+      AGENT_WORKFLOW_INTERNAL_URL: http://agent-workflow:5453
+      AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
+      AGENT_WORKFLOW_CONFIG_NAME: notelite
       # Auth cookies only over HTTPS — the containerized stack is served via nginx TLS.
       # `environment:` overrides env_file, so a stale backend/.env cannot disable this.
       COOKIE_SECURE:          "true"
@@ -184,6 +187,9 @@ services:
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       LOKI_URL:               http://loki:3100
+      AGENT_WORKFLOW_INTERNAL_URL: http://agent-workflow:5453
+      AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
+      AGENT_WORKFLOW_CONFIG_NAME: notelite
     volumes:
       - ./notelite_agent/app:/app/app:ro
       - agent-model-cache:/app/.cache
@@ -191,6 +197,60 @@ services:
       - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
       - "8000"
+    networks:
+      - notelite-net
+
+  # Notelite MCP tool server — read-only tools exposed to agent-workflow
+  agent-mcp:
+    env_file:
+      - ./notelite_agent/.env
+    build:
+      context: ./notelite_agent
+      dockerfile: Dockerfile
+    container_name: notelite-agent-mcp
+    restart: unless-stopped
+    command: ["python", "-m", "app.mcp.main"]
+    environment:
+      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
+      HF_HOME:                /app/.cache/huggingface
+      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
+      QDRANT_URL:             http://qdrant:6333
+      BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
+      MESSAGE_BROKER_URL:     *redis-url
+      CELERY_RESULT_BACKEND:  *redis-url
+      POSTGRES_DB_URL:        *pg-url
+      FEATURE_FLAGS_PATH:     /app/feature_flags.json
+      LOKI_URL:               http://loki:3100
+      RUN_MIGRATIONS:         "false"
+    volumes:
+      - ./notelite_agent/app:/app/app:ro
+      - agent-model-cache:/app/.cache
+      - ./feature_flags.json:/app/feature_flags.json:ro
+      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
+    expose:
+      - "8000"
+    networks:
+      - notelite-net
+
+  # Standalone agent workflow orchestration service
+  agent-workflow:
+    env_file:
+      - ./notelite_agent/.env
+    build:
+      context: ./agent-workflow-service
+      dockerfile: Dockerfile
+    container_name: notelite-agent-workflow
+    restart: unless-stopped
+    environment:
+      AGENT_WORKFLOW_API_KEY: ${AGENT_API_KEY}
+      AGENT_WORKFLOW_CHECKPOINTER: redis
+      AGENT_WORKFLOW_REDIS_URL: *redis-url
+      MCP_URL: http://agent-mcp:8000/mcp
+      MCP_AUTH_TOKEN: ""
+      ALLOWED_UPSTREAM_HOSTS: ${ALLOWED_UPSTREAM_HOSTS:-agent-mcp,redis,localhost,127.0.0.1}
+    expose:
+      - "5453"
     networks:
       - notelite-net
 

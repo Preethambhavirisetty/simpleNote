@@ -1,16 +1,111 @@
 import logging
 import uuid
+from functools import lru_cache
+from typing import Any
 
+from redis import Redis, RedisError
+from sqlalchemy import text
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
-from app.core.config import INGESTION_TASK_STRING
+from app.core.config import INGESTION_TASK_STRING, MESSAGE_BROKER_URL
 from app.core.settings import init_llama_index_settings
+from app.db.postgres import DatabaseManager
 from app.logger import logger
 from app.shared.http import TransientHTTPError, is_transient_http_error
 from app.services.ingestion.orchestrator import IngestionOrchestrator
 from app.services.ingestion.workers.celery_app import CONVERSATION_TASK, celery_app
 
 log = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _redis_client() -> Redis:
+    return Redis.from_url(MESSAGE_BROKER_URL, decode_responses=True)
+
+
+def _pending_key(user_id: str, note_id: str) -> str:
+    return f"ingest:pending:{user_id}:{note_id}"
+
+
+def _clear_pending_marker(user_id: str, note_id: str) -> None:
+    try:
+        _redis_client().delete(_pending_key(user_id, note_id))
+    except RedisError:
+        logger.warning("ingestion.coalesce_marker_clear_failed", user_id=user_id, note_id=note_id)
+
+
+def _latest_note_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    user_id = str(payload.get("user_id") or payload.get("userid") or "").strip()
+    note_id = str(payload.get("note_id") or "").strip()
+    folder_id = str(payload.get("folder_id") or "").strip()
+    role = str(payload.get("role") or "user")
+    if not user_id or not note_id:
+        return payload
+
+    _clear_pending_marker(user_id, note_id)
+
+    with DatabaseManager.get_session_factory()() as session:
+        row = session.execute(
+            text(
+                """
+                SELECT n.id::text AS note_id, n.user_id::text AS user_id,
+                       n.folder_id::text AS folder_id, n.title AS note_title,
+                       coalesce(n.description, '') AS description,
+                       coalesce(n.content_text, '') AS text, n.version AS version,
+                       f.name AS folder_title,
+                       (
+                           SELECT coalesce(array_agg(t.name), '{}')
+                           FROM notetags nt
+                           JOIN tags t ON t.id = nt.tag_id
+                           WHERE nt.note_id = n.id
+                       ) AS tags
+                FROM notes n
+                JOIN folders f ON f.id = n.folder_id
+                WHERE n.id::text = :note_id AND n.user_id::text = :user_id
+                """
+            ),
+            {"note_id": note_id, "user_id": user_id},
+        ).mappings().first()
+
+    if row is None:
+        return {
+            "action": "delete",
+            "user_id": user_id,
+            "userid": user_id,
+            "tenant_id": user_id,
+            "folder_id": folder_id,
+            "note_id": note_id,
+            "role": role,
+        }
+
+    latest = dict(row)
+    if not str(latest.get("text") or "").strip():
+        return {
+            "action": "delete",
+            "user_id": user_id,
+            "userid": user_id,
+            "tenant_id": user_id,
+            "folder_id": latest.get("folder_id") or folder_id,
+            "note_id": note_id,
+            "role": role,
+            "version": latest.get("version"),
+        }
+
+    return {
+        "action": "upsert",
+        "user_id": user_id,
+        "userid": user_id,
+        "tenant_id": user_id,
+        "folder_id": latest.get("folder_id"),
+        "note_id": note_id,
+        "role": role,
+        "folder_title": latest.get("folder_title") or "",
+        "note_title": latest.get("note_title") or "",
+        "description": latest.get("description") or "",
+        "tags": list(latest.get("tags") or []),
+        "text": latest.get("text") or "",
+        "version": latest.get("version"),
+    }
 
 
 def _bind_task_trace(trace_id: str | None) -> None:
@@ -41,7 +136,10 @@ def ingest_in_background(self, data=None, **kwargs):
 
     init_llama_index_settings()
     try:
-        return IngestionOrchestrator().run(data, **kwargs)
+        payload = IngestionOrchestrator._payload(data, **kwargs)
+        if payload.get("coalesced"):
+            payload = _latest_note_payload(payload)
+        return IngestionOrchestrator().run(payload)
     except Exception as exc:
         if is_transient_http_error(exc):
             raise self.retry(exc=exc) from exc

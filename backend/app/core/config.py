@@ -61,4 +61,9 @@ INGESTION_QUEUE = _require_env("INGESTION_QUEUE", "ingestion")
 # Shared secret for service-to-service calls from the notelite_agent.
 AGENT_API_KEY = _require_env("AGENT_API_KEY")
 AGENT_INTERNAL_URL = _require_env("AGENT_INTERNAL_URL", "http://localhost:3002")
+AGENT_WORKFLOW_INTERNAL_URL = _require_env("AGENT_WORKFLOW_INTERNAL_URL", "http://agent-workflow:5453")
+AGENT_WORKFLOW_API_KEY = _require_env("AGENT_WORKFLOW_API_KEY", AGENT_API_KEY)
+AGENT_WORKFLOW_CONFIG_NAME = _require_env("AGENT_WORKFLOW_CONFIG_NAME", "notelite")
+INGESTION_DEBOUNCE_SECONDS = int(_require_env("INGESTION_DEBOUNCE_SECONDS", "10"))
+INGESTION_COALESCE_TTL_SECONDS = int(_require_env("INGESTION_COALESCE_TTL_SECONDS", "120"))
 

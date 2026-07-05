@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware'
 import { conversationsApi } from '@/api/conversations'
 import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
+import { useFeatureFlagStore } from './featureFlagStore'
 
 let activeStreamController = null
 let requestedConversationId = null
@@ -108,8 +109,11 @@ export const useChatStore = create(
         const streamController = new AbortController()
         activeStreamController = streamController
 
+        const useAgentWorkflow = useFeatureFlagStore.getState().isEnabled('chat.agent_workflow')
+
         await streamChat({
           body,
+          endpoint: useAgentWorkflow ? '/api/chat/agent-stream' : '/api/chat/stream',
           signal: streamController.signal,
           onMeta: (meta) => {
             const convId = meta.conversation_id

@@ -5,36 +5,15 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.celery import celery_app
-from app.core.config import INGESTION_TASK_STRING
 from app.core.tiptap import extract_text
 from app.db.postgres.repos.folder import FolderRepository
 from app.db.postgres.repos.note import NoteRepository
 from app.db.postgres.repos.tag import TagRepository
 from app.exceptions.base import AppException
-from app.logger import get_trace_id
 from app.schema.base import ErrorCode
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
+from app.services.ingestion_dispatch import dispatch_delete, dispatch_upsert
 
-
-def _dispatch_ingest(payload: dict) -> None:
-    """Send an upsert ingestion task to the notelite_agent queue.
-
-    trace_id carries the originating request's correlation id into the worker,
-    which binds it before processing (see agent ingestion_tasks).
-    """
-    celery_app.send_task(
-        INGESTION_TASK_STRING,
-        kwargs={"action": "upsert", "trace_id": get_trace_id(), **payload},
-    )
-
-
-def _dispatch_delete(payload: dict) -> None:
-    """Send a delete ingestion task to remove the vector from the store."""
-    celery_app.send_task(
-        INGESTION_TASK_STRING,
-        kwargs={"action": "delete", "trace_id": get_trace_id(), **payload},
-    )
 
 
 class NoteService:
@@ -100,7 +79,7 @@ class NoteService:
         db.refresh(note)
 
         if content_text:
-            _dispatch_ingest(self._ingestion_payload(db, note, user_role))
+            dispatch_upsert(self._ingestion_payload(db, note, user_role))
         return note
 
     def list(
@@ -144,9 +123,9 @@ class NoteService:
 
         if content_changed:
             if content_text.strip():
-                _dispatch_ingest(self._ingestion_payload(db, note, user_role))
+                dispatch_upsert(self._ingestion_payload(db, note, user_role))
             else:
-                _dispatch_delete({
+                dispatch_delete({
                     "userid": str(note.user_id),
                     "folder_id": str(note.folder_id),
                     "note_id": str(note.id),
@@ -165,7 +144,7 @@ class NoteService:
 
         # Re-index so the vector store's folder metadata reflects the new folder.
         if note.content_text and note.content_text.strip():
-            _dispatch_ingest(self._ingestion_payload(db, note, user_role))
+            dispatch_upsert(self._ingestion_payload(db, note, user_role))
         return note
 
     def delete(self, db: Session, note_id: UUID, user_id: UUID, user_role: list[str]):
@@ -181,7 +160,7 @@ class NoteService:
         }
         self.repo.delete(db, note)
         db.commit()
-        _dispatch_delete(del_payload)   # remove vector after DB row is gone
+        dispatch_delete(del_payload)   # remove vector after DB row is gone
 
     # ── Tags on a note ────────────────────────────────────────────────────────
 

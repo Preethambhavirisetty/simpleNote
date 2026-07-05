@@ -50,6 +50,9 @@ _load_aws_secrets()
 SECRET_KEY = require_env("SECRET_KEY")
 BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
+AGENT_WORKFLOW_INTERNAL_URL = require_env("AGENT_WORKFLOW_INTERNAL_URL", "http://agent-workflow:5453")
+AGENT_WORKFLOW_API_KEY = require_env("AGENT_WORKFLOW_API_KEY", AGENT_API_KEY)
+AGENT_WORKFLOW_CONFIG_NAME = require_env("AGENT_WORKFLOW_CONFIG_NAME", "notelite")
 # Capacity of the threadpool that runs sync routes and sync streaming responses.
 # Each active chat stream holds one thread for its full duration, so the anyio
 # default of 40 caps concurrent chats; raise/lower to match expected concurrency.
