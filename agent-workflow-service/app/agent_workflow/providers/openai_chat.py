@@ -68,6 +68,47 @@ class OpenAiChatCompletionsProvider:
         self._record_usage(data.get("usage"))
         return self._extract_message_content(data)
 
+    def complete_with_tools(
+        self,
+        messages: Sequence[dict[str, Any]],
+        *,
+        tools: Sequence[dict[str, Any]],
+        max_tokens: int = 1024,
+    ) -> dict[str, Any]:
+        """One chat turn with the OpenAI native tools contract.
+
+        Returns {"content": str, "tool_calls": [{"name", "arguments"}]}; callers
+        validate arguments against the tool schema before executing.
+        """
+        body = self._request_body(messages, max_tokens=max_tokens, stream=False)
+        if tools:
+            body["tools"] = list(tools)
+            body["tool_choice"] = "auto"
+        data = with_transient_retries(lambda: self._post_json(body))
+        self._record_usage(data.get("usage"))
+        choices = data.get("choices") or []
+        message = (choices[0] or {}).get("message") or {} if choices else {}
+        tool_calls: list[dict[str, Any]] = []
+        for call in message.get("tool_calls") or []:
+            function = (call or {}).get("function") or {}
+            name = str(function.get("name") or "").strip()
+            if not name:
+                continue
+            raw_arguments = function.get("arguments")
+            if isinstance(raw_arguments, dict):
+                arguments = raw_arguments
+            elif isinstance(raw_arguments, str) and raw_arguments.strip():
+                try:
+                    parsed = json.loads(raw_arguments)
+                    arguments = parsed if isinstance(parsed, dict) else {}
+                except json.JSONDecodeError:
+                    # Schema validation downstream reports the missing fields.
+                    arguments = {}
+            else:
+                arguments = {}
+            tool_calls.append({"name": name, "arguments": arguments})
+        return {"content": self._extract_message_content(data), "tool_calls": tool_calls}
+
     def stream(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> Iterator[str]:
         body = self._request_body(messages, max_tokens=max_tokens, stream=True)
         max_attempts = 3

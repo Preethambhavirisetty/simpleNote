@@ -99,6 +99,7 @@ class ReviewerDefaults:
     max_tokens: int = 1200
     max_cycles: int = 2
     reject_action: str = "replan"
+    mode: str = "always"  # always | on_risk
 
 
 @dataclass
@@ -160,6 +161,7 @@ class LlmConfig:
     top_p: float = 0.9
     top_k: int = 40
     seed: int = 0xFFFFFFFF
+    native_tool_calling: bool = False
 
 
 @dataclass
@@ -172,6 +174,25 @@ class McpConfig:
 
 
 @dataclass
+class CheckpointerResource:
+    mode: str = ""  # "" (unset) | memory | redis | postgres
+    url: str = ""
+
+
+@dataclass
+class ToolIndexResource:
+    search_url: str = ""
+    collections: list[str] = field(default_factory=list)
+    owner_scope: str = ""
+
+
+@dataclass
+class ResourcesConfig:
+    checkpointer: CheckpointerResource = field(default_factory=CheckpointerResource)
+    tool_index: ToolIndexResource = field(default_factory=ToolIndexResource)
+
+
+@dataclass
 class AgentConfig:
     name: str
     prompts: dict[str, str]
@@ -179,6 +200,7 @@ class AgentConfig:
     mcp: McpConfig
     policy: AgentPolicy
     prompts_inline: dict[str, str] = field(default_factory=dict)
+    resources: ResourcesConfig = field(default_factory=ResourcesConfig)
     base_dir: Path = field(default_factory=Path.cwd)
 
     def prompt_text(self, role: str) -> str:
@@ -208,7 +230,16 @@ class AgentConfig:
                 "top_p": self.llm.top_p,
                 "top_k": self.llm.top_k,
                 "seed": self.llm.seed,
+                "native_tool_calling": self.llm.native_tool_calling,
                 "api_key_hash": hashlib.sha256((self.llm.api_key or "").encode("utf-8")).hexdigest(),
+            },
+            "resources": {
+                "checkpointer_mode": self.resources.checkpointer.mode,
+                # Connection URLs may embed credentials; hash them.
+                "checkpointer_url_hash": hashlib.sha256((self.resources.checkpointer.url or "").encode("utf-8")).hexdigest(),
+                "tool_index_search_url": self.resources.tool_index.search_url,
+                "tool_index_collections": list(self.resources.tool_index.collections),
+                "tool_index_owner_scope": self.resources.tool_index.owner_scope,
             },
             "mcp": {
                 "url": self.mcp.url,
@@ -265,6 +296,7 @@ class AgentConfig:
                     "max_tokens": policy.reviewer.max_tokens,
                     "max_cycles": policy.reviewer.max_cycles,
                     "reject_action": policy.reviewer.reject_action,
+                    "mode": policy.reviewer.mode,
                 },
                 "model": policy.model,
                 "instructions": policy.instructions,
@@ -342,6 +374,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
             max_tokens=_as_int(policy_raw.reviewer.max_tokens, 1200),
             max_cycles=review_max_cycles,
             reject_action=reject_action,
+            mode=str(policy_raw.reviewer.mode or "always"),
         ),
         model=policy_raw.model,
         instructions=str(policy_raw.instructions or ""),
@@ -360,6 +393,20 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         top_p=_as_float(llm_raw.top_p, 0.9),
         top_k=_as_int(llm_raw.top_k, 40),
         seed=_as_int(llm_raw.seed, 0xFFFFFFFF),
+        native_tool_calling=_as_bool(llm_raw.native_tool_calling, False),
+    )
+
+    resources_raw = model.resources
+    resources = ResourcesConfig(
+        checkpointer=CheckpointerResource(
+            mode=str(resources_raw.checkpointer.mode or "").strip().lower(),
+            url=str(resources_raw.checkpointer.url or "").strip(),
+        ),
+        tool_index=ToolIndexResource(
+            search_url=str(resources_raw.tool_index.search_url or "").strip(),
+            collections=[str(item).strip() for item in (resources_raw.tool_index.collections or []) if str(item).strip()],
+            owner_scope=str(resources_raw.tool_index.owner_scope or "").strip(),
+        ),
     )
 
     mcp_raw = model.mcp
@@ -382,6 +429,17 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         for idx, entry in enumerate(mcp_raw.servers or [])
     ]
 
+    # A shared tool-index resource is the default semantic tool-search endpoint
+    # for every server that does not configure its own.
+    if resources.tool_index.search_url:
+        for server in servers:
+            if not server.tool_discovery.search_url:
+                server.tool_discovery.search_url = resources.tool_index.search_url
+                if not server.tool_discovery.collections:
+                    server.tool_discovery.collections = list(resources.tool_index.collections)
+                if not server.tool_discovery.owner_scope:
+                    server.tool_discovery.owner_scope = resources.tool_index.owner_scope
+
     mcp = McpConfig(
         url=str(mcp_raw.url or os.getenv("MCP_URL", "")).strip(),
         auth_token=str(mcp_raw.auth_token or os.getenv("MCP_AUTH_TOKEN", "")).strip(),
@@ -398,6 +456,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         llm=llm,
         mcp=mcp,
         policy=policy,
+        resources=resources,
         base_dir=resolved_base_dir,
     )
 
@@ -427,6 +486,18 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "top_p": base.llm.top_p,
             "top_k": base.llm.top_k,
             "seed": base.llm.seed,
+            "native_tool_calling": base.llm.native_tool_calling,
+        },
+        "resources": {
+            "checkpointer": {
+                "mode": base.resources.checkpointer.mode,
+                "url": base.resources.checkpointer.url,
+            },
+            "tool_index": {
+                "search_url": base.resources.tool_index.search_url,
+                "collections": list(base.resources.tool_index.collections),
+                "owner_scope": base.resources.tool_index.owner_scope,
+            },
         },
         "mcp": {
             "url": base.mcp.url,
@@ -491,6 +562,7 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
                 "max_tokens": base.policy.reviewer.max_tokens,
                 "max_cycles": base.policy.reviewer.max_cycles,
                 "reject_action": base.policy.reviewer.reject_action,
+                "mode": base.policy.reviewer.mode,
             },
             "model": base.policy.model,
             "instructions": base.policy.instructions,

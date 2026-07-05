@@ -17,6 +17,16 @@ def _stream_writer() -> Callable[[Any], None] | None:
         return None
 
 
+_MECHANICAL_PREFIXES = (
+    "Here is what I found from tool results:",
+    "Here is what I found:",
+)
+
+
+def _is_mechanical_text(text: str) -> bool:
+    return text.lstrip().startswith(_MECHANICAL_PREFIXES)
+
+
 def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
     if state.get("phase") != "done" or state.get("pending_destructive"):
         return {}
@@ -26,6 +36,15 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
         return {}
     if not config.policy.render_final_answer:
         return {"final_answer": existing}
+
+    # An LLM-written draft is already user-facing prose; re-rendering it costs a
+    # full LLM roundtrip for no quality gain. Render only mechanical drafts
+    # (deterministic artifact dumps). Unknown provenance renders, conservatively.
+    if state.get("draft_kind") == "llm" and not _is_mechanical_text(existing):
+        final_answer = existing
+        if config.policy.enforce_grounding:
+            final_answer = _ensure_grounding(final_answer, state.get("artifacts") or [])
+        return {"final_answer": final_answer}
 
     writer = _stream_writer()
     messages = _terminal_answer_messages(state, existing)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,17 +27,18 @@ class ManagedCheckpointer:
                 self._context = None
 
 
-def create_checkpointer() -> ManagedCheckpointer:
-    mode = (os.getenv("AGENT_WORKFLOW_CHECKPOINTER") or os.getenv("CHECKPOINTER") or "memory").strip().lower()
+def create_checkpointer(mode: str = "", url: str = "") -> ManagedCheckpointer:
+    """Build a checkpointer; mode/url fall back to environment when empty."""
+    mode = (mode or os.getenv("AGENT_WORKFLOW_CHECKPOINTER") or os.getenv("CHECKPOINTER") or "memory").strip().lower()
     if mode in {"", "memory", "dev"}:
         return ManagedCheckpointer(MemorySaver())
     if mode == "redis":
-        url = _required_url("AGENT_WORKFLOW_REDIS_URL", "REDIS_URL")
+        url = url or _required_url("AGENT_WORKFLOW_REDIS_URL", "REDIS_URL")
         from langgraph.checkpoint.redis import RedisSaver  # type: ignore[import-not-found]
 
         return _from_conn_string(RedisSaver, url)
     if mode in {"postgres", "postgresql"}:
-        url = _required_url("AGENT_WORKFLOW_POSTGRES_URL", "POSTGRES_URL", "DATABASE_URL")
+        url = url or _required_url("AGENT_WORKFLOW_POSTGRES_URL", "POSTGRES_URL", "DATABASE_URL")
         from langgraph.checkpoint.postgres import PostgresSaver  # type: ignore[import-not-found]
 
         saver = _from_conn_string(PostgresSaver, url)
@@ -45,6 +47,38 @@ def create_checkpointer() -> ManagedCheckpointer:
             setup()
         return saver
     raise RuntimeError(f"Unsupported checkpointer mode: {mode}")
+
+
+_shared_checkpointers: dict[tuple[str, str], ManagedCheckpointer] = {}
+_shared_lock = threading.Lock()
+
+
+def get_shared_checkpointer(mode: str, url: str = "") -> ManagedCheckpointer:
+    """One checkpointer per (mode, url) resource, shared across engines.
+
+    Config-declared resources (resources.checkpointer) resolve here so every
+    engine pointing at the same backend shares one connection and any worker
+    can resume any thread.
+    """
+    key = ((mode or "").strip().lower(), (url or "").strip())
+    with _shared_lock:
+        existing = _shared_checkpointers.get(key)
+        if existing is not None:
+            return existing
+        created = create_checkpointer(key[0], key[1])
+        _shared_checkpointers[key] = created
+        return created
+
+
+def close_shared_checkpointers() -> None:
+    with _shared_lock:
+        savers = list(_shared_checkpointers.values())
+        _shared_checkpointers.clear()
+    for saver in savers:
+        try:
+            saver.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def delete_thread(checkpointer: Any, thread_id: str) -> None:

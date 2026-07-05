@@ -79,6 +79,16 @@ def _iter_upstream_hosts(config: dict[str, Any]) -> Iterator[str]:
     if host:
         yield host
 
+    resources = config.get("resources") if isinstance(config.get("resources"), dict) else {}
+    checkpointer = resources.get("checkpointer") if isinstance(resources.get("checkpointer"), dict) else {}
+    host = _host_from_url(checkpointer.get("url"))
+    if host:
+        yield host
+    tool_index = resources.get("tool_index") if isinstance(resources.get("tool_index"), dict) else {}
+    host = _host_from_url(tool_index.get("search_url"))
+    if host:
+        yield host
+
     mcp = config.get("mcp") if isinstance(config.get("mcp"), dict) else {}
     host = _host_from_url(mcp.get("url"))
     if host:

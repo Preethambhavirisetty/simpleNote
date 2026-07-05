@@ -55,6 +55,9 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         approved = review.get("approved_answer") or state.get("draft_answer") or ""
         updates["final_answer"] = approved.strip()
         updates["error"] = None
+        if review.get("approved_answer"):
+            # Reviewer-written prose: the finalizer can skip its re-render.
+            updates["draft_kind"] = "llm"
     elif verdict == "REVISE":
         required = review.get("required_changes") or []
         updates["review_feedback"] = "\n".join(f"- {item}" for item in required)

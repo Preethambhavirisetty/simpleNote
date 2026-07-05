@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.agent_workflow.checkpointing import close_shared_checkpointers
 from app.agent_workflow.deadlines import shutdown_deadline_executor
 from app.api.api_response import ApiResponse
 from app.api.checkpointer import close_runtime_checkpointer
@@ -23,6 +24,7 @@ async def lifespan(_app: FastAPI):
         yield
     finally:
         close_runtime_checkpointer()
+        close_shared_checkpointers()
         shutdown_deadline_executor()
 
 

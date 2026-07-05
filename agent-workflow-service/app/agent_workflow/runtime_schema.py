@@ -74,6 +74,9 @@ class ReviewerDefaultsModel(BaseModel):
     max_tokens: int = Field(1200, ge=128, le=16000)
     max_cycles: int = Field(2, ge=0, le=20)
     reject_action: str = Field("replan", pattern="^(replan|abort)$")
+    # always: review every run; on_risk: review only runs with failed/denied
+    # tool calls or errors — clean runs skip the reviewer LLM call.
+    mode: str = Field("always", pattern="^(always|on_risk)$")
 
 
 class AgentPolicyModel(BaseModel):
@@ -149,6 +152,9 @@ class LlmConfigModel(BaseModel):
     top_p: float = Field(0.9, ge=0.0, le=1.0)
     top_k: int = Field(40, ge=0, le=500)
     seed: int = Field(0xFFFFFFFF)
+    # Use the OpenAI tools/tool_calls contract for executor tool selection when
+    # the provider supports it; falls back to JSON-in-text on failure.
+    native_tool_calling: bool = False
 
     @field_validator("default_max_tokens", "top_k", "seed", mode="before")
     @classmethod
@@ -161,6 +167,35 @@ class LlmConfigModel(BaseModel):
         return _empty_to_none(value)
 
 
+class CheckpointerResourceModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str = Field("", pattern="^(|memory|redis|postgres|postgresql)$")
+    url: str = Field("", max_length=2000)
+
+
+class ToolIndexResourceModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    search_url: str = Field("", max_length=2000)
+    collections: list[str] = Field(default_factory=list, max_length=32)
+    owner_scope: str = Field("", max_length=64)
+
+
+class ResourcesModel(BaseModel):
+    """Shared infrastructure connections referenced by the runtime.
+
+    checkpointer: durable saver backing HITL resume (redis/postgres).
+    tool_index: default semantic tool-search endpoint applied to MCP servers
+    that do not define their own tool_discovery.search_url.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    checkpointer: CheckpointerResourceModel = Field(default_factory=CheckpointerResourceModel)
+    tool_index: ToolIndexResourceModel = Field(default_factory=ToolIndexResourceModel)
+
+
 class AgentConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -170,6 +205,7 @@ class AgentConfigModel(BaseModel):
     llm: LlmConfigModel
     mcp: McpConfigModel = Field(default_factory=McpConfigModel)
     policy: AgentPolicyModel = Field(default_factory=AgentPolicyModel)
+    resources: ResourcesModel = Field(default_factory=ResourcesModel)
 
     @field_validator("prompts", "prompts_inline")
     @classmethod

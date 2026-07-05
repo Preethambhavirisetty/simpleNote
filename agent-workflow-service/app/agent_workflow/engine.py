@@ -12,7 +12,7 @@ from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from app.agent_workflow.cache import get_or_create_graph, get_or_create_provider
-from app.agent_workflow.checkpointing import delete_thread
+from app.agent_workflow.checkpointing import delete_thread, get_shared_checkpointer
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
 from app.agent_workflow.graph import build_graph
 from app.agent_workflow.providers import OpenAiChatCompletionsProvider, create_tool_provider
@@ -66,6 +66,13 @@ class AgentEngine:
     graph: Any = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # A checkpointer declared in the agent config (resources.checkpointer)
+        # is more specific than a host-injected default and wins; explicit
+        # injection still applies for configs without a declared resource.
+        resource = self.config.resources.checkpointer
+        if resource.mode:
+            self.checkpointer = get_shared_checkpointer(resource.mode, resource.url)
+
         signature = self.config.signature()
         # The compiled graph closes over the llm/tools instances, so provider
         # identity must be part of the key: two engines with the same config but
@@ -79,12 +86,15 @@ class AgentEngine:
 
         def _build_cached() -> tuple[Any, Any]:
             checkpointer = self.checkpointer or MemorySaver()
+            # ManagedCheckpointer wraps the actual saver for lifecycle control;
+            # langgraph's compile() requires the raw BaseCheckpointSaver.
+            saver = getattr(checkpointer, "checkpointer", None) or checkpointer
             graph = build_graph(
                 self.config,
                 self.llm,
                 self.tools,
                 callbacks=self._callback_map(),
-                checkpointer=checkpointer,
+                checkpointer=saver,
             )
             return graph, checkpointer
 
@@ -325,6 +335,7 @@ class AgentEngine:
             artifacts=[],
             tool_calls=[],
             draft_answer="",
+            draft_kind="",
             review={},
             review_feedback="",
             iteration={"executor_turns": 0, "review_cycles": 0, "tool_calls": 0},
