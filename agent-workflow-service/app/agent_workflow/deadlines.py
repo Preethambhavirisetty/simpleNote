@@ -16,6 +16,7 @@ class DeadlineExceeded(TimeoutError):
 
 
 def run_with_deadline(operation: Callable[[], T], *, timeout_seconds: float, label: str) -> T:
+    """Run an operation with a timeout while preserving context variables."""
     if timeout_seconds <= 0:
         return operation()
 
@@ -29,4 +30,5 @@ def run_with_deadline(operation: Callable[[], T], *, timeout_seconds: float, lab
 
 
 def shutdown_deadline_executor() -> None:
+    """Stop the shared deadline worker pool during service shutdown."""
     _EXECUTOR.shutdown(wait=False, cancel_futures=True)

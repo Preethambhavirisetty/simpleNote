@@ -17,10 +17,30 @@ from app.agent_workflow.parsing import parse_executor_action
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.state import AgentState, Artifact, ToolCallRecord
+from app.agent_workflow.telemetry import llm_call
 from app.agent_workflow.util.context_path import resolve_context_path
 
 
+def _complete_llm(llm: LlmProvider, messages: list[dict[str, str]], *, max_tokens: int, node: str, label: str) -> str:
+    """Run an executor LLM call inside the debug trace wrapper."""
+    with llm_call(node=node, label=label, messages=messages, max_tokens=max_tokens):
+        return llm.complete(messages, max_tokens=max_tokens)
+
+
+def _complete_with_tools_llm(
+    llm: LlmProvider,
+    messages: list[dict[str, str]],
+    *,
+    tools: list[dict[str, Any]],
+    max_tokens: int,
+) -> dict[str, Any]:
+    """Run a native tool-calling LLM turn and trace its token usage."""
+    with llm_call(node="executor", label="choose_native_tool", messages=messages, max_tokens=max_tokens):
+        return llm.complete_with_tools(messages, tools=tools, max_tokens=max_tokens)
+
+
 def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
+    """Return tool names already called for the current plan step."""
     return {
         str(artifact.get("tool") or "")
         for artifact in (state.get("artifacts") or [])
@@ -29,15 +49,18 @@ def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
 
 
 def _cache_key(query: str) -> str:
+    """Normalize a query into a short stable cache key."""
     return " ".join(query.lower().split())[:300]
 
 
 def _prune_tool_calls(records: list[ToolCallRecord], *, config: AgentConfig) -> list[ToolCallRecord]:
+    """Prune tool calls to the configured retention limit."""
     limit = max(0, int(config.policy.max_retained_tool_calls))
     return records[-limit:] if limit else []
 
 
 def _prune_artifacts(artifacts: list[Artifact], *, config: AgentConfig) -> list[Artifact]:
+    """Prune artifacts to the configured retention limit."""
     limit = max(0, int(config.policy.max_retained_artifacts))
     if not limit:
         return []
@@ -57,6 +80,7 @@ def _prune_tool_discovery_cache(
     *,
     config: AgentConfig,
 ) -> dict[str, list[dict[str, Any]]]:
+    """Prune tool discovery cache to the configured retention limit."""
     limit = max(0, int(config.policy.tool_discovery_cache_size))
     if not limit:
         return {}
@@ -65,6 +89,7 @@ def _prune_tool_discovery_cache(
 
 
 def _schema_for_tool(tool_name: str, candidate_tools: list[dict[str, Any]]) -> dict[str, Any]:
+    """Find the JSON input schema for a discovered tool."""
     for tool in candidate_tools:
         if tool.get("name") == tool_name:
             schema = tool.get("input_schema") or tool.get("inputSchema") or {}
@@ -73,6 +98,7 @@ def _schema_for_tool(tool_name: str, candidate_tools: list[dict[str, Any]]) -> d
 
 
 def _is_tool_allowed(tool_name: str, *, config: AgentConfig) -> bool:
+    """Return whether the configured tool policy allows this tool."""
     allowlist = {item for item in (config.policy.tools.allowlist or []) if item}
     denylist = {item for item in (config.policy.tools.denylist or []) if item}
     if tool_name in denylist:
@@ -83,6 +109,7 @@ def _is_tool_allowed(tool_name: str, *, config: AgentConfig) -> bool:
 
 
 def _filter_candidates_by_policy(candidates: list[dict[str, Any]], *, config: AgentConfig) -> list[dict[str, Any]]:
+    """Remove discovered tools blocked by allowlist or denylist policy."""
     filtered = []
     for candidate in candidates:
         tool_name = str(candidate.get("name") or "")
@@ -92,6 +119,7 @@ def _filter_candidates_by_policy(candidates: list[dict[str, Any]], *, config: Ag
 
 
 def _required_tools_for_step(config: AgentConfig, step: dict[str, Any]) -> set[str]:
+    """Return tool names that must run before this step can finish."""
     required = {tool for tool in (step.get("required_tools") or []) if tool}
     title = str(step.get("title") or "")
     for key, tools in (config.policy.tools.required_tools or {}).items():
@@ -109,6 +137,7 @@ def _apply_argument_injection(
     runtime_context: dict[str, Any],
     config: AgentConfig,
 ) -> dict[str, Any]:
+    """Inject trusted runtime-context values into tool arguments."""
     mapping = dict((config.policy.tools.argument_injection or {}).get(tool_name) or {})
     if not mapping or not schema:
         return arguments
@@ -127,6 +156,7 @@ def _apply_argument_injection(
 
 
 def _matches_json_type(value: Any, expected: Any) -> bool:
+    """Helper for matches json type."""
     if isinstance(expected, list):
         return any(_matches_json_type(value, item) for item in expected)
     if not expected:
@@ -149,6 +179,7 @@ def _matches_json_type(value: Any, expected: Any) -> bool:
 
 
 def _validate_tool_arguments(tool_name: str, arguments: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    """Validate tool arguments and raise or return errors when invalid."""
     if not schema:
         return []
 
@@ -187,6 +218,7 @@ def _record_invalid_tool_arguments(
     arguments: dict[str, Any],
     errors: list[str],
 ) -> dict[str, Any]:
+    """Record invalid tool arguments into workflow state or telemetry."""
     record: ToolCallRecord = {
         "name": tool_name,
         "args_preview": json.dumps(arguments)[:300],
@@ -211,6 +243,7 @@ def _record_invalid_tool_arguments(
 
 
 def _search_repeat_counter(iteration: dict[str, Any], *, step_index: int) -> int:
+    """Search repeat counter and return matching candidates."""
     prev_step = int(iteration.get("search_repeat_step", -1))
     if prev_step != step_index:
         iteration["search_repeat_step"] = step_index
@@ -233,7 +266,7 @@ def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: Llm
     )
     try:
         raw = run_with_deadline(
-            lambda: llm.complete(messages, max_tokens=2000),
+            lambda: _complete_llm(llm, messages, max_tokens=2000, node="executor", label="synthesize_answer"),
             timeout_seconds=config.policy.llm_timeout_seconds,
             label="executor answer synthesis LLM call",
         )
@@ -257,6 +290,7 @@ def _run_has_risk(state: AgentState) -> bool:
 
 
 def _native_tool_specs(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert discovered tools into OpenAI native tool-call specs."""
     specs = []
     for candidate in candidates[:7]:
         name = str(candidate.get("name") or "").strip()
@@ -332,6 +366,7 @@ def _prefetch_candidate_tools(
 
 
 def _was_denied(state: AgentState, tool_name: str) -> bool:
+    """Helper for was denied."""
     return any(
         record.get("name") == tool_name and record.get("status") == "denied"
         for record in (state.get("tool_calls") or [])
@@ -345,6 +380,7 @@ def _record_denial(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> None:
+    """Record a denied destructive tool call without executing it."""
     record: ToolCallRecord = {
         "name": tool_name,
         "args_preview": json.dumps(arguments)[:300],
@@ -372,6 +408,7 @@ def _execute_tool_call_action(
     on_artifact: Callable[[Artifact], None] | None,
     on_destructive_action: Callable[[str, dict[str, Any]], bool] | None,
 ) -> dict[str, Any]:
+    """Helper for execute tool call action."""
     tool_name = str(action.get("name") or "")
     arguments = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
     if not tool_name:
@@ -512,6 +549,10 @@ def _run_tool_and_record(
             "status": status,
             "arguments": arguments,
             "error": error,
+            "latency_ms": latency_ms,
+            "artifact_id": artifact.get("id"),
+            "artifact_score": round(float(artifact.get("composite_score") or 0.0), 3),
+            "artifact_truncated": truncated,
         }
     )
     return updates
@@ -528,6 +569,9 @@ def executor_node(
     on_artifact: Callable[[Artifact], None] | None = None,
     on_destructive_action: Callable[[str, dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
+    # The executor owns the active step: it discovers tools, validates tool
+    # arguments, records artifacts, and decides when a draft is ready.
+    """Execute the current plan step by choosing actions, calling tools, and drafting answers."""
     reviewer_enabled = config.policy.enable_reviewer and config.policy.reviewer.enabled
     reviewer_skip_reason = "reviewer_disabled"
     if reviewer_enabled and config.policy.reviewer.mode == "on_risk" and not _run_has_risk(state):
@@ -618,8 +662,8 @@ def executor_node(
         if use_native:
             try:
                 response = run_with_deadline(
-                    lambda: llm.complete_with_tools(
-                        messages, tools=_native_tool_specs(native_candidates), max_tokens=1200
+                    lambda: _complete_with_tools_llm(
+                        llm, messages, tools=_native_tool_specs(native_candidates), max_tokens=1200
                     ),
                     timeout_seconds=config.policy.llm_timeout_seconds,
                     label="executor LLM call",
@@ -653,7 +697,7 @@ def executor_node(
                     raw = str(response.get("content") or "")
         if action is None and not raw:
             raw = run_with_deadline(
-                lambda: llm.complete(messages, max_tokens=1200),
+                lambda: _complete_llm(llm, messages, max_tokens=1200, node="executor", label="choose_action"),
                 timeout_seconds=config.policy.llm_timeout_seconds,
                 label="executor LLM call",
             )
@@ -920,6 +964,7 @@ def executor_node(
 
 
 def _fallback_answer(state: AgentState) -> str:
+    """Build a best-effort answer when normal drafting cannot complete."""
     grounded = _artifact_grounded_answer(state)
     if grounded:
         return grounded
@@ -933,6 +978,7 @@ def _fallback_answer(state: AgentState) -> str:
 
 
 def _artifact_grounded_answer(state: AgentState) -> str:
+    """Render a deterministic answer directly from collected artifacts."""
     artifacts = state.get("artifacts") or []
     if not artifacts:
         return ""

@@ -18,7 +18,9 @@ _ENV_PATTERN = re.compile(r"\$\{([^}]+)\}")
 
 
 def _resolve_env(value: str) -> str:
+    """Resolve env from config or runtime input."""
     def replacer(match: re.Match[str]) -> str:
+        """Replace one ${ENV_NAME} placeholder with its environment value."""
         key = match.group(1)
         return os.getenv(key, "")
 
@@ -26,6 +28,7 @@ def _resolve_env(value: str) -> str:
 
 
 def _resolve_env_deep(obj: Any) -> Any:
+    """Resolve env deep from config or runtime input."""
     if isinstance(obj, str):
         return _resolve_env(obj)
     if isinstance(obj, dict):
@@ -36,6 +39,7 @@ def _resolve_env_deep(obj: Any) -> Any:
 
 
 def _as_bool(value: Any, default: bool = False) -> bool:
+    """Coerce a config value into bool form."""
     if value is None:
         return default
     if isinstance(value, bool):
@@ -50,6 +54,7 @@ def _as_bool(value: Any, default: bool = False) -> bool:
 
 
 def _as_int(value: Any, default: int) -> int:
+    """Coerce a config value into int form."""
     if value is None:
         return default
     if isinstance(value, str) and not value.strip():
@@ -58,6 +63,7 @@ def _as_int(value: Any, default: int) -> int:
 
 
 def _as_float(value: Any, default: float) -> float:
+    """Coerce a config value into float form."""
     if value is None:
         return default
     if isinstance(value, str) and not value.strip():
@@ -67,6 +73,7 @@ def _as_float(value: Any, default: float) -> float:
 
 @dataclass
 class TruncationPolicy:
+    """Runtime settings for trimming and scoring artifacts."""
     max_artifact_chars: int = 2500
     score_weights: dict[str, float] = field(
         default_factory=lambda: {
@@ -81,6 +88,7 @@ class TruncationPolicy:
 
 @dataclass
 class ToolPolicy:
+    """Runtime settings for tool allowlists, denylists, and injection."""
     allowlist: list[str] = field(default_factory=list)
     denylist: list[str] = field(default_factory=list)
     required_tools: dict[str, list[str]] = field(default_factory=dict)
@@ -89,12 +97,14 @@ class ToolPolicy:
 
 @dataclass
 class PlannerDefaults:
+    """Runtime planner defaults."""
     enabled: bool = True
     max_tokens: int = 1500
 
 
 @dataclass
 class ReviewerDefaults:
+    """Runtime reviewer defaults."""
     enabled: bool = True
     max_tokens: int = 1200
     max_cycles: int = 2
@@ -104,6 +114,7 @@ class ReviewerDefaults:
 
 @dataclass
 class AgentPolicy:
+    """Runtime policy controlling workflow limits and gates."""
     max_executor_iterations: int = 12
     max_review_cycles: int = 2
     max_tool_calls_per_step: int = 4
@@ -132,6 +143,7 @@ class AgentPolicy:
 
 @dataclass
 class ToolDiscoveryConfig:
+    """Runtime settings for semantic tool discovery."""
     mode: str = "fallback"
     search_url: str = ""
     collections: list[str] = field(default_factory=list)
@@ -141,6 +153,7 @@ class ToolDiscoveryConfig:
 
 @dataclass
 class McpServerConfig:
+    """Runtime settings for one MCP server."""
     name: str = "default"
     url: str = ""
     auth_token: str = ""
@@ -152,6 +165,7 @@ class McpServerConfig:
 
 @dataclass
 class LlmConfig:
+    """Runtime settings for the LLM provider."""
     base_url: str = ""
     api_key: str = ""
     model: str = ""
@@ -166,6 +180,7 @@ class LlmConfig:
 
 @dataclass
 class McpConfig:
+    """Runtime settings for MCP providers."""
     url: str = ""
     auth_token: str = ""
     timeout_seconds: float = 120.0
@@ -175,12 +190,14 @@ class McpConfig:
 
 @dataclass
 class CheckpointerResource:
+    """Runtime checkpointer backend settings."""
     mode: str = ""  # "" (unset) | memory | redis | postgres
     url: str = ""
 
 
 @dataclass
 class ToolIndexResource:
+    """Runtime semantic tool index settings."""
     search_url: str = ""
     collections: list[str] = field(default_factory=list)
     owner_scope: str = ""
@@ -188,12 +205,14 @@ class ToolIndexResource:
 
 @dataclass
 class ResourcesConfig:
+    """Runtime infrastructure resources used by the agent."""
     checkpointer: CheckpointerResource = field(default_factory=CheckpointerResource)
     tool_index: ToolIndexResource = field(default_factory=ToolIndexResource)
 
 
 @dataclass
 class AgentConfig:
+    """Parsed agent configuration used by the workflow engine."""
     name: str
     prompts: dict[str, str]
     llm: LlmConfig
@@ -204,6 +223,7 @@ class AgentConfig:
     base_dir: Path = field(default_factory=Path.cwd)
 
     def prompt_text(self, role: str) -> str:
+        """Prompt text."""
         inline = str(self.prompts_inline.get(role) or "").strip()
         if inline:
             return inline
@@ -216,6 +236,7 @@ class AgentConfig:
         return path
 
     def signature(self) -> str:
+        """Return a stable cache key for this config without exposing secrets."""
         policy = self.policy
         payload = {
             "name": self.name,
@@ -308,11 +329,13 @@ class AgentConfig:
 
 
 def _transport_timeout(deadline_seconds: float, *, margin_seconds: float = 1.0) -> float:
+    """Helper for transport timeout."""
     if deadline_seconds <= margin_seconds:
         return max(0.1, deadline_seconds * 0.8)
     return max(0.1, deadline_seconds - margin_seconds)
 
 def _default_score_weights() -> dict[str, float]:
+    """Helper for default score weights."""
     return {
         "relevance": 0.4,
         "freshness": 0.2,
@@ -322,6 +345,7 @@ def _default_score_weights() -> dict[str, float]:
 
 
 def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> AgentConfig:
+    """Validate raw config data and convert it into runtime dataclasses."""
     resolved = _resolve_env_deep(deepcopy(raw or {}))
     model = AgentConfigModel.model_validate(resolved)
     policy_raw = model.policy
@@ -462,6 +486,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
 
 
 def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Helper for deep merge."""
     merged = deepcopy(base)
     for key, value in (overrides or {}).items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
@@ -472,6 +497,7 @@ def _deep_merge(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, An
 
 
 def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentConfig:
+    """Apply runtime overrides to an existing agent config."""
     base_raw = {
         "name": base.name,
         "prompts": dict(base.prompts),
@@ -573,6 +599,7 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
 
 
 def load_agent_config(path: str | Path) -> AgentConfig:
+    """Load YAML or JSON config from disk and parse it."""
     config_path = Path(path).resolve()
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     base_dir = config_path.parent

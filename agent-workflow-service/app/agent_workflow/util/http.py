@@ -7,21 +7,26 @@ import httpx
 
 
 class WorkflowHTTPError(RuntimeError):
+    """Base exception for upstream HTTP failures."""
     def __init__(self, message: str, *, status_code: int | None = None, retry_after: float | None = None):
+        """Initialize this object with its runtime dependencies."""
         super().__init__(message)
         self.status_code = status_code
         self.retry_after = retry_after
 
 
 class TransientHTTPError(WorkflowHTTPError):
+    """HTTP failure that may succeed when retried."""
     pass
 
 
 class PermanentHTTPError(WorkflowHTTPError):
+    """HTTP failure that should not be retried."""
     pass
 
 
 def is_transient_http_error(error: BaseException) -> bool:
+    """Return whether transient http error is true."""
     if isinstance(error, TransientHTTPError):
         return True
     if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout)):
@@ -32,6 +37,7 @@ def is_transient_http_error(error: BaseException) -> bool:
 
 
 def raise_for_workflow_status(response: httpx.Response, *, service: str) -> None:
+    """Raise for workflow status."""
     if not response.is_error:
         return
     detail = response.text.strip()
@@ -55,6 +61,7 @@ def raise_for_workflow_status(response: httpx.Response, *, service: str) -> None
 
 
 def _parse_retry_after(value: str | None) -> float | None:
+    """Parse retry after into the shape used by the workflow."""
     if not value:
         return None
     value = value.strip()

@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from app.agent_workflow.config import AgentConfig
+from app.agent_workflow.telemetry import record_llm_usage
 from app.agent_workflow.util.http import is_transient_http_error, raise_for_workflow_status
 from app.agent_workflow.util.retry import with_transient_retries
 
@@ -26,6 +27,7 @@ def normalize_inference_model(model: str) -> str:
 
 @dataclass
 class OpenAiChatCompletionsProvider:
+    """OpenAI-compatible chat completions provider."""
     base_url: str
     model: str
     api_key: str = ""
@@ -42,6 +44,7 @@ class OpenAiChatCompletionsProvider:
 
     @classmethod
     def from_agent_config(cls, config: AgentConfig) -> "OpenAiChatCompletionsProvider":
+        """From agent config."""
         llm = config.llm
         model = str(config.policy.model or llm.model or "").strip()
         base_url = str(llm.base_url or "").strip()
@@ -63,6 +66,7 @@ class OpenAiChatCompletionsProvider:
         )
 
     def complete(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> str:
+        """Run one non-streaming LLM completion request."""
         body = self._request_body(messages, max_tokens=max_tokens, stream=False)
         data = with_transient_retries(lambda: self._post_json(body))
         self._record_usage(data.get("usage"))
@@ -110,6 +114,7 @@ class OpenAiChatCompletionsProvider:
         return {"content": self._extract_message_content(data), "tool_calls": tool_calls}
 
     def stream(self, messages: Sequence[dict[str, Any]], *, max_tokens: int = 1024) -> Iterator[str]:
+        """Run one streaming LLM completion request."""
         body = self._request_body(messages, max_tokens=max_tokens, stream=True)
         max_attempts = 3
         for attempt in range(max_attempts):
@@ -131,15 +136,18 @@ class OpenAiChatCompletionsProvider:
                     time.sleep(0.2 * (2**attempt))
 
     def usage_totals(self) -> dict[str, int]:
+        """Usage totals."""
         with self._usage_lock:
             return dict(self._usage_totals)
 
     def close(self) -> None:
+        """Release any underlying network or storage resources."""
         if self._client is not None:
             self._client.close()
             self._client = None
 
     def _request_body(self, messages: Sequence[dict[str, Any]], *, max_tokens: int, stream: bool) -> dict[str, Any]:
+        """Helper for request body."""
         return {
             "model": self.model,
             "messages": [self._message_to_dict(m) for m in messages],
@@ -153,6 +161,7 @@ class OpenAiChatCompletionsProvider:
         }
 
     def _post_json(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Send one upstream POST request and return the parsed response."""
         response = self._http_client().post(
             self._chat_completions_url(),
             headers=self._headers(),
@@ -162,6 +171,7 @@ class OpenAiChatCompletionsProvider:
         return response.json()
 
     def _stream_once(self, body: dict[str, Any]) -> Iterator[str]:
+        """Helper for stream once."""
         with self._http_client().stream(
             "POST",
             self._chat_completions_url(),
@@ -195,13 +205,18 @@ class OpenAiChatCompletionsProvider:
                     yield str(content)
 
     def _http_client(self) -> httpx.Client:
+        """Helper for http client."""
         if self._client is None:
             self._client = httpx.Client(timeout=self.timeout_seconds)
         return self._client
 
     def _record_usage(self, usage: Any) -> None:
+        """Record usage into workflow state or telemetry."""
         if not isinstance(usage, dict):
             return
+        # The provider is the only layer that sees exact usage from the
+        # OpenAI-compatible response. The active debug trace supplies the label.
+        record_llm_usage(usage)
         with self._usage_lock:
             for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                 value = usage.get(key)
@@ -209,12 +224,14 @@ class OpenAiChatCompletionsProvider:
                     self._usage_totals[key] = self._usage_totals.get(key, 0) + value
 
     def _headers(self) -> dict[str, str]:
+        """Build request headers for the upstream service."""
         headers = {"Content-Type": "application/json"}
         if self.api_key and self.send_auth_header:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
     def _chat_completions_url(self) -> str:
+        """Helper for chat completions url."""
         base = self.base_url.rstrip("/")
         if base.endswith("/chat/completions"):
             return base
@@ -222,6 +239,7 @@ class OpenAiChatCompletionsProvider:
 
     @staticmethod
     def _message_to_dict(message: dict[str, Any] | Any) -> dict[str, str]:
+        """Helper for message to dict."""
         if not isinstance(message, dict):
             role = getattr(message, "role", "user")
             content = getattr(message, "content", "")
@@ -230,6 +248,7 @@ class OpenAiChatCompletionsProvider:
 
     @staticmethod
     def _extract_message_content(data: dict[str, Any]) -> str:
+        """Extract message content from a larger payload."""
         choices = data.get("choices") or []
         if not choices:
             return ""

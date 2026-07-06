@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.agent_workflow.telemetry import trace_event_messages
+
 
 _ACTIVITY_FIELDS = (
     "phase",
@@ -70,6 +72,7 @@ def engine_event_to_sse(event: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
             "error": event.get("error"),
             "pending_approval": event.get("pending_approval"),
             "thread_id": event.get("thread_id"),
+            "debug_trace": trace_event_messages(event.get("debug_trace") or []),
         }
     return None
 

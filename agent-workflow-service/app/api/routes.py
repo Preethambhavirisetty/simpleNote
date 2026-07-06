@@ -17,6 +17,7 @@ from app.api.schema import (
     AgentWorkflowRunRequest,
     AgentWorkflowRuntimeBundleRequest,
 )
+from app.agent_workflow.telemetry import trace_event_messages
 
 
 router = APIRouter(
@@ -39,6 +40,8 @@ def run_agent_workflow(payload: AgentWorkflowRunRequest):
             "tool_call_count": len(result.tool_calls),
             "pending_approval": result.pending_approval,
             "error": result.error,
+            "events": result.events,
+            "debug_trace": trace_event_messages(result.events),
         }
     )
 
@@ -56,6 +59,8 @@ def run_agent_workflow_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest
             "tool_call_count": len(result.tool_calls),
             "pending_approval": result.pending_approval,
             "error": result.error,
+            "events": result.events,
+            "debug_trace": trace_event_messages(result.events),
         }
     )
 
@@ -108,5 +113,7 @@ def resume_agent_workflow(payload: AgentWorkflowResumeRequest):
             "tool_call_count": len(result.tool_calls),
             "pending_approval": result.pending_approval,
             "error": result.error,
+            "events": result.events,
+            "debug_trace": trace_event_messages(result.events),
         }
     )

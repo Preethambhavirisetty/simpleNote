@@ -10,6 +10,7 @@ T = TypeVar("T")
 
 
 def with_transient_retries(operation: Callable[[], T], *, max_attempts: int = 3, base_sleep_seconds: float = 0.2) -> T:
+    """With transient retries."""
     last_exc: Exception | None = None
     for attempt in range(max_attempts):
         try:

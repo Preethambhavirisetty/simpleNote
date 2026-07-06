@@ -34,6 +34,8 @@ curl http://127.0.0.1:5453/health
 
 When `AGENT_WORKFLOW_API_KEY` is set, send header `X-API-Key: <key>`.
 
+Debug trace: set `AGENT_WORKFLOW_DEBUG_TRACE=true` to include final-turn one-line workflow logs and token counts in sync `debug_trace` string arrays, sync `events`, and streaming `done.debug_trace` payloads.
+
 ## Postman example (YAML agent)
 
 ```http

@@ -10,13 +10,16 @@ from langgraph.checkpoint.memory import MemorySaver
 
 @dataclass
 class ManagedCheckpointer:
+    """Lifecycle wrapper around a LangGraph checkpointer."""
     checkpointer: Any
     _context: Any = None
 
     def __getattr__(self, name: str) -> Any:
+        """Delegate unknown attributes to the wrapped object."""
         return getattr(self.checkpointer, name)
 
     def close(self) -> None:
+        """Release any underlying network or storage resources."""
         close = getattr(self.checkpointer, "close", None)
         if callable(close):
             close()
@@ -71,6 +74,7 @@ def get_shared_checkpointer(mode: str, url: str = "") -> ManagedCheckpointer:
 
 
 def close_shared_checkpointers() -> None:
+    """Close all shared checkpointer connections."""
     with _shared_lock:
         savers = list(_shared_checkpointers.values())
         _shared_checkpointers.clear()
@@ -82,6 +86,7 @@ def close_shared_checkpointers() -> None:
 
 
 def delete_thread(checkpointer: Any, thread_id: str) -> None:
+    """Remove stored checkpoint data for a completed thread when supported."""
     if not thread_id:
         return
     for method_name in ("delete_thread", "delete", "delete_checkpoint"):
@@ -107,6 +112,7 @@ def delete_thread(checkpointer: Any, thread_id: str) -> None:
 
 
 def _from_conn_string(cls: Any, url: str) -> ManagedCheckpointer:
+    """Helper for from conn string."""
     factory = getattr(cls, "from_conn_string", None)
     if not callable(factory):
         return ManagedCheckpointer(cls(url))
@@ -118,6 +124,7 @@ def _from_conn_string(cls: Any, url: str) -> ManagedCheckpointer:
 
 
 def _required_url(*names: str) -> str:
+    """Helper for required url."""
     for name in names:
         value = os.getenv(name, "").strip()
         if value:
@@ -126,6 +133,7 @@ def _required_url(*names: str) -> str:
 
 
 def _key_matches_thread(key: Any, thread_id: str) -> bool:
+    """Helper for key matches thread."""
     if key == thread_id:
         return True
     if isinstance(key, tuple):

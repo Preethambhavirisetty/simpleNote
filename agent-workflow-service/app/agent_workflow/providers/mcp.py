@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import re
 import threading
 import time
@@ -12,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from app.agent_workflow.config import McpConfig, McpServerConfig, ToolDiscoveryConfig
+from app.agent_workflow.config import McpConfig, McpServerConfig
 from app.agent_workflow.providers.tool_index import HttpToolIndexProvider
 from app.agent_workflow.providers.tools import ToolCandidate, ToolProvider
 from app.agent_workflow.util.http import is_transient_http_error, raise_for_workflow_status
@@ -26,6 +25,7 @@ _TOKEN_RE = re.compile(r"[a-z0-9_]+", re.IGNORECASE)
 
 
 def create_tool_provider(mcp: McpConfig) -> ToolProvider:
+    """Create the MCP tool provider for one or more configured servers."""
     server_configs = _server_configs(mcp)
     if not server_configs:
         return EmptyToolProvider()
@@ -36,6 +36,7 @@ def create_tool_provider(mcp: McpConfig) -> ToolProvider:
 
 
 def _server_configs(mcp: McpConfig) -> list[McpServerConfig]:
+    """Build unique MCP server configs from parsed runtime settings."""
     configs = [server for server in (mcp.servers or []) if server.url]
     if not configs:
         # Env resolution happens at config parse time (parse_agent_config maps
@@ -77,6 +78,7 @@ def _server_configs(mcp: McpConfig) -> list[McpServerConfig]:
 
 
 def _collect_index_targets(configs: list[McpServerConfig]) -> tuple[list[str], str, str]:
+    """Collect semantic tool-index collections shared by MCP servers."""
     collections: list[str] = []
     owner_scope = ""
     search_url = ""
@@ -93,6 +95,7 @@ def _collect_index_targets(configs: list[McpServerConfig]) -> tuple[list[str], s
 
 
 def _search_via_tool_index(configs: list[McpServerConfig], query: str, *, limit: int) -> list[ToolCandidate]:
+    """Search via tool index and return matching candidates."""
     collections, owner_scope, search_url = _collect_index_targets(configs)
     if not collections:
         return []
@@ -113,6 +116,7 @@ def _search_via_tool_index(configs: list[McpServerConfig], query: str, *, limit:
 
 @dataclass
 class _CatalogEntry:
+    """Catalog entry connecting an exposed tool name to its MCP server."""
     server_name: str
     raw_name: str
     exposed_name: str
@@ -120,14 +124,18 @@ class _CatalogEntry:
 
 
 class MultiMcpToolProvider:
+    """Tool provider that fans out search and calls across MCP servers."""
     def __init__(self, providers: list[RemoteMcpToolProvider]):
+        """Initialize this object with its runtime dependencies."""
         self.providers = providers
 
     def close(self) -> None:
+        """Release any underlying network or storage resources."""
         for provider in self.providers:
             provider.close()
 
     def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+        """Search tools and return matching candidates."""
         configs = [provider.config for provider in self.providers if hasattr(provider, "config")]
         indexed = _search_via_tool_index(configs, query, limit=limit)
         if indexed:
@@ -136,6 +144,7 @@ class MultiMcpToolProvider:
         return _rank_catalog(entries, query, limit=limit)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Call tool and return the provider result."""
         entries = self._catalog_entries()
         matches = [entry for entry in entries if name in {entry.exposed_name, entry.raw_name}]
         if len(matches) != 1:
@@ -147,6 +156,7 @@ class MultiMcpToolProvider:
         return provider.call_tool(entry.raw_name, arguments or {}, validate=False)
 
     def _catalog_entries(self) -> list[_CatalogEntry]:
+        """Load and namespace all tools exposed by child MCP providers."""
         raw_entries: list[tuple[RemoteMcpToolProvider, ToolCandidate]] = []
         for provider in self.providers:
             for candidate in provider.list_tools():
@@ -180,7 +190,9 @@ class MultiMcpToolProvider:
 
 
 class RemoteMcpToolProvider:
+    """Tool provider for one remote MCP JSON-RPC server."""
     def __init__(self, config: McpServerConfig):
+        """Initialize this object with its runtime dependencies."""
         self.config = config
         self.server_name = config.name or "default"
         self._request_id = 0
@@ -199,9 +211,11 @@ class RemoteMcpToolProvider:
         self._client = httpx.Client(**client_kwargs)
 
     def close(self) -> None:
+        """Release any underlying network or storage resources."""
         self._client.close()
 
     def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+        """Search tools and return matching candidates."""
         indexed = _search_via_tool_index([self.config], query, limit=limit)
         if indexed:
             return indexed
@@ -227,6 +241,7 @@ class RemoteMcpToolProvider:
         )
 
     def list_tools(self) -> list[ToolCandidate]:
+        """List tools."""
         now = time.time()
         with self._catalog_lock:
             if self._catalog is not None and now - self._catalog_loaded_at < _CATALOG_TTL_SECONDS:
@@ -247,6 +262,7 @@ class RemoteMcpToolProvider:
             return list(tools)
 
     def call_tool(self, name: str, arguments: dict[str, Any], *, validate: bool = True) -> Any:
+        """Call tool and return the provider result."""
         if validate:
             schema = self._schema_for_tool(name)
             _validate_arguments(name, arguments or {}, schema)
@@ -254,6 +270,7 @@ class RemoteMcpToolProvider:
         return normalize_mcp_tool_result(result)
 
     def _schema_for_tool(self, name: str) -> dict[str, Any]:
+        """Helper for schema for tool."""
         catalog = self.list_tools()
         for candidate in catalog:
             if candidate.name == name:
@@ -264,6 +281,7 @@ class RemoteMcpToolProvider:
         return {}
 
     def _jsonrpc(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Helper for jsonrpc."""
         headers = self._headers()
         self._ensure_initialized(headers)
         payload = {
@@ -278,6 +296,7 @@ class RemoteMcpToolProvider:
         return body.get("result") or {}
 
     def _headers(self) -> dict[str, str]:
+        """Build request headers for the upstream service."""
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
@@ -287,11 +306,13 @@ class RemoteMcpToolProvider:
         return headers
 
     def _next_request_id(self) -> int:
+        """Return the next value in the provider sequence."""
         with self._id_lock:
             self._request_id += 1
             return self._request_id
 
     def _ensure_initialized(self, headers: dict[str, str]) -> None:
+        """Helper for ensure initialized."""
         if self._initialized:
             return
         with self._init_lock:
@@ -321,6 +342,7 @@ class RemoteMcpToolProvider:
             self._initialized = True
 
     def _post_jsonrpc(self, payload: dict[str, Any], *, headers: dict[str, str]) -> dict[str, Any]:
+        """Send one upstream POST request and return the parsed response."""
         last_exc: Exception | None = None
         for attempt in range(3):
             try:
@@ -343,13 +365,16 @@ class EmptyToolProvider:
     """No MCP server configured; useful for fast-path-only apps and explicit test injection."""
 
     def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+        """Search tools and return matching candidates."""
         return []
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        """Call tool and return the provider result."""
         raise RuntimeError(f"No MCP servers are configured for tool call {name!r}")
 
 
 def _parse_jsonrpc_response(raw: str) -> dict[str, Any]:
+    """Parse jsonrpc response into the shape used by the workflow."""
     text = raw.strip()
     if text.startswith("{"):
         return json.loads(text)
@@ -362,12 +387,14 @@ def _parse_jsonrpc_response(raw: str) -> dict[str, Any]:
 
 
 def _normalize_list_tools_result(result: Any) -> list[ToolCandidate]:
+    """Normalize MCP tools/list payloads into tool candidates."""
     if not isinstance(result, dict):
         return []
     return [_candidate_from_payload(item, 0.0) for item in (result.get("tools") or []) if isinstance(item, dict)]
 
 
 def _normalize_search_result(result: Any) -> list[ToolCandidate]:
+    """Normalize semantic tool-search payloads into tool candidates."""
     if isinstance(result, list):
         items = result
     elif isinstance(result, dict):
@@ -389,6 +416,7 @@ def _normalize_search_result(result: Any) -> list[ToolCandidate]:
 
 
 def _candidate_from_payload(payload: dict[str, Any], score: float) -> ToolCandidate:
+    """Create a ToolCandidate from one MCP tool payload."""
     name = str(payload.get("name") or "").strip()
     annotations = payload.get("annotations") if isinstance(payload.get("annotations"), dict) else {}
     schema = payload.get("inputSchema") if isinstance(payload.get("inputSchema"), dict) else payload.get("input_schema")
@@ -402,6 +430,7 @@ def _candidate_from_payload(payload: dict[str, Any], score: float) -> ToolCandid
 
 
 def _rank_catalog(entries: list[_CatalogEntry], query: str, *, limit: int) -> list[ToolCandidate]:
+    """Rank locally cached tools by keyword overlap with the query."""
     query_tokens = _tokens(query)
     ranked: list[tuple[float, ToolCandidate]] = []
     for entry in entries:
@@ -425,6 +454,7 @@ def _rank_catalog(entries: list[_CatalogEntry], query: str, *, limit: int) -> li
 
 
 def _tokens(text: str) -> set[str]:
+    """Tokenize text for lightweight local tool ranking."""
     return {token.lower() for token in _TOKEN_RE.findall(text) if len(token) > 2}
 
 
@@ -475,12 +505,14 @@ def normalize_mcp_tool_result(result: Any) -> Any:
 
 
 def _validate_arguments(tool_name: str, arguments: dict[str, Any], schema: dict[str, Any]) -> None:
+    """Raise when tool arguments do not match the tool schema."""
     errors = _argument_errors(arguments, schema)
     if errors:
         raise ValueError(f"Invalid arguments for {tool_name}: {'; '.join(errors)}")
 
 
 def _argument_errors(arguments: dict[str, Any], schema: dict[str, Any]) -> list[str]:
+    """Return schema validation errors for a tool argument object."""
     if not schema:
         return []
     errors: list[str] = []
@@ -506,6 +538,7 @@ def _argument_errors(arguments: dict[str, Any], schema: dict[str, Any]) -> list[
 
 
 def _matches_json_type(value: Any, expected: Any) -> bool:
+    """Return whether a Python value matches an expected JSON schema type."""
     if isinstance(expected, list):
         return any(_matches_json_type(value, item) for item in expected)
     if not expected:

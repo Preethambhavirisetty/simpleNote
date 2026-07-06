@@ -11,10 +11,15 @@ Role = Literal["planner", "executor", "reviewer"]
 
 
 class ContextBuilder:
+    """Builds role-specific LLM messages from workflow state."""
     def __init__(self, config: AgentConfig):
+        """Initialize this object with its runtime dependencies."""
         self.config = config
 
     def build(self, state: AgentState, role: Role) -> list[dict[str, str]]:
+        """Build the prompt messages for a planner, executor, or reviewer LLM call."""
+        # Every LLM node receives the same state, but each role needs a
+        # different view. This builder selects and orders the useful sections.
         system = self.config.prompt_text(role)
         if self.config.policy.instructions:
             system = f"{system}\n\n## Agent instructions\n{self.config.policy.instructions}"
@@ -58,6 +63,9 @@ class ContextBuilder:
         ]
 
     def _fit_budget(self, sections: list[tuple[int, str]], system: str) -> str:
+        """Select the highest-priority context sections that fit the token budget."""
+        # Higher-priority sections win when context is tight; artifacts are the
+        # only section we partially trim because they can be long tool outputs.
         max_tokens = self.config.policy.max_context_tokens
         used = count_tokens(system) + 50
         ordered = sorted(sections, key=lambda item: item[0], reverse=True)
@@ -78,6 +86,7 @@ class ContextBuilder:
 
     @staticmethod
     def _trim_section_to_token_budget(text: str, token_budget: int) -> str:
+        """Trim a long context section while preserving whole artifact bullets."""
         if token_budget <= 0:
             return ""
         max_chars = max(200, token_budget * 4)
@@ -86,6 +95,7 @@ class ContextBuilder:
         return text[:max_chars].rsplit("\n- ", 1)[0].rstrip() + "\n- [truncated] additional artifacts omitted due to context budget"
 
     def _format_plan(self, plan: dict[str, Any], step_index: int, role: Role) -> str:
+        """Format plan for inclusion in LLM context."""
         lines = [f"Goal: {plan.get('goal', '')}"]
         steps = plan.get("steps") or []
         for idx, step in enumerate(steps):
@@ -101,6 +111,7 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _format_tools(self, tools: list[dict[str, Any]]) -> str:
+        """Format tools for inclusion in LLM context."""
         lines = []
         for tool in tools[:7]:
             schema = tool.get("input_schema") or tool.get("inputSchema") or {}
@@ -111,6 +122,7 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _format_artifacts(self, artifacts: list[Artifact]) -> str:
+        """Format artifacts for inclusion in LLM context."""
         lines = []
         for artifact in artifacts[:8]:
             scores = artifact.get("scores") or {}
@@ -125,11 +137,13 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _format_tool_calls(self, records: list[dict[str, Any]]) -> str:
+        """Format tool calls for inclusion in LLM context."""
         return "\n".join(
             f"- {r.get('name')} ({r.get('status')}): {r.get('args_preview', '')}" for r in records
         )
 
     def _format_history(self, messages: list[dict[str, Any]]) -> str:
+        """Format history for inclusion in LLM context."""
         lines = []
         for message in messages[-6:]:
             lines.append(f"{message.get('role', 'user')}: {str(message.get('content', ''))[:500]}")

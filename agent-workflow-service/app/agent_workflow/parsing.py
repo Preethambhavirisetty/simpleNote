@@ -8,6 +8,7 @@ from app.agent_workflow.state import Plan, PlanStep, ReviewResult
 
 
 def parse_plan_markdown(text: str) -> Plan:
+    """Parse planner markdown into the structured plan used by the graph."""
     sections = _split_sections(text)
     steps = _parse_steps(sections.get("execution plan", ""))
     return Plan(
@@ -22,6 +23,7 @@ def parse_plan_markdown(text: str) -> Plan:
 
 
 def parse_review_markdown(text: str) -> ReviewResult:
+    """Parse reviewer markdown into a structured review result."""
     sections = _split_sections(text)
     verdict = "REVISE"
     verdict_block = sections.get("verdict", "")
@@ -40,6 +42,7 @@ def parse_review_markdown(text: str) -> ReviewResult:
 
 
 def parse_executor_action(text: str) -> dict[str, Any]:
+    """Parse the executor JSON action and fall back to a draft answer when needed."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
@@ -63,6 +66,7 @@ def parse_executor_action(text: str) -> dict[str, Any]:
 
 
 def _split_sections(text: str) -> dict[str, str]:
+    """Helper for split sections."""
     sections: dict[str, str] = {}
     current = ""
     body: list[str] = []
@@ -80,6 +84,7 @@ def _split_sections(text: str) -> dict[str, str]:
 
 
 def _bullets(block: str) -> list[str]:
+    """Helper for bullets."""
     items = []
     for line in block.splitlines():
         line = line.strip()
@@ -91,6 +96,7 @@ def _bullets(block: str) -> list[str]:
 
 
 def _numbered(block: str) -> list[str]:
+    """Helper for numbered."""
     items = []
     for line in block.splitlines():
         line = line.strip()
@@ -102,6 +108,7 @@ def _numbered(block: str) -> list[str]:
 
 
 def _parse_steps(block: str) -> list[PlanStep]:
+    """Parse steps into the shape used by the workflow."""
     steps: list[PlanStep] = []
     chunks = re.split(r"\n(?=\d+\.\s+\*\*)", block)
     for chunk in chunks:
@@ -126,12 +133,14 @@ def _parse_steps(block: str) -> list[PlanStep]:
 
 
 def _field(block: str, label: str) -> str:
+    """Helper for field."""
     pattern = rf"{label}\s*[—:-]\s*(.+)"
     match = re.search(pattern, block, re.IGNORECASE)
     return match.group(1).strip() if match else ""
 
 
 def _csv_items(value: str) -> list[str]:
+    """Helper for csv items."""
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]

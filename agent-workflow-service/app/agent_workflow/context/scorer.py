@@ -20,6 +20,7 @@ def score_artifact(
     semantic_score: float | None = None,
     created_at: float | None = None,
 ) -> dict[str, float]:
+    """Score a tool artifact for relevance, freshness, uniqueness, and actionability."""
     relevance = _relevance_score(summary, step_query, semantic_score)
     freshness = _freshness_score(tool_result, created_at, policy.freshness_half_life_seconds)
     uniqueness = _uniqueness_score(summary, existing_artifacts)
@@ -42,6 +43,7 @@ def score_artifact(
 
 
 def _relevance_score(summary: str, step_query: str, semantic_score: float | None) -> float:
+    """Compute the relevance score used for artifact ranking."""
     if semantic_score is not None:
         return max(0.0, min(float(semantic_score), 1.0))
     query_terms = set(_tokenize(step_query))
@@ -59,6 +61,7 @@ def _freshness_score(
     created_at: float | None,
     half_life: float,
 ) -> float:
+    """Compute the freshness score used for artifact ranking."""
     payload_time = _extract_timestamp(tool_result)
     reference = payload_time or created_at or time.time()
     age = max(0.0, time.time() - reference)
@@ -68,6 +71,7 @@ def _freshness_score(
 
 
 def _uniqueness_score(summary: str, existing_artifacts: list[Artifact]) -> float:
+    """Compute the uniqueness score used for artifact ranking."""
     if not existing_artifacts:
         return 1.0
     summary_tokens = set(_tokenize(summary))
@@ -84,6 +88,7 @@ def _uniqueness_score(summary: str, existing_artifacts: list[Artifact]) -> float
 
 
 def _actionability_score(tool_result: Any) -> float:
+    """Compute the actionability score used for artifact ranking."""
     if isinstance(tool_result, dict):
         score = 0.2
         id_keys = ("id", "doc_id", "document_id", "card_id", "panel_id", "chunk_id")
@@ -105,6 +110,7 @@ def _actionability_score(tool_result: Any) -> float:
 
 
 def _extract_timestamp(tool_result: Any) -> float | None:
+    """Extract timestamp from a larger payload."""
     if not isinstance(tool_result, dict):
         return None
     for key in ("updated_at", "modified_at", "timestamp", "version"):
@@ -120,8 +126,10 @@ def _extract_timestamp(tool_result: Any) -> float | None:
 
 
 def _tokenize(text: str) -> list[str]:
+    """Helper for tokenize."""
     return [t for t in re.findall(r"[a-z0-9_]+", text.lower()) if len(t) > 1]
 
 
 def content_fingerprint(text: str) -> str:
+    """Build a stable fingerprint for text content."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]

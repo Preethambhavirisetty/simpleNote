@@ -20,6 +20,7 @@ from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.runtime_schema import RunRequestModel
 from app.agent_workflow.state import AgentState
+from app.agent_workflow.telemetry import begin_turn_trace, finish_turn_trace, llm_call, record_workflow_update
 from app.agent_workflow.streaming import HostCallbacks, RunRequest, RunResult, map_graph_update
 
 
@@ -40,6 +41,7 @@ _GREETING_RE = re.compile(r"^(hi|hello|hey|thanks|thank you|ok|okay|yes|no)[!.\s
 
 
 def _merge_state(state: AgentState, update: dict[str, Any], *, max_events: int = 80) -> AgentState:
+    """Helper for merge state."""
     merged = {**state, **update}
     if "events" in update:
         events = list(state.get("events") or []) + list(update["events"])
@@ -69,6 +71,7 @@ class AgentEngine:
         # A checkpointer declared in the agent config (resources.checkpointer)
         # is more specific than a host-injected default and wins; explicit
         # injection still applies for configs without a declared resource.
+        """Helper for post init."""
         resource = self.config.resources.checkpointer
         if resource.mode:
             self.checkpointer = get_shared_checkpointer(resource.mode, resource.url)
@@ -85,6 +88,7 @@ class AgentEngine:
             cache_signature = f"{cache_signature}:checkpointer:{id(self.checkpointer)}"
 
         def _build_cached() -> tuple[Any, Any]:
+            """Helper for build cached."""
             checkpointer = self.checkpointer or MemorySaver()
             # ManagedCheckpointer wraps the actual saver for lifecycle control;
             # langgraph's compile() requires the raw BaseCheckpointSaver.
@@ -110,6 +114,7 @@ class AgentEngine:
         llm: LlmProvider | None = None,
         tools: ToolProvider | None = None,
     ) -> "AgentEngine":
+        """From config."""
         config = load_agent_config(path)
         signature = config.signature()
         llm_provider = llm or get_or_create_provider(
@@ -141,6 +146,7 @@ class AgentEngine:
         llm: LlmProvider | None = None,
         tools: ToolProvider | None = None,
     ) -> "AgentEngine":
+        """From dict."""
         config = parse_agent_config(raw, base_dir=Path(base_dir).resolve() if base_dir else None)
         signature = config.signature()
         llm_provider = llm or get_or_create_provider(
@@ -172,6 +178,7 @@ class AgentEngine:
         llm: LlmProvider | None = None,
         tools: ToolProvider | None = None,
     ) -> "AgentEngine":
+        """From runtime config."""
         if isinstance(base, (str, Path)):
             config = load_agent_config(base)
         else:
@@ -199,6 +206,7 @@ class AgentEngine:
 
     @staticmethod
     def _validate_request(request: RunRequest) -> RunRequest:
+        """Validate request and raise or return errors when invalid."""
         model = RunRequestModel.model_validate(
             {
                 "query": request.query,
@@ -215,6 +223,7 @@ class AgentEngine:
         )
 
     def _can_fast_path(self, request: RunRequest) -> tuple[bool, str]:
+        """Helper for can fast path."""
         if not self.config.policy.enable_fast_path:
             return False, "disabled"
         query = request.query.strip()
@@ -238,6 +247,7 @@ class AgentEngine:
         return False, "not_simple"
 
     def _direct_answer_messages(self, request: RunRequest) -> list[dict[str, str]]:
+        """Helper for direct answer messages."""
         messages: list[dict[str, str]] = [
             {
                 "role": "system",
@@ -256,7 +266,10 @@ class AgentEngine:
         return messages
 
     def _fast_path_result(self, request: RunRequest, thread_id: str, reason: str) -> RunResult:
-        answer = self.llm.complete(self._direct_answer_messages(request), max_tokens=512).strip()
+        """Helper for fast path result."""
+        messages = self._direct_answer_messages(request)
+        with llm_call(node="router", label="fast_path_complete", messages=messages, max_tokens=512):
+            answer = self.llm.complete(messages, max_tokens=512).strip()
         return RunResult(
             answer=answer,
             review={"verdict": "SKIPPED", "reason": reason},
@@ -267,11 +280,13 @@ class AgentEngine:
         )
 
     def _emit_fast_path_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Helper for emit fast path event."""
         if self.callbacks.on_event:
             self.callbacks.on_event(event)
         return event
 
     def _stream_fast_path(self, request: RunRequest, thread_id: str, reason: str) -> Iterator[dict[str, Any]]:
+        """Helper for stream fast path."""
         yield self._emit_fast_path_event(
             {
                 "type": "debug",
@@ -280,15 +295,18 @@ class AgentEngine:
             }
         )
         parts: list[str] = []
+        messages = self._direct_answer_messages(request)
         try:
-            for token in self.llm.stream(self._direct_answer_messages(request), max_tokens=512):
-                if not token:
-                    continue
-                parts.append(token)
-                yield self._emit_fast_path_event({"type": "delta", "content": token, "thread_id": thread_id})
+            with llm_call(node="router", label="fast_path_stream", messages=messages, max_tokens=512):
+                for token in self.llm.stream(messages, max_tokens=512):
+                    if not token:
+                        continue
+                    parts.append(token)
+                    yield self._emit_fast_path_event({"type": "delta", "content": token, "thread_id": thread_id})
         except Exception as exc:
             if not parts:
-                answer = self.llm.complete(self._direct_answer_messages(request), max_tokens=512).strip()
+                with llm_call(node="router", label="fast_path_stream_fallback", messages=messages, max_tokens=512):
+                    answer = self.llm.complete(messages, max_tokens=512).strip()
                 parts.append(answer)
                 yield self._emit_fast_path_event({"type": "delta", "content": answer, "thread_id": thread_id})
             yield self._emit_fast_path_event(
@@ -303,10 +321,12 @@ class AgentEngine:
                 "tool_call_count": 0,
                 "error": None,
                 "thread_id": thread_id,
+                "debug_trace": finish_turn_trace(),
             }
         )
 
     def _initial_state(self, request: RunRequest) -> AgentState:
+        """Helper for initial state."""
         plan = {}
         phase = "planning"
         planner_enabled = self.config.policy.enable_planner and self.config.policy.planner.enabled
@@ -347,6 +367,7 @@ class AgentEngine:
         )
 
     def _callback_map(self) -> dict[str, Any]:
+        """Call callback map and return the provider result."""
         return {
             "on_tool_search": self.callbacks.on_tool_search,
             "on_tool_call": self.callbacks.on_tool_call,
@@ -357,9 +378,11 @@ class AgentEngine:
     def _new_thread_id(self, session_id: str) -> str:
         # Unique per run: reusing a conversation-scoped id verbatim would collide
         # with the previous turn's checkpoint (including a paused interrupt).
+        """Helper for new thread id."""
         return f"{session_id or 'run'}-{uuid.uuid4().hex[:12]}"
 
     def _thread_config(self, thread_id: str) -> dict[str, Any]:
+        """Helper for thread config."""
         review_cycles = max(0, self.config.policy.reviewer.max_cycles)
         review_passes = max(1, review_cycles + 1)
         replan_passes = max(1, review_cycles + 1)
@@ -371,6 +394,7 @@ class AgentEngine:
 
     @staticmethod
     def _awaiting_answer(pending: dict[str, Any]) -> str:
+        """Helper for awaiting answer."""
         tool = pending.get("tool") or "a destructive tool"
         return (
             f"This request needs an action that requires approval: {tool}. "
@@ -378,6 +402,7 @@ class AgentEngine:
         )
 
     def _recursion_error_result(self, state: AgentState, exc: GraphRecursionError, thread_id: str) -> RunResult:
+        """Helper for recursion error result."""
         answer = str(state.get("final_answer") or state.get("draft_answer") or "")
         if not answer and state.get("artifacts"):
             from app.agent_workflow.nodes.executor import _fallback_answer
@@ -396,6 +421,7 @@ class AgentEngine:
     # ── update pump (shared by run/stream/resume) ──────────────────────────────
 
     def _pending_events_from_interrupt(self, raw_interrupt: Any, thread_id: str) -> Iterator[dict[str, Any]]:
+        """Helper for pending events from interrupt."""
         interrupts = raw_interrupt if isinstance(raw_interrupt, (list, tuple)) else [raw_interrupt]
         for intr in interrupts:
             payload = getattr(intr, "value", None)
@@ -440,6 +466,7 @@ class AgentEngine:
                     continue
                 if not isinstance(update, dict):
                     continue
+                record_workflow_update(update, holder["state"])
                 if update.get("plan") and self.callbacks.on_plan:
                     self.callbacks.on_plan(dict(update["plan"]))
                 if update.get("review") and self.callbacks.on_review:
@@ -462,6 +489,7 @@ class AgentEngine:
 
     @staticmethod
     def _pending_approval_event(state: AgentState, thread_id: str) -> dict[str, Any] | None:
+        """Helper for pending approval event."""
         pending = state.get("pending_destructive")
         if state.get("phase") != "awaiting_approval" or not pending:
             return None
@@ -471,6 +499,7 @@ class AgentEngine:
 
     @staticmethod
     def _error_result(thread_id: str, error: str) -> RunResult:
+        """Helper for error result."""
         return RunResult(
             answer="",
             review={},
@@ -506,11 +535,13 @@ class AgentEngine:
         }
 
     def _cleanup_thread_if_terminal(self, state: AgentState, thread_id: str) -> None:
+        """Helper for cleanup thread if terminal."""
         if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
             return
         delete_thread(self.checkpointer, thread_id)
 
     def _result_from_state(self, state: AgentState, thread_id: str) -> RunResult:
+        """Helper for result from state."""
         pending = state.get("pending_destructive")
         awaiting = state.get("phase") == "awaiting_approval" and bool(pending)
         answer = str(state.get("final_answer") or state.get("draft_answer") or "")
@@ -528,6 +559,7 @@ class AgentEngine:
         )
 
     def _llm_usage_snapshot(self) -> dict[str, int]:
+        """Helper for llm usage snapshot."""
         usage = getattr(self.llm, "usage_totals", None)
         if not callable(usage):
             return {}
@@ -538,20 +570,25 @@ class AgentEngine:
 
     @staticmethod
     def _llm_usage_delta(start: dict[str, int], end: dict[str, int]) -> dict[str, int]:
+        """Helper for llm usage delta."""
         keys = set(start) | set(end)
         return {key: max(0, int(end.get(key, 0)) - int(start.get(key, 0))) for key in keys}
 
     def _attach_usage_event(self, result: RunResult, usage_start: dict[str, int]) -> RunResult:
+        """Helper for attach usage event."""
         usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
         if usage:
             result.events.append({"step": "telemetry.llm_usage", "usage": usage})
+        result.events.extend(finish_turn_trace())
         return result
 
     # ── public API ─────────────────────────────────────────────────────────────
 
     def run(self, request: RunRequest) -> RunResult:
+        """Run one request synchronously and return the final workflow result."""
         request = self._validate_request(request)
         thread_id = self._new_thread_id(request.session_id)
+        begin_turn_trace(thread_id, request.query)
         fast_path, reason = self._can_fast_path(request)
         if fast_path:
             usage_start = self._llm_usage_snapshot()
@@ -575,8 +612,10 @@ class AgentEngine:
         return result
 
     def stream(self, request: RunRequest) -> Iterator[dict[str, Any]]:
+        """Run one streaming LLM completion request."""
         request = self._validate_request(request)
         thread_id = self._new_thread_id(request.session_id)
+        begin_turn_trace(thread_id, request.query)
         fast_path, reason = self._can_fast_path(request)
         if fast_path:
             yield from self._stream_fast_path(request, thread_id, reason)
@@ -632,12 +671,14 @@ class AgentEngine:
             usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
             if usage:
                 final["usage"] = usage
+            final["debug_trace"] = finish_turn_trace()
             if self.callbacks.on_event:
                 self.callbacks.on_event(final)
             yield final
         self._cleanup_thread_if_terminal(holder["state"], thread_id)
 
     def resume(self, thread_id: str, *, approved: bool) -> RunResult:
+        """Resume a paused destructive-approval workflow and return its result."""
         last_event: dict[str, Any] | None = None
         for event in self.resume_stream(thread_id, approved=approved, cleanup_terminal=False):
             last_event = event
@@ -670,6 +711,7 @@ class AgentEngine:
             yield event
             return
 
+        begin_turn_trace(thread_id, str(state.get("user_query") or "resume"))
         holder = {"state": state}
         usage_start = self._llm_usage_snapshot()
         streamed_answer = False
@@ -701,6 +743,7 @@ class AgentEngine:
             usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
             if usage:
                 final["usage"] = usage
+            final["debug_trace"] = finish_turn_trace()
             if self.callbacks.on_event:
                 self.callbacks.on_event(final)
             yield final
@@ -709,6 +752,7 @@ class AgentEngine:
 
     @staticmethod
     def _done_event_from_result(result: RunResult) -> dict[str, Any]:
+        """Helper for done event from result."""
         return {
             "type": "done",
             "answer": result.answer,
@@ -717,4 +761,5 @@ class AgentEngine:
             "tool_call_count": len(result.tool_calls),
             "error": result.error,
             "thread_id": result.thread_id,
+            "debug_trace": finish_turn_trace(),
         }

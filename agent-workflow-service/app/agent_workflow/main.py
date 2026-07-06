@@ -13,6 +13,7 @@ _DEFAULT_CONFIG = _PACKAGE_DIR / "agents" / "default.yaml"
 
 
 def _print_review(event: dict) -> None:
+    """Helper for print review."""
     verdict = event.get("verdict", "?")
     print(f"\n[review] verdict={verdict}", flush=True)
     print(
@@ -36,6 +37,7 @@ def _print_review(event: dict) -> None:
 
 
 def main() -> None:
+    """Run the command-line workflow entrypoint."""
     if str(_ORCHESTRATOR_ROOT) not in sys.path:
         sys.path.insert(0, str(_ORCHESTRATOR_ROOT))
 
@@ -58,6 +60,7 @@ def main() -> None:
         raise SystemExit(2)
 
     def approve_destructive(tool: str, arguments: dict) -> bool:
+        """Ask the CLI user to approve or deny a destructive tool call."""
         if args.yes:
             return True
         prompt = f"\n[approval] run destructive tool {tool} with {json.dumps(arguments)[:200]}? [y/N] "

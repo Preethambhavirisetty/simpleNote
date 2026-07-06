@@ -14,6 +14,7 @@ _lock = RLock()
 
 
 def _set_lru_entry(cache: OrderedDict[str, Any], key: str, value: Any, *, max_entries: int) -> Any:
+    """Helper for set lru entry."""
     cache[key] = value
     cache.move_to_end(key)
     while len(cache) > max_entries:
@@ -26,6 +27,7 @@ def get_or_create_graph(
     signature: str,
     builder: Callable[[], tuple[Any, Any]],
 ) -> tuple[Any, Any]:
+    """Return a cached compiled graph or build and cache a new one."""
     with _lock:
         if signature in _graph_cache:
             value = _graph_cache.pop(signature)
@@ -51,6 +53,7 @@ def get_or_create_provider(
     kind: str,
     builder: Callable[[], Any],
 ) -> Any:
+    """Return a cached provider instance or build and cache one."""
     key = f"{signature}:{kind}"
     with _lock:
         if key in _provider_cache:
@@ -68,6 +71,7 @@ def get_or_create_provider(
 
 
 def clear_engine_caches() -> None:
+    """Close cached resources and clear graph/provider caches."""
     with _lock:
         for value in _graph_cache.values():
             _close_cached_value(value)
@@ -78,6 +82,7 @@ def clear_engine_caches() -> None:
 
 
 def _close_cached_value(value: Any) -> None:
+    """Helper for close cached value."""
     values = value if isinstance(value, tuple) else (value,)
     for item in values:
         close = getattr(item, "close", None)

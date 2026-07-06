@@ -6,9 +6,11 @@ from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
+from app.agent_workflow.telemetry import llm_call
 
 
 def _stream_writer() -> Callable[[Any], None] | None:
+    """Return LangGraph stream writer when finalizer streaming is active."""
     try:
         from langgraph.config import get_stream_writer
 
@@ -24,10 +26,14 @@ _MECHANICAL_PREFIXES = (
 
 
 def _is_mechanical_text(text: str) -> bool:
+    """Return whether text is a deterministic artifact dump."""
     return text.lstrip().startswith(_MECHANICAL_PREFIXES)
 
 
 def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
+    """Produce the final user-facing answer from an approved or mechanical draft."""
+    # The finalizer is the last rendering pass. It preserves the approved
+    # meaning and only spends another LLM call for mechanical artifact dumps.
     if state.get("phase") != "done" or state.get("pending_destructive"):
         return {}
 
@@ -35,7 +41,7 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     if not existing:
         return {}
     if not config.policy.render_final_answer:
-        return {"final_answer": existing}
+        return {"final_answer": existing, "events": [{"step": "finalizer.render_skipped", "reason": "disabled", "answer_chars": len(existing)}]}
 
     # An LLM-written draft is already user-facing prose; re-rendering it costs a
     # full LLM roundtrip for no quality gain. Render only mechanical drafts
@@ -44,21 +50,26 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
         final_answer = existing
         if config.policy.enforce_grounding:
             final_answer = _ensure_grounding(final_answer, state.get("artifacts") or [])
-        return {"final_answer": final_answer}
+        return {
+            "final_answer": final_answer,
+            "events": [{"step": "finalizer.reused_draft", "draft_kind": "llm", "answer_chars": len(final_answer)}],
+        }
 
     writer = _stream_writer()
     messages = _terminal_answer_messages(state, existing)
 
     def _render() -> str:
-        if writer is None:
-            return llm.complete(messages, max_tokens=2000)
-        parts: list[str] = []
-        for token in llm.stream(messages, max_tokens=2000):
-            if not token:
-                continue
-            parts.append(token)
-            writer({"type": "delta", "content": token})
-        return "".join(parts)
+        """Helper for render."""
+        with llm_call(node="finalizer", label="render_final_answer", messages=messages, max_tokens=2000):
+            if writer is None:
+                return llm.complete(messages, max_tokens=2000)
+            parts: list[str] = []
+            for token in llm.stream(messages, max_tokens=2000):
+                if not token:
+                    continue
+                parts.append(token)
+                writer({"type": "delta", "content": token})
+            return "".join(parts)
 
     try:
         rendered = run_with_deadline(
@@ -74,10 +85,21 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     final_answer = rendered or existing
     if config.policy.enforce_grounding:
         final_answer = _ensure_grounding(final_answer, state.get("artifacts") or [])
-    return {"final_answer": final_answer}
+    return {
+        "final_answer": final_answer,
+        "events": [
+            {
+                "step": "finalizer.rendered",
+                "used_llm_render": bool(rendered),
+                "answer_chars": len(final_answer),
+                "artifact_count": len(state.get("artifacts") or []),
+            }
+        ],
+    }
 
 
 def _terminal_answer_messages(state: AgentState, approved: str) -> list[dict[str, str]]:
+    """Build the finalizer prompt from the approved draft and artifacts."""
     artifacts = state.get("artifacts") or []
     source_lines = []
     for artifact in artifacts[:12]:
@@ -109,6 +131,7 @@ def _terminal_answer_messages(state: AgentState, approved: str) -> list[dict[str
 
 
 def _ensure_grounding(answer: str, artifacts: list[dict[str, Any]]) -> str:
+    """Append source references when grounding is required and missing."""
     if not artifacts:
         return answer
     refs = [_source_ref_text(artifact.get("source_ref") or {}) for artifact in artifacts[:3]]
@@ -121,6 +144,7 @@ def _ensure_grounding(answer: str, artifacts: list[dict[str, Any]]) -> str:
 
 
 def _source_ref_text(source_ref: dict[str, Any]) -> str:
+    """Format a compact source reference from artifact metadata."""
     parts = []
     for key in ("doc_id", "document_id", "page", "chunk_id", "id", "url", "title"):
         value = source_ref.get(key)

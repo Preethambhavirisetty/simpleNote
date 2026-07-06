@@ -9,6 +9,7 @@ _ENCODING = tiktoken.get_encoding("cl100k_base")
 
 
 def count_tokens(text: str) -> int:
+    """Count tokens with the service tokenizer and fall back to a character estimate."""
     if not text:
         return 0
     try:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -10,6 +9,7 @@ from app.agent_workflow.state import AgentState, Artifact
 
 @dataclass
 class RunRequest:
+    """Normalized request passed to the engine."""
     query: str
     session_id: str = ""
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -18,6 +18,7 @@ class RunRequest:
 
 @dataclass
 class RunResult:
+    """Final result returned by sync and resume calls."""
     answer: str
     review: dict[str, Any]
     artifacts: list[Artifact]
@@ -32,6 +33,7 @@ class RunResult:
 
 @dataclass
 class HostCallbacks:
+    """Optional hooks for hosts to observe workflow activity."""
     on_plan: Callable[[dict[str, Any]], None] | None = None
     on_tool_search: Callable[[str, list[dict[str, Any]]], None] | None = None
     on_tool_call: Callable[[str, dict[str, Any], Any], None] | None = None
@@ -43,6 +45,8 @@ class HostCallbacks:
 
 def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str, Any]]:
     """Translate LangGraph node output into host events."""
+    # Nodes store durable-ish workflow events in state. This function turns
+    # those internal events into API/SSE events that clients can render.
     events: list[dict[str, Any]] = []
     merged: AgentState = {**prev, **update}
 

@@ -8,9 +8,13 @@ from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.parsing import parse_plan_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
+from app.agent_workflow.telemetry import llm_call
 
 
 def planner_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
+    """Create or skip a plan and move the workflow into execution."""
+    # The planner turns the user request into explicit steps. That keeps the
+    # rest of the graph from guessing what "done" should mean.
     planner_cfg = config.policy.planner
     if not planner_cfg.enabled:
         return {
@@ -24,7 +28,7 @@ def planner_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) ->
     )
     try:
         raw = run_with_deadline(
-            lambda: llm.complete(messages, max_tokens=planner_cfg.max_tokens),
+            lambda: _complete_planner(llm, messages, planner_cfg.max_tokens),
             timeout_seconds=config.policy.llm_timeout_seconds,
             label="planner LLM call",
         )
@@ -47,3 +51,9 @@ def planner_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) ->
         "events": [{"step": "planner.completed", "goal": plan.get("goal", "")}],
         "iteration": iteration,
     }
+
+
+def _complete_planner(llm: LlmProvider, messages: list[dict[str, str]], max_tokens: int) -> str:
+    """Run the planner LLM call inside the debug trace wrapper."""
+    with llm_call(node="planner", label="create_plan", messages=messages, max_tokens=max_tokens):
+        return llm.complete(messages, max_tokens=max_tokens)

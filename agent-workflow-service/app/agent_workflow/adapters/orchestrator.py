@@ -55,4 +55,5 @@ def engine_event_to_sse(event: dict[str, Any]) -> tuple[str, dict[str, Any]] | N
 
 
 def sse_encode(event_name: str, payload: dict[str, Any]) -> str:
+    """Encode one server-sent event frame."""
     return f"event: {event_name}\ndata: {json.dumps(payload)}\n\n"

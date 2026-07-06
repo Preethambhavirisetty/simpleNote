@@ -4,6 +4,7 @@ from typing import Any, TypedDict
 
 
 class PlanStep(TypedDict, total=False):
+    """One planner step with optional tool and stopping guidance."""
     title: str
     action: str
     tool_hint: str
@@ -13,6 +14,7 @@ class PlanStep(TypedDict, total=False):
 
 
 class Plan(TypedDict, total=False):
+    """Structured planner output shared with executor and reviewer nodes."""
     goal: str
     assumptions: list[str]
     risks: list[str]
@@ -23,6 +25,7 @@ class Plan(TypedDict, total=False):
 
 
 class ReviewResult(TypedDict, total=False):
+    """Structured reviewer verdict and requested changes."""
     verdict: str  # APPROVE | REVISE | REJECT
     scorecard: dict[str, Any]
     issues: list[str]
@@ -33,6 +36,7 @@ class ReviewResult(TypedDict, total=False):
 
 
 class Artifact(TypedDict, total=False):
+    """Normalized evidence captured from a tool call."""
     id: str
     tool: str
     summary: str
@@ -46,6 +50,7 @@ class Artifact(TypedDict, total=False):
 
 
 class ToolCallRecord(TypedDict, total=False):
+    """Compact audit record for one attempted tool call."""
     name: str
     args_preview: str
     status: str
@@ -54,12 +59,14 @@ class ToolCallRecord(TypedDict, total=False):
 
 
 class IterationCounters(TypedDict, total=False):
+    """Counters used to cap loops and review cycles."""
     executor_turns: int
     review_cycles: int
     tool_calls: int
 
 
 class AgentState(TypedDict, total=False):
+    """LangGraph state object passed between workflow nodes."""
     messages: list[dict[str, Any]]
     user_query: str
     session_id: str

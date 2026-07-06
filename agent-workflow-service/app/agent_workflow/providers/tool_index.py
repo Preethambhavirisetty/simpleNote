@@ -15,17 +15,7 @@ DEFAULT_API_KEY = (os.getenv("TOOL_INDEX_API_KEY") or os.getenv("MCP_INTERNAL_KE
 
 
 class ToolIndexProvider(Protocol):
-    def search_tools(
-        self,
-        *,
-        owner_scope: str,
-        collections: list[str],
-        query: str,
-        limit: int = 25,
-    ) -> list[ToolCandidate]: ...
-
-
-class NullToolIndexProvider:
+    """Protocol for semantic tool-index backends."""
     def search_tools(
         self,
         *,
@@ -34,20 +24,39 @@ class NullToolIndexProvider:
         query: str,
         limit: int = 25,
     ) -> list[ToolCandidate]:
+        """Search the semantic tool index and return matching candidates."""
+        ...
+
+
+class NullToolIndexProvider:
+    """Disabled semantic tool-index provider."""
+    def search_tools(
+        self,
+        *,
+        owner_scope: str,
+        collections: list[str],
+        query: str,
+        limit: int = 25,
+    ) -> list[ToolCandidate]:
+        """Search tools and return matching candidates."""
         return []
 
 
 class HttpToolIndexProvider:
+    """HTTP client for the semantic tool-index service."""
     def __init__(self, search_url: str, api_key: str = "") -> None:
+        """Initialize this object with its runtime dependencies."""
         self.search_url = search_url.rstrip("/")
         self.api_key = api_key.strip()
 
     @property
     def available(self) -> bool:
+        """Return whether this provider has enough configuration to run."""
         return bool(self.search_url)
 
     @classmethod
     def from_env(cls) -> HttpToolIndexProvider:
+        """Create a provider from TOOL_INDEX_* environment settings."""
         return cls(search_url=DEFAULT_SEARCH_URL, api_key=DEFAULT_API_KEY)
 
     def search_tools(
@@ -58,6 +67,7 @@ class HttpToolIndexProvider:
         query: str,
         limit: int = 25,
     ) -> list[ToolCandidate]:
+        """Search tools and return matching candidates."""
         if not self.available or not collections:
             return []
         payload = {

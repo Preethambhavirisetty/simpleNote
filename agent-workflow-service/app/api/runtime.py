@@ -10,7 +10,7 @@ from app.agent_workflow.engine import AgentEngine
 from app.api.checkpointer import get_runtime_checkpointer
 from app.agent_workflow.streaming import RunRequest
 from app.api.config import AGENT_CONFIG_DIR, ALLOWED_UPSTREAM_HOSTS
-from app.api.runtime_bundle_adapter import build_engine_from_runtime_bundle, build_runtime_overrides
+from app.api.runtime_bundle_adapter import build_runtime_overrides
 from app.api.schema import AgentWorkflowRunRequest, AgentWorkflowRuntimeBundleRequest
 from app.api.sse_adapter import engine_event_to_sse, sse_encode
 

@@ -60,6 +60,7 @@ def truncate_tool_result(
 
 
 def _compact_raw_ref(tool_result: Any, *, truncated: bool) -> dict[str, Any]:
+    """Helper for compact raw ref."""
     if isinstance(tool_result, dict):
         ref: dict[str, Any] = {"type": "dict", "truncated": truncated, "keys": list(tool_result.keys())[:30]}
         for key in ("ok", "query", "user_id", "doc_id", "document_id", "note_id", "chunk_id", "page", "uri", "url", "path", "message"):
@@ -81,6 +82,7 @@ def _compact_raw_ref(tool_result: Any, *, truncated: bool) -> dict[str, Any]:
 
 
 def extract_source_ref(tool_result: Any) -> dict[str, Any]:
+    """Extract source ref from a larger payload."""
     if not isinstance(tool_result, dict):
         return {}
     ref: dict[str, Any] = {}
@@ -96,12 +98,14 @@ def extract_source_ref(tool_result: Any) -> dict[str, Any]:
 
 
 def _truncate_text(text: str, max_chars: int) -> str:
+    """Truncate text to fit configured context limits."""
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 20] + "\n...[truncated]..."
 
 
 def _truncate_dict(data: dict[str, Any], step_query: str, max_chars: int) -> tuple[dict[str, Any], bool]:
+    """Truncate dict to fit configured context limits."""
     truncated = False
     output: dict[str, Any] = {}
     query_terms = set(step_query.lower().split())
@@ -140,6 +144,7 @@ def _truncate_dict(data: dict[str, Any], step_query: str, max_chars: int) -> tup
 
 
 def _truncate_list(items: list[Any], max_chars: int) -> tuple[dict[str, Any], bool]:
+    """Truncate list to fit configured context limits."""
     truncated = len(items) > 5
     payload = {
         "items": items[:3],
@@ -156,4 +161,5 @@ def _truncate_list(items: list[Any], max_chars: int) -> tuple[dict[str, Any], bo
 
 
 def make_artifact_id(tool: str, summary: str) -> str:
+    """Make artifact id."""
     return f"{tool}:{content_fingerprint(summary)}"

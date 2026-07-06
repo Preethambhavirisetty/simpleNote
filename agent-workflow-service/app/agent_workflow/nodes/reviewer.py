@@ -8,9 +8,13 @@ from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.parsing import parse_review_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
+from app.agent_workflow.telemetry import llm_call
 
 
 def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
+    """Review the draft answer and decide whether to approve, revise, or replan."""
+    # The reviewer checks whether the draft is supported by the artifacts. Its
+    # verdict controls whether the graph finalizes, revises, or replans.
     reviewer_cfg = config.policy.reviewer
     if not reviewer_cfg.enabled:
         return {
@@ -29,7 +33,7 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
 
     try:
         raw = run_with_deadline(
-            lambda: llm.complete(messages, max_tokens=reviewer_cfg.max_tokens),
+            lambda: _complete_review(llm, messages, reviewer_cfg.max_tokens),
             timeout_seconds=config.policy.llm_timeout_seconds,
             label="reviewer LLM call",
         )
@@ -106,3 +110,9 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         }
     ]
     return updates
+
+
+def _complete_review(llm: LlmProvider, messages: list[dict[str, str]], max_tokens: int) -> str:
+    """Run the reviewer LLM call inside the debug trace wrapper."""
+    with llm_call(node="reviewer", label="review_draft", messages=messages, max_tokens=max_tokens):
+        return llm.complete(messages, max_tokens=max_tokens)

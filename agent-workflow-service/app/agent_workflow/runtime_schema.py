@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 def _empty_to_none(value: Any) -> Any:
+    """Helper for empty to none."""
     if isinstance(value, str) and not value.strip():
         return None
     return value
@@ -15,6 +16,7 @@ _BLOCKED_KEYS = {"__proto__", "constructor", "prototype"}
 
 
 def _validate_runtime_context_value(value: Any, *, depth: int = 0) -> Any:
+    """Validate runtime context value and raise or return errors when invalid."""
     if depth > 8:
         raise ValueError("runtime_context nesting exceeds 8 levels")
     if isinstance(value, dict):
@@ -37,6 +39,7 @@ def _validate_runtime_context_value(value: Any, *, depth: int = 0) -> Any:
 
 
 class RuntimeMessageModel(BaseModel):
+    """Validated chat history message supplied by a caller."""
     model_config = ConfigDict(extra="forbid")
 
     role: str = Field(..., pattern="^(system|user|assistant)$")
@@ -44,6 +47,7 @@ class RuntimeMessageModel(BaseModel):
 
 
 class TruncationPolicyModel(BaseModel):
+    """Validation model for artifact truncation settings."""
     model_config = ConfigDict(extra="forbid")
 
     max_artifact_chars: int = Field(2500, ge=200, le=20000)
@@ -52,6 +56,7 @@ class TruncationPolicyModel(BaseModel):
 
 
 class ToolPolicyModel(BaseModel):
+    """Validation model for allowed, denied, and required tools."""
     model_config = ConfigDict(extra="forbid")
 
     allowlist: list[str] = Field(default_factory=list, max_length=256)
@@ -61,6 +66,7 @@ class ToolPolicyModel(BaseModel):
 
 
 class PlannerDefaultsModel(BaseModel):
+    """Validation model for planner behavior settings."""
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
@@ -68,6 +74,7 @@ class PlannerDefaultsModel(BaseModel):
 
 
 class ReviewerDefaultsModel(BaseModel):
+    """Validation model for reviewer behavior settings."""
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
@@ -80,6 +87,7 @@ class ReviewerDefaultsModel(BaseModel):
 
 
 class AgentPolicyModel(BaseModel):
+    """Validation model for workflow policy settings."""
     model_config = ConfigDict(extra="forbid")
 
     max_executor_iterations: int = Field(12, ge=1, le=100)
@@ -109,6 +117,7 @@ class AgentPolicyModel(BaseModel):
 
 
 class ToolDiscoveryModel(BaseModel):
+    """Validation model for semantic MCP tool discovery settings."""
     model_config = ConfigDict(extra="forbid")
 
     mode: str = Field("fallback", max_length=32)
@@ -119,6 +128,7 @@ class ToolDiscoveryModel(BaseModel):
 
 
 class McpServerModel(BaseModel):
+    """Validation model for one MCP server definition."""
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field("default", min_length=1, max_length=120)
@@ -131,6 +141,7 @@ class McpServerModel(BaseModel):
 
 
 class McpConfigModel(BaseModel):
+    """Validation model for MCP connection settings."""
     model_config = ConfigDict(extra="forbid")
 
     url: str = Field("", max_length=2000)
@@ -141,6 +152,7 @@ class McpConfigModel(BaseModel):
 
 
 class LlmConfigModel(BaseModel):
+    """Validation model for LLM connection and sampling settings."""
     model_config = ConfigDict(extra="forbid")
 
     base_url: str = Field(..., min_length=1, max_length=2000)
@@ -159,15 +171,18 @@ class LlmConfigModel(BaseModel):
     @field_validator("default_max_tokens", "top_k", "seed", mode="before")
     @classmethod
     def coerce_empty_int(cls, value: Any) -> Any:
+        """Coerce empty int."""
         return _empty_to_none(value)
 
     @field_validator("temperature", "top_p", mode="before")
     @classmethod
     def coerce_empty_float(cls, value: Any) -> Any:
+        """Coerce empty float."""
         return _empty_to_none(value)
 
 
 class CheckpointerResourceModel(BaseModel):
+    """Validation model for durable checkpoint storage."""
     model_config = ConfigDict(extra="forbid")
 
     mode: str = Field("", pattern="^(|memory|redis|postgres|postgresql)$")
@@ -175,6 +190,7 @@ class CheckpointerResourceModel(BaseModel):
 
 
 class ToolIndexResourceModel(BaseModel):
+    """Validation model for shared semantic tool index settings."""
     model_config = ConfigDict(extra="forbid")
 
     search_url: str = Field("", max_length=2000)
@@ -197,6 +213,7 @@ class ResourcesModel(BaseModel):
 
 
 class AgentConfigModel(BaseModel):
+    """Validation model for a full agent workflow configuration."""
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field("agent", min_length=1, max_length=255)
@@ -210,6 +227,7 @@ class AgentConfigModel(BaseModel):
     @field_validator("prompts", "prompts_inline")
     @classmethod
     def validate_prompt_keys(cls, value: dict[str, str]) -> dict[str, str]:
+        """Validate prompt keys and raise or return errors when invalid."""
         allowed = {"planner", "executor", "reviewer"}
         unknown = sorted(set(value) - allowed)
         if unknown:
@@ -218,12 +236,14 @@ class AgentConfigModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_prompt_sources(self) -> "AgentConfigModel":
+        """Validate prompt sources and raise or return errors when invalid."""
         if not (self.prompts or self.prompts_inline):
             raise ValueError("at least one prompt source must be configured")
         return self
 
 
 class RunRequestModel(BaseModel):
+    """Validation model for incoming workflow run requests."""
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(..., min_length=1, max_length=12000)
@@ -234,6 +254,7 @@ class RunRequestModel(BaseModel):
     @field_validator("runtime_context", mode="before")
     @classmethod
     def validate_runtime_context(cls, value: Any) -> dict[str, Any]:
+        """Validate runtime context and raise or return errors when invalid."""
         if value is None:
             return {}
         if not isinstance(value, dict):
