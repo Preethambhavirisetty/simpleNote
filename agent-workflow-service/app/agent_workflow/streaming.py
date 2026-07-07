@@ -171,6 +171,17 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
                     "truncated_source_count": entry.get("truncated_source_count", 0),
                 }
             )
+        elif step == "summarizer.completed":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "running",
+                    "label": f"Compacted memory: folded {entry.get('folded_count', 0)} artifact(s) into a running summary",
+                    "answer_chars": entry.get("summary_chars", 0),
+                }
+            )
+        elif step in {"summarizer.timeout", "summarizer.noop"}:
+            events.append({"type": "debug", "message": f"Memory compaction {step.rsplit('.', 1)[-1]}: {entry.get('error') or entry.get('reason') or ''}"})
         elif step == "synthesizer.completed":
             events.append(
                 {

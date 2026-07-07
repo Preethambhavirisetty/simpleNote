@@ -18,6 +18,7 @@ def parse_plan_markdown(text: str) -> Plan:
         steps=steps,
         acceptance_criteria=_bullets(sections.get("acceptance criteria", "")),
         suggested_structure=sections.get("suggested user-facing structure", "").strip(),
+        search_query=_first_line(sections.get("search query", "")),
         raw_markdown=text,
     )
 
@@ -81,6 +82,15 @@ def _split_sections(text: str) -> dict[str, str]:
     if current:
         sections[current.lower()] = "\n".join(body).strip()
     return sections
+
+
+def _first_line(block: str) -> str:
+    """Return the first non-empty line of a section, stripped of list markers."""
+    for line in block.splitlines():
+        cleaned = line.strip().lstrip("-*").strip()
+        if cleaned:
+            return cleaned
+    return ""
 
 
 def _bullets(block: str) -> list[str]:

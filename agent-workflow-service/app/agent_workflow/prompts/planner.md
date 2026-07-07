@@ -16,6 +16,13 @@ Do not answer the user. Do not call tools. Do not assume tool results.
 
 ## Output Format
 
+### Search Query
+
+One line: a standalone search query for semantic tool discovery. Resolve pronouns
+and references from the conversation history into explicit nouns (e.g. rewrite
+"how many are there?" after a dashboard turn into "count of panels in the
+<name> dashboard"). If the request is already standalone, repeat it as-is.
+
 ### Goal
 
 One sentence.

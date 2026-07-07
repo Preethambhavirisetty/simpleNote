@@ -124,6 +124,16 @@ class FinalizerDefaultsModel(BaseModel):
     artifact_line_max_chars: int = Field(1200, ge=200, le=20000)
 
 
+class SummaryDefaultsModel(BaseModel):
+    """Validation model for the in-loop running-summary (memory compaction) node."""
+    model_config = ConfigDict(extra="forbid")
+
+    compact_after_artifacts: int = Field(16, ge=1, le=200)
+    keep_after_summary: int = Field(6, ge=0, le=200)
+    max_cycles: int = Field(3, ge=1, le=20)
+    max_tokens: int = Field(700, ge=128, le=16000)
+
+
 class RouterDefaultsModel(BaseModel):
     """Validation model for fast-path router limits."""
     model_config = ConfigDict(extra="forbid")
@@ -178,6 +188,7 @@ class AgentPolicyModel(BaseModel):
     enforce_grounding: bool = False
     enable_planner: bool = True
     enable_reviewer: bool = True
+    enable_running_summary: bool = False
     cross_turn_artifact_persistence: bool = False
     artifact_store_ttl_seconds: int = Field(86400, ge=60, le=604800)
     require_tool_on_follow_up: bool = True
@@ -189,6 +200,7 @@ class AgentPolicyModel(BaseModel):
     reviewer: ReviewerDefaultsModel = Field(default_factory=ReviewerDefaultsModel)
     executor: ExecutorDefaultsModel = Field(default_factory=ExecutorDefaultsModel)
     finalizer: FinalizerDefaultsModel = Field(default_factory=FinalizerDefaultsModel)
+    summary: SummaryDefaultsModel = Field(default_factory=SummaryDefaultsModel)
     router: RouterDefaultsModel = Field(default_factory=RouterDefaultsModel)
     context: ContextLimitsModel = Field(default_factory=ContextLimitsModel)
 

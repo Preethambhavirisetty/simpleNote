@@ -143,6 +143,15 @@ class FinalizerDefaults:
 
 
 @dataclass
+class SummaryDefaults:
+    """Runtime settings for the in-loop running-summary (memory compaction) node."""
+    compact_after_artifacts: int = 16  # trigger compaction once retained artifacts reach this
+    keep_after_summary: int = 6  # highest-scoring artifacts kept verbatim after compaction
+    max_cycles: int = 3  # hard cap on summarizer invocations per run
+    max_tokens: int = 700
+
+
+@dataclass
 class RouterDefaults:
     """Runtime fast-path router limits."""
     fast_path_max_tokens: int = 512
@@ -192,6 +201,7 @@ class AgentPolicy:
     enforce_grounding: bool = False
     enable_planner: bool = True
     enable_reviewer: bool = True
+    enable_running_summary: bool = False
     cross_turn_artifact_persistence: bool = False
     artifact_store_ttl_seconds: int = 86400
     require_tool_on_follow_up: bool = True
@@ -201,6 +211,7 @@ class AgentPolicy:
     reviewer: ReviewerDefaults = field(default_factory=ReviewerDefaults)
     executor: ExecutorDefaults = field(default_factory=ExecutorDefaults)
     finalizer: FinalizerDefaults = field(default_factory=FinalizerDefaults)
+    summary: SummaryDefaults = field(default_factory=SummaryDefaults)
     router: RouterDefaults = field(default_factory=RouterDefaults)
     context: ContextLimits = field(default_factory=ContextLimits)
     model: str | None = None
@@ -363,9 +374,16 @@ class AgentConfig:
                 "enforce_grounding": policy.enforce_grounding,
                 "enable_planner": policy.enable_planner,
                 "enable_reviewer": policy.enable_reviewer,
+                "enable_running_summary": policy.enable_running_summary,
                 "cross_turn_artifact_persistence": policy.cross_turn_artifact_persistence,
                 "artifact_store_ttl_seconds": policy.artifact_store_ttl_seconds,
                 "require_tool_on_follow_up": policy.require_tool_on_follow_up,
+                "summary": {
+                    "compact_after_artifacts": policy.summary.compact_after_artifacts,
+                    "keep_after_summary": policy.summary.keep_after_summary,
+                    "max_cycles": policy.summary.max_cycles,
+                    "max_tokens": policy.summary.max_tokens,
+                },
                 "truncation": {
                     "max_artifact_chars": policy.truncation.max_artifact_chars,
                     "max_string_field_chars": policy.truncation.max_string_field_chars,
@@ -485,6 +503,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         enforce_grounding=_as_bool(policy_raw.enforce_grounding, False),
         enable_planner=planner_enabled,
         enable_reviewer=reviewer_enabled,
+        enable_running_summary=_as_bool(policy_raw.enable_running_summary, False),
         cross_turn_artifact_persistence=_as_bool(policy_raw.cross_turn_artifact_persistence, False),
         artifact_store_ttl_seconds=_as_int(policy_raw.artifact_store_ttl_seconds, 86400),
         require_tool_on_follow_up=_as_bool(policy_raw.require_tool_on_follow_up, True),
@@ -532,6 +551,12 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
             max_tokens=_as_int(policy_raw.finalizer.max_tokens, 2000),
             max_artifact_lines=_as_int(policy_raw.finalizer.max_artifact_lines, 12),
             artifact_line_max_chars=_as_int(policy_raw.finalizer.artifact_line_max_chars, 1200),
+        ),
+        summary=SummaryDefaults(
+            compact_after_artifacts=_as_int(policy_raw.summary.compact_after_artifacts, 16),
+            keep_after_summary=_as_int(policy_raw.summary.keep_after_summary, 6),
+            max_cycles=_as_int(policy_raw.summary.max_cycles, 3),
+            max_tokens=_as_int(policy_raw.summary.max_tokens, 700),
         ),
         router=RouterDefaults(
             fast_path_max_tokens=_as_int(policy_raw.router.fast_path_max_tokens, 512),
@@ -722,9 +747,16 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "enforce_grounding": base.policy.enforce_grounding,
             "enable_planner": base.policy.enable_planner,
             "enable_reviewer": base.policy.enable_reviewer,
+            "enable_running_summary": base.policy.enable_running_summary,
             "cross_turn_artifact_persistence": base.policy.cross_turn_artifact_persistence,
             "artifact_store_ttl_seconds": base.policy.artifact_store_ttl_seconds,
             "require_tool_on_follow_up": base.policy.require_tool_on_follow_up,
+            "summary": {
+                "compact_after_artifacts": base.policy.summary.compact_after_artifacts,
+                "keep_after_summary": base.policy.summary.keep_after_summary,
+                "max_cycles": base.policy.summary.max_cycles,
+                "max_tokens": base.policy.summary.max_tokens,
+            },
             "truncation": {
                 "max_artifact_chars": base.policy.truncation.max_artifact_chars,
                 "max_string_field_chars": base.policy.truncation.max_string_field_chars,

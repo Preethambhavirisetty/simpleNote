@@ -32,6 +32,9 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
     # small facts with provenance, not full tool payloads that can explode context.
     artifacts = list(state.get("artifacts") or [])
     facts = _extract_facts(artifacts, max_facts=config.policy.context.max_artifacts_in_prompt * 3)
+    # Evidence compressed into running memory mid-loop must still reach
+    # synthesis/review; seed it as facts ahead of the per-artifact facts.
+    facts = _memory_facts(str(state.get("running_summary") or "")) + facts
     if not facts and state.get("draft_answer"):
         facts = [
             {
@@ -56,6 +59,27 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
             }
         ],
     }
+
+
+def _memory_facts(running_summary: str) -> list[Fact]:
+    """Turn the running-summary memo into compact facts for downstream nodes."""
+    facts: list[Fact] = []
+    for line in _summary_lines(running_summary):
+        # Skip the memo's section headers ("Confirmed facts:", etc.).
+        if line.endswith(":") and len(line) <= 40:
+            continue
+        facts.append(
+            {
+                "id": _fact_id("running_summary", line),
+                "text": line,
+                "source_artifact_id": "",
+                "tool": "running_summary",
+                "source_ref": {},
+                "confidence": 0.5,
+                "truncated_source": False,
+            }
+        )
+    return facts
 
 
 def _extract_facts(artifacts: list[dict[str, Any]], *, max_facts: int) -> list[Fact]:

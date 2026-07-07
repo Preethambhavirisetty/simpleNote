@@ -56,6 +56,12 @@ class ContextBuilder:
         if state.get("review_feedback") and role in ("executor", "planner"):
             sections.append((90, f"Reviewer feedback:\n{state['review_feedback']}"))
 
+        running_summary = str(state.get("running_summary") or "").strip()
+        if running_summary and role == "executor":
+            # Compressed earlier findings kept above raw artifacts so the loop
+            # never loses evidence that was summarized away to free context.
+            sections.append((88, f"Working memory (summarized earlier findings):\n{running_summary}"))
+
         history = state.get("messages") or []
         if history:
             sections.append((50, f"Conversation history:\n{self._format_history(history)}"))

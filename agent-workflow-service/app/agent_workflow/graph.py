@@ -13,6 +13,7 @@ from app.agent_workflow.nodes import (
     planner_node,
     reviewer_node,
     revision_node,
+    summarizer_node,
     synthesizer_node,
 )
 from app.agent_workflow.providers.llm import LlmProvider
@@ -61,6 +62,10 @@ def build_graph(
         """Extract compact facts from raw tool artifacts."""
         return fact_extractor_node(state, config=config)
 
+    def _summarizer(state: AgentState) -> dict[str, Any]:
+        """Compress accumulated artifacts into running memory mid-loop."""
+        return summarizer_node(state, config=config, llm=llm)
+
     def _synthesizer(state: AgentState) -> dict[str, Any]:
         """Write the main draft answer from facts."""
         return synthesizer_node(state, config=config, llm=llm)
@@ -84,6 +89,7 @@ def build_graph(
     graph.add_node("executor", _executor)
     graph.add_node("approval", _approval)
     graph.add_node("fact_extractor", _fact_extractor)
+    graph.add_node("summarizer", _summarizer)
     graph.add_node("synthesizer", _synthesizer)
     graph.add_node("reviewer", _reviewer)
     graph.add_node("revision", _revision)
@@ -113,11 +119,16 @@ def build_graph(
         {
             "executor": "executor",
             "approval": "approval",
+            "summarizer": "summarizer",
             "fact_extractor": "fact_extractor",
             "finalizer": "finalizer",
             END: END,
         },
     )
+
+    # The summarizer is a mid-loop detour: it compresses memory and hands control
+    # straight back to the executor to keep gathering evidence.
+    graph.add_edge("summarizer", "executor")
 
     # Approval is only for pending destructive side effects; normal read/report
     # tasks skip it entirely and continue through executor.
@@ -171,10 +182,23 @@ def route_after_executor(state: AgentState, *, config: AgentConfig) -> str:
     if phase == "fact_extracting":
         return "fact_extractor"
     if phase == "executing":
-        return "executor"
+        # Compress memory mid-loop when retained artifacts approach the cap, then
+        # return to the executor with freed context for more exploration.
+        return "summarizer" if _should_compact(state, config) else "executor"
     # Any other phase (including "done" and unexpected values) finalizes; the
     # finalizer emits an error for phases that should never reach it.
     return "finalizer"
+
+
+def _should_compact(state: AgentState, config: AgentConfig) -> bool:
+    """Return whether the executor loop should detour through the summarizer."""
+    policy = config.policy
+    if not policy.enable_running_summary:
+        return False
+    iteration = state.get("iteration") or {}
+    if int(iteration.get("summaries") or 0) >= policy.summary.max_cycles:
+        return False
+    return len(state.get("artifacts") or []) >= policy.summary.compact_after_artifacts
 
 
 def route_after_synthesizer(state: AgentState) -> str:

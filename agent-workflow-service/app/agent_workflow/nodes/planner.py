@@ -5,6 +5,7 @@ from typing import Any
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.context import ContextBuilder
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
+from app.agent_workflow.follow_up import build_search_query
 from app.agent_workflow.parsing import parse_plan_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
@@ -15,10 +16,12 @@ def planner_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) ->
     """Create or skip a plan and move the workflow into execution."""
     # The planner turns the user request into explicit steps. That keeps the
     # rest of the graph from guessing what "done" should mean.
+    fallback_query = build_search_query(str(state.get("user_query") or ""), state.get("messages") or [])
     planner_cfg = config.policy.planner
     if not planner_cfg.enabled:
         return {
             "phase": "executing",
+            "search_query": fallback_query,
             "events": [{"step": "planner.skipped", "reason": "planner_disabled"}],
         }
     builder = ContextBuilder(config)
@@ -42,9 +45,13 @@ def planner_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) ->
     plan = parse_plan_markdown(raw)
     iteration = dict(state.get("iteration") or {})
     iteration["executor_turns"] = 0
+    # Prefer the planner's history-aware rewrite; fall back to the deterministic
+    # standalone query so tool search always has resolved nouns.
+    search_query = str(plan.get("search_query") or "").strip() or fallback_query
     return {
         "plan": plan,
         "phase": "executing",
+        "search_query": search_query,
         "current_step_index": 0,
         "candidate_tools": [],
         "review_feedback": "",

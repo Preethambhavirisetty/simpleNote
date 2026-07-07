@@ -609,8 +609,11 @@ def executor_node(
         }
 
     current_step = steps[step_index] if step_index < len(steps) else {}
+    # Prefer the planner-rewritten standalone query (pronouns resolved) so
+    # semantic tool search on follow-ups matches on real nouns, not "them"/"it".
+    retrieval_query = str(state.get("search_query") or state.get("user_query", ""))
     step_query = " ".join(
-        part for part in [current_step.get("title", ""), current_step.get("action", ""), state.get("user_query", "")] if part
+        part for part in [current_step.get("title", ""), current_step.get("action", ""), retrieval_query] if part
     )
 
     native_mode = bool(config.llm.native_tool_calling) and callable(getattr(llm, "complete_with_tools", None))

@@ -98,6 +98,9 @@ class RoleAwareLlm(LlmProvider):
         if "synthesizer node" in system:
             self.roles.append("synthesizer")
             return "Found SLA in doc-1 page 2."
+        if "compress an agent's working memory" in system:
+            self.roles.append("summarizer")
+            return "Confirmed facts:\n- found SLA in doc-1 page 2"
         if "reviewer node" in system:
             self.roles.append("reviewer")
             return self.reviewer_output

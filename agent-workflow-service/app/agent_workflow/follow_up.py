@@ -58,6 +58,33 @@ def is_follow_up_query(query: str, history: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _last_user_text(history: list[dict[str, Any]]) -> str:
+    """Return the most recent prior user message content, if any."""
+    for item in reversed(history):
+        if isinstance(item, dict) and str(item.get("role") or "") == "user":
+            content = str(item.get("content") or "").strip()
+            if content:
+                return content
+    return ""
+
+
+def build_search_query(query: str, history: list[dict[str, Any]]) -> str:
+    """Deterministic standalone-query fallback used when the planner is off.
+
+    On a follow-up turn a bare question ("how many are there?") has no nouns for
+    semantic tool search, so the most recent user turn is prepended to restore
+    context. First-shot queries are returned unchanged. The planner's LLM rewrite
+    is preferred when available; this is the no-LLM safety net.
+    """
+    cleaned = str(query or "").strip()
+    if not is_follow_up_query(cleaned, history):
+        return cleaned
+    prev = _last_user_text(history)
+    if prev and prev.lower() not in cleaned.lower():
+        return f"{prev} {cleaned}".strip()
+    return cleaned
+
+
 def infer_evidence_tools(query: str, history: list[dict[str, Any]]) -> set[str]:
     """Infer which tools should be re-run when fresh evidence is required."""
     blob = f"{query}\n{_history_text(history)}"

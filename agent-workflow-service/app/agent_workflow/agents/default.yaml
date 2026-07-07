@@ -38,9 +38,19 @@ policy:
   enforce_grounding: false
   enable_planner: true
   enable_reviewer: true
+  # Mid-loop memory compaction: once retained artifacts approach the cap, one
+  # LLM call folds the lower-scoring ones into a running summary and drops them,
+  # freeing context for more exploration. Bounded by summary.max_cycles.
+  enable_running_summary: true
   cross_turn_artifact_persistence: true
   artifact_store_ttl_seconds: 86400
   require_tool_on_follow_up: true
+
+  summary:
+    compact_after_artifacts: 16
+    keep_after_summary: 6
+    max_cycles: 3
+    max_tokens: 700
 
   # Keep planning cheap; the executor/fact/synthesis path handles the detail.
   planner:

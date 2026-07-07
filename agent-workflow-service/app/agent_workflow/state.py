@@ -21,6 +21,7 @@ class Plan(TypedDict, total=False):
     steps: list[PlanStep]
     acceptance_criteria: list[str]
     suggested_structure: str
+    search_query: str  # standalone, pronoun-resolved query for semantic tool search
     raw_markdown: str
 
 
@@ -77,12 +78,14 @@ class IterationCounters(TypedDict, total=False):
     revision_cycles: int
     tool_calls: int
     replans: int
+    summaries: int
 
 
 class AgentState(TypedDict, total=False):
     """LangGraph state object passed between workflow nodes."""
     messages: list[dict[str, Any]]
     user_query: str
+    search_query: str  # standalone retrieval query (planner-rewritten on follow-ups)
     session_id: str
     runtime_context: dict[str, Any]
     plan: Plan
@@ -94,6 +97,7 @@ class AgentState(TypedDict, total=False):
     facts: list[Fact]
     draft_answer: str
     draft_kind: str  # "mechanical" (deterministic artifact dump) | "llm" (prose) | "executor_draft" (raw executor answer)
+    running_summary: str  # compressed memo of summarized-away artifacts (see summarizer node)
     review: ReviewResult
     review_feedback: str
     iteration: IterationCounters
