@@ -43,7 +43,7 @@ class HostCallbacks:
     on_event: Callable[[dict[str, Any]], None] | None = None
 
 
-def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str, Any]]:
+def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str | None = None) -> list[dict[str, Any]]:
     """Translate LangGraph node output into host events."""
     # Nodes store durable-ish workflow events in state. This function turns
     # those internal events into API/SSE events that clients can render.
@@ -254,7 +254,12 @@ def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str,
     if update.get("error") and merged.get("phase") == "reviewing":
         events.append({"type": "debug", "message": f"Error: {update['error']}"})
 
-    if merged.get("final_answer") and merged.get("phase") == "done":
+    # Every terminal path routes through the finalizer, so the terminal `done`
+    # event is emitted only for the finalizer's update. Other nodes may set
+    # phase="done" as a routing signal (e.g. reviewer APPROVE), but emitting a
+    # `done` for those too would surface duplicate/early terminal events.
+    emit_done = node_name is None or node_name == "finalizer"
+    if emit_done and merged.get("final_answer") and merged.get("phase") == "done":
         events.append(
             {
                 "type": "done",

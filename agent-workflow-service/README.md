@@ -107,3 +107,11 @@ Response:
 
 The workflow applies the agent tool allowlist after search. If search fails or the connector is not indexed, the workflow **defaults to fallback discovery** (`tools/list` + keyword ranking) without failing the run.
 
+
+TODO:
+Low — executor SRP. I deliberately did not do this one now, and I'd push back on doing it as part of a bugfix. You're right that executor.py still owns tool discovery, native calling, argument injection, schema validation, approval routing, loop breaking, truncation, scoring, and artifact creation — and tool_selection / tool_validation / artifact_builder / executor_loop is a sensible target decomposition. But it's a large, purely-structural refactor of the most complex node, it carries real regression risk, and the executor already has pre-existing failing tests (the native-mode ones) that would make it hard to distinguish refactor regressions from prior breakage. Since you flagged it non-urgent/long-term, the disciplined move is a dedicated follow-up PR with the native-mode tests green first, not folding it into this change. Happy to take that on separately if you want to prioritize it.
+
+
+2 things:
+- for follow ups, does agent does semantic search for tools with the given query, right? so I think agent need to summarize conversation history provided, rephrase the question and then do semantic search against the tool, then it return much relevant tools, right? is it already implemented?
+- agent loops goes on, at one point, it thinks more reasearch or exploration should happen, so, it has to summarize its memory so far, then it allows room for further reasearch, right? how can I implement that?

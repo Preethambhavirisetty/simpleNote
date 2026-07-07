@@ -114,9 +114,9 @@ class ReviewerDefaults:
     max_cycles: int = 2
     # NOTE: reject_action is currently informational only. A REJECT verdict
     # returns the best-available draft and stops; the graph does not route back
-    # to the planner, so "replan" is not yet wired. "abort" reflects the real
-    # behavior. Keep this until replan-on-reject is implemented.
-    reject_action: str = "replan"
+    # to the planner, so "replan" is legacy/not yet wired. "abort" reflects the
+    # real behavior. Keep this until replan-on-reject is implemented.
+    reject_action: str = "abort"
     mode: str = "always"  # always | on_risk
 
 
@@ -182,9 +182,9 @@ class AgentPolicy:
     max_retained_tool_calls: int = 40
     max_retained_events: int = 80
     tool_discovery_cache_size: int = 16
-    # See ReviewerDefaults.reject_action: "replan" is not yet wired; a REJECT
-    # verdict returns the best-available draft. "abort" is the honest setting.
-    reject_action: str = "replan"  # replan (not yet implemented) | abort
+    # See ReviewerDefaults.reject_action: "replan" is legacy/not yet wired; a
+    # REJECT verdict returns the best-available draft. "abort" is the honest setting.
+    reject_action: str = "abort"  # abort | replan (legacy, not yet implemented)
     destructive_tools: list[str] = field(default_factory=list)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True
@@ -740,14 +740,19 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
                 "required_tools": dict(base.policy.tools.required_tools),
                 "argument_injection": dict(base.policy.tools.argument_injection),
             },
+            # The resolved enable state is carried by the flat enable_planner /
+            # enable_reviewer keys above. Nested "enabled" is intentionally
+            # omitted here so a flat runtime override (e.g. enable_planner: false)
+            # is honored — otherwise the serialized nested value would always win
+            # over the override during re-parse.
             "planner": {
-                "enabled": base.policy.planner.enabled,
                 "max_tokens": base.policy.planner.max_tokens,
             },
+            # As with "enabled", the resolved cycle cap is carried by the flat
+            # max_review_cycles key, so nested "max_cycles" is omitted to let a
+            # flat runtime override survive re-parse.
             "reviewer": {
-                "enabled": base.policy.reviewer.enabled,
                 "max_tokens": base.policy.reviewer.max_tokens,
-                "max_cycles": base.policy.reviewer.max_cycles,
                 "reject_action": base.policy.reviewer.reject_action,
                 "mode": base.policy.reviewer.mode,
             },

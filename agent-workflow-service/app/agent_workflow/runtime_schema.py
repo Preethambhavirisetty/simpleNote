@@ -73,7 +73,9 @@ class PlannerDefaultsModel(BaseModel):
     """Validation model for planner behavior settings."""
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
+    # None = inherit the flat `enable_planner` flag (which itself defaults True).
+    # This keeps nested/flat precedence explicit: nested wins only when it is set.
+    enabled: bool | None = None
     max_tokens: int = Field(1500, ge=128, le=16000)
 
 
@@ -81,10 +83,18 @@ class ReviewerDefaultsModel(BaseModel):
     """Validation model for reviewer behavior settings."""
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = True
+    # None = inherit the flat `enable_reviewer` flag (which itself defaults True).
+    # This keeps nested/flat precedence explicit: nested wins only when it is set.
+    enabled: bool | None = None
     max_tokens: int = Field(1200, ge=128, le=16000)
-    max_cycles: int = Field(2, ge=0, le=20)
-    reject_action: str = Field("replan", pattern="^(replan|abort)$")
+    # When the reviewer is enabled it always runs at least once, so the cap
+    # starts at 1. To skip review entirely, set enabled/enable_reviewer to false.
+    # None = inherit the flat `max_review_cycles` (which itself defaults to 2),
+    # so nested wins only when explicitly set (mirrors the enabled flag).
+    max_cycles: int | None = Field(None, ge=1, le=20)
+    # "replan" is legacy and not yet wired: a REJECT verdict returns the best
+    # available draft (same as "abort"). Still accepted so existing configs load.
+    reject_action: str = Field("abort", pattern="^(replan|abort)$")
     # always: review every run; on_risk: review only runs with failed/denied
     # tool calls or errors — clean runs skip the reviewer LLM call.
     mode: str = Field("always", pattern="^(always|on_risk)$")
@@ -148,7 +158,9 @@ class AgentPolicyModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_executor_iterations: int = Field(12, ge=1, le=100)
-    max_review_cycles: int = Field(2, ge=0, le=20)
+    # Legacy flat alias for reviewer.max_cycles; an enabled reviewer runs at
+    # least once, so the cap starts at 1. Disable review via enable_reviewer.
+    max_review_cycles: int = Field(2, ge=1, le=20)
     max_tool_calls_per_step: int = Field(4, ge=1, le=20)
     max_context_tokens: int = Field(12000, ge=1000, le=200000)
     llm_timeout_seconds: float = Field(60.0, ge=1.0, le=600.0)
@@ -157,7 +169,8 @@ class AgentPolicyModel(BaseModel):
     max_retained_tool_calls: int = Field(40, ge=0, le=300)
     max_retained_events: int = Field(80, ge=0, le=500)
     tool_discovery_cache_size: int = Field(16, ge=0, le=200)
-    reject_action: str = Field("replan", pattern="^(replan|abort)$")
+    # "replan" is legacy and not yet wired (see ReviewerDefaultsModel.reject_action).
+    reject_action: str = Field("abort", pattern="^(replan|abort)$")
     destructive_tools: list[str] = Field(default_factory=list, max_length=256)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True

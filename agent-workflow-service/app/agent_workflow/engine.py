@@ -523,7 +523,7 @@ class AgentEngine:
                 if update.get("review") and self.callbacks.on_review:
                     self.callbacks.on_review(dict(update["review"]))
 
-                for event in map_graph_update(update, holder["state"]):
+                for event in map_graph_update(update, holder["state"], node_name=node_name):
                     if event.get("type") == "done":
                         if not emit_done:
                             continue

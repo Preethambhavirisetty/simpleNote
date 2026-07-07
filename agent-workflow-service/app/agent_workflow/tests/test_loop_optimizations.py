@@ -15,9 +15,9 @@ from app.agent_workflow.streaming import HostCallbacks, RunRequest
 
 
 def _config(**overrides):
-    # Note: planner/reviewer enablement must use the nested objects — the
-    # nested pydantic defaults (enabled=True) take precedence over the flat
-    # enable_planner/enable_reviewer flags.
+    # Disable planner/reviewer via the nested objects for clarity. The flat
+    # enable_planner/enable_reviewer flags now work too: nested `enabled`
+    # defaults to None and only overrides the flat flag when explicitly set.
     raw = {
         "name": "opt-test",
         "prompts_inline": {"planner": "plan", "executor": "execute", "reviewer": "review"},

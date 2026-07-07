@@ -147,6 +147,24 @@ def test_golden_path_runs_all_nodes_and_approves():
     assert "reviewer.completed" in steps
 
 
+def test_run_emits_exactly_one_done_event():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    seen: list[dict] = []
+    callbacks = HostCallbacks(on_event=seen.append)
+    engine = AgentEngine(config=config, llm=RoleAwareLlm(), tools=MockTools(), callbacks=callbacks)
+
+    engine.run(RunRequest(query="Find SLA mentions"))
+
+    # The reviewer sets phase=done as a routing signal, but only the finalizer
+    # should emit the terminal done event — no duplicates.
+    done_events = [event for event in seen if event.get("type") == "done"]
+    assert len(done_events) == 1
+
+
 def test_revise_path_runs_revision_before_finalizing():
     from pathlib import Path
 

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.agent_workflow.config import load_agent_config
+from app.agent_workflow.config import TruncationPolicy, load_agent_config
+from app.agent_workflow.context.truncator import truncate_tool_result
 from app.agent_workflow.nodes.fact_extractor import fact_extractor_node
 from app.agent_workflow.nodes.reviewer import _parse_review
 from app.agent_workflow.nodes.synthesizer import synthesizer_node
@@ -123,6 +124,71 @@ def test_fact_extractor_falls_back_to_summary_line_splitting():
 
     assert "SLA is 99.9%" in texts
     assert "Region is us-east" in texts
+
+
+# --- Phase 1: structured facts survive the real executor truncation path ---
+
+
+def _truncate(tool_result):
+    # Mirror what the executor does: truncate the tool result, then build an
+    # artifact whose raw_ref is the compacted reference fed to fact_extractor.
+    summary, raw_ref, truncated = truncate_tool_result(
+        tool_result, step_query="q", policy=TruncationPolicy(max_artifact_chars=6000)
+    )
+    return {"id": "a1", "tool": "t", "summary": summary, "raw_ref": raw_ref, "truncated": truncated, "composite_score": 0.9}
+
+
+def test_structured_facts_survive_compaction_end_to_end():
+    tool_result = {"ok": True, "facts": ["panel CPU = 42%", "panel Mem = 71%"]}
+    artifact = _truncate(tool_result)
+
+    # The compacted raw_ref must keep the actual facts, not just a count.
+    assert artifact["raw_ref"].get("facts") == ["panel CPU = 42%", "panel Mem = 71%"]
+    assert artifact["raw_ref"].get("facts_count") == 2
+
+    result = fact_extractor_node({"artifacts": [artifact]}, config=_config())
+    texts = [fact["text"] for fact in result["facts"]]
+    assert "panel CPU = 42%" in texts
+    assert "panel Mem = 71%" in texts
+
+
+def test_dashboard_panels_survive_compaction_end_to_end():
+    panels = [{"title": f"Panel {i}", "value": i} for i in range(16)]
+    artifact = _truncate({"found": True, "panels": panels})
+
+    assert len(artifact["raw_ref"].get("panels") or []) == 16
+
+    result = fact_extractor_node({"artifacts": [artifact]}, config=_config())
+    texts = [fact["text"] for fact in result["facts"]]
+    assert any("title=Panel 0" in text for text in texts)
+    assert any("title=Panel 15" in text for text in texts)
+
+
+def test_large_structured_field_is_bounded_in_raw_ref():
+    # A huge structured field must not be preserved whole; it is bounded so the
+    # compact raw_ref stays small, falling back to a partial keep.
+    facts = [f"fact number {i} " + "x" * 200 for i in range(500)]
+    artifact = _truncate({"facts": facts})
+    kept = artifact["raw_ref"].get("facts") or []
+    assert 0 < len(kept) < len(facts)
+    assert artifact["raw_ref"].get("facts_count") == 500
+
+
+def test_single_oversized_structured_item_does_not_exceed_budget():
+    # A single row larger than the whole structured budget must be dropped, not
+    # kept — otherwise one oversized fact could blow the bounded raw_ref.
+    from app.agent_workflow.context.truncator import _MAX_STRUCTURED_REF_CHARS
+
+    oversized = "x" * (_MAX_STRUCTURED_REF_CHARS + 1000)
+    artifact = _truncate({"facts": [oversized, "a small follow-up fact"]})
+    ref = artifact["raw_ref"]
+
+    assert ref.get("facts") is None  # nothing preserved; the prefix stops at item 0
+    assert ref.get("facts_count") == 2
+    # The structured portion of raw_ref stays within budget.
+    import json as _json
+
+    assert len(_json.dumps(ref, default=str)) < _MAX_STRUCTURED_REF_CHARS
 
 
 # --- Phase 3: reviewer parsing ---------------------------------------------

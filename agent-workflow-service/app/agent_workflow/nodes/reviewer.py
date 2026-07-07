@@ -76,6 +76,9 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
     iteration = dict(state.get("iteration") or {})
     iteration["review_cycles"] = int(iteration.get("review_cycles") or 0) + 1
 
+    # An enabled reviewer always runs at least once; the schema enforces
+    # max_cycles >= 1, and the floor here is a defensive guard. Disable review
+    # entirely via reviewer.enabled / enable_reviewer, not max_cycles = 0.
     if iteration["review_cycles"] > max(1, int(reviewer_cfg.max_cycles or 1)):
         return {
             "phase": "done",
