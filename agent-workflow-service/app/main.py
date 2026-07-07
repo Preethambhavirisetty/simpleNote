@@ -14,6 +14,7 @@ from app.api.api_response import ApiResponse
 from app.api.checkpointer import close_runtime_checkpointer
 from app.api.config import SERVICE_PORT
 from app.api.routes import router as agent_workflow_router
+from app.api.action_controller import router as agent_workflow_action_router
 
 
 log = logging.getLogger(__name__)
@@ -70,3 +71,4 @@ def health():
 
 
 app.include_router(agent_workflow_router)
+app.include_router(agent_workflow_action_router)
