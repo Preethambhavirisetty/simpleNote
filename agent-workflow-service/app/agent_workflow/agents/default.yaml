@@ -8,24 +8,107 @@ llm:
   api_key: ${LLM_API_KEY}
   model: ${LLM_MODEL}
   send_auth_header: ${LLM_SEND_AUTH_HEADER}
-  default_max_tokens: 5000
+  default_max_tokens: 2048
   temperature: ${LLM_TEMPERATURE}
   top_p: ${LLM_TOP_P}
   top_k: ${LLM_TOP_K}
   seed: ${LLM_SEED}
+  native_tool_calling: true
 mcp:
   url: ${MCP_URL}
   auth_token: ${MCP_AUTH_TOKEN}
 policy:
-  max_executor_iterations: 12
-  max_review_cycles: 2
-  max_tool_calls_per_step: 4
-  max_context_tokens: 12000
-  reject_action: replan
+  # Practical defaults for a generic tool agent. App-specific agents should
+  # override these for heavy reports, long audits, or risky infrastructure work.
+  max_executor_iterations: 10
+  max_review_cycles: 1
+  max_tool_calls_per_step: 3
+  max_context_tokens: 24000
+  llm_timeout_seconds: 90
+  tool_timeout_seconds: 180
+  max_retained_artifacts: 20
+  max_retained_tool_calls: 32
+  max_retained_events: 100
+  tool_discovery_cache_size: 16
+  reject_action: abort
+  enable_fast_path: true
+  render_final_answer: true
+  enforce_grounding: false
+  enable_planner: true
+  enable_reviewer: true
+  cross_turn_artifact_persistence: true
+  artifact_store_ttl_seconds: 86400
+  require_tool_on_follow_up: true
+
+  # Keep planning cheap; the executor/fact/synthesis path handles the detail.
+  planner:
+    enabled: true
+    max_tokens: 1200
+
+  # Most clean tool runs do not need a judge. Failed tools, errors, or policy
+  # signals still trigger review through on_risk mode.
+  reviewer:
+    enabled: true
+    max_tokens: 1000
+    max_cycles: 1
+    reject_action: abort
+    mode: on_risk
+
+  executor:
+    choose_action_max_tokens: 1000
+    native_tool_max_tokens: 1000
+    synthesize_max_tokens: 2500
+    max_native_tools: 8
+    tool_description_max_chars: 1200
+    fallback_artifact_limit: 6
+    mechanical_artifact_limit: 10
+    mechanical_line_limit: 80
+    fallback_summary_chars: 800
+
+  finalizer:
+    max_tokens: 1500
+    max_artifact_lines: 8
+    artifact_line_max_chars: 1000
+
+  router:
+    fast_path_max_tokens: 512
+    fast_path_max_query_chars: 240
+    fast_path_max_query_words: 28
+    fast_path_history_messages: 4
+    fast_path_history_content_chars: 1200
+    merge_state_max_events: 100
+
+  context:
+    system_budget_padding: 50
+    min_artifact_budget_tokens: 600
+    trim_section_min_chars: 400
+    max_tools_in_prompt: 8
+    max_tool_calls_in_prompt: 6
+    max_artifacts_in_prompt: 10
+    max_history_messages: 6
+    history_preview_head_chars: 500
+    history_preview_tail_chars: 500
+    artifact_summary_ratio: 0.65
+    artifact_summary_min_chars: 1000
+
   truncation:
-    max_artifact_chars: 2500
+    max_artifact_chars: 6000
+    max_string_field_chars: 1200
+    max_list_rows_visible: 150
+    dict_list_budget_reserve: 96
+    dict_list_min_budget: 400
     score_weights:
-      relevance: 0.4
-      freshness: 0.2
-      uniqueness: 0.2
-      actionability: 0.2
+      relevance: 0.45
+      freshness: 0.15
+      uniqueness: 0.15
+      actionability: 0.25
+    freshness_half_life_seconds: 3600
+
+  tools:
+    allowlist: []
+    denylist: []
+    required_tools: {}
+    argument_injection: {}
+
+  destructive_tools: []
+  require_destructive_confirmation: true

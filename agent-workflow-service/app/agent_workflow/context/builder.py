@@ -12,15 +12,17 @@ Role = Literal["planner", "executor", "reviewer"]
 
 class ContextBuilder:
     """Builds role-specific LLM messages from workflow state."""
+
     def __init__(self, config: AgentConfig):
         """Initialize this object with its runtime dependencies."""
         self.config = config
 
     def build(self, state: AgentState, role: Role) -> list[dict[str, str]]:
         """Build the prompt messages for a planner, executor, or reviewer LLM call."""
-        # Every LLM node receives the same state, but each role needs a
-        # different view. This builder selects and orders the useful sections.
         system = self.config.prompt_text(role)
+        contract = self._contract_prompt()
+        if contract:
+            system = f"{system}\n\n{contract}"
         if self.config.policy.instructions:
             system = f"{system}\n\n## Agent instructions\n{self.config.policy.instructions}"
 
@@ -44,7 +46,12 @@ class ContextBuilder:
 
         tool_calls = state.get("tool_calls") or []
         if tool_calls:
-            sections.append((60, f"Recent tool calls:\n{self._format_tool_calls(tool_calls[-5:])}"))
+            sections.append(
+                (
+                    60,
+                    f"Recent tool calls:\n{self._format_tool_calls(tool_calls[-self.config.policy.context.max_tool_calls_in_prompt :])}",
+                )
+            )
 
         if state.get("review_feedback") and role in ("executor", "planner"):
             sections.append((90, f"Reviewer feedback:\n{state['review_feedback']}"))
@@ -62,12 +69,18 @@ class ContextBuilder:
             {"role": "user", "content": body},
         ]
 
+    def _contract_prompt(self) -> str:
+        """Load the shared contract prompt appended to every role system message."""
+        path = self.config.base_dir / "prompts" / "contract.md"
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+        return ""
+
     def _fit_budget(self, sections: list[tuple[int, str]], system: str) -> str:
         """Select the highest-priority context sections that fit the token budget."""
-        # Higher-priority sections win when context is tight; artifacts are the
-        # only section we partially trim because they can be long tool outputs.
+        limits = self.config.policy.context
         max_tokens = self.config.policy.max_context_tokens
-        used = count_tokens(system) + 50
+        used = count_tokens(system) + limits.system_budget_padding
         ordered = sorted(sections, key=lambda item: item[0], reverse=True)
         chosen: list[str] = []
         for _priority, text in ordered:
@@ -77,19 +90,19 @@ class ContextBuilder:
                 used += tokens
                 continue
             remaining = max_tokens - used
-            if text.startswith("Artifacts:\n") and remaining >= 200:
-                trimmed = self._trim_section_to_token_budget(text, remaining)
+            if text.startswith("Artifacts:\n") and remaining >= limits.min_artifact_budget_tokens:
+                trimmed = self._trim_section_to_token_budget(text, remaining, limits.trim_section_min_chars)
                 if trimmed:
                     chosen.append(trimmed)
                     used += count_tokens(trimmed)
         return "\n\n---\n\n".join(chosen)
 
     @staticmethod
-    def _trim_section_to_token_budget(text: str, token_budget: int) -> str:
+    def _trim_section_to_token_budget(text: str, token_budget: int, min_chars: int) -> str:
         """Trim a long context section while preserving whole artifact bullets."""
         if token_budget <= 0:
             return ""
-        max_chars = max(200, token_budget * 4)
+        max_chars = max(min_chars, token_budget * 4)
         if len(text) <= max_chars:
             return text
         return text[:max_chars].rsplit("\n- ", 1)[0].rstrip() + "\n- [truncated] additional artifacts omitted due to context budget"
@@ -113,18 +126,23 @@ class ContextBuilder:
     def _format_tools(self, tools: list[dict[str, Any]]) -> str:
         """Format tools for inclusion in LLM context."""
         lines = []
-        for tool in tools[:7]:
+        for tool in tools[: self.config.policy.context.max_tools_in_prompt]:
             schema = tool.get("input_schema") or tool.get("inputSchema") or {}
             lines.append(
                 f"- {tool.get('name')} ({tool.get('title', '')}, score={tool.get('score', 0):.2f}): "
-                f"{tool.get('description', '')}\n  inputSchema: {json.dumps(schema)[:500]}"
+                f"{tool.get('description', '')}\n  inputSchema: {json.dumps(schema, ensure_ascii=False)}"
             )
         return "\n".join(lines)
 
     def _format_artifacts(self, artifacts: list[Artifact]) -> str:
         """Format artifacts for inclusion in LLM context."""
+        limits = self.config.policy.context
+        max_summary_chars = max(
+            limits.artifact_summary_min_chars,
+            int(self.config.policy.truncation.max_artifact_chars * limits.artifact_summary_ratio),
+        )
         lines = []
-        for artifact in artifacts[:8]:
+        for artifact in artifacts[: limits.max_artifacts_in_prompt]:
             scores = artifact.get("scores") or {}
             source = artifact.get("source_ref") or {}
             lines.append(
@@ -132,7 +150,7 @@ class ContextBuilder:
                 f"(r={scores.get('relevance', 0)}, f={scores.get('freshness', 0)}, "
                 f"u={scores.get('uniqueness', 0)}, a={scores.get('actionability', 0)}) "
                 f"source={json.dumps(source) if source else '{}'}\n"
-                f"  {artifact.get('summary', '')[:1200]}"
+                f"  {str(artifact.get('summary', ''))[:max_summary_chars]}"
             )
         return "\n".join(lines)
 
@@ -142,9 +160,18 @@ class ContextBuilder:
             f"- {r.get('name')} ({r.get('status')}): {r.get('args_preview', '')}" for r in records
         )
 
+    def _truncate_message_preview(self, content: str) -> str:
+        limits = self.config.policy.context
+        head = limits.history_preview_head_chars
+        tail = limits.history_preview_tail_chars
+        if len(content) <= head + tail + 24:
+            return content
+        return f"{content[:head]}\n...[middle omitted]...\n{content[-tail:]}"
+
     def _format_history(self, messages: list[dict[str, Any]]) -> str:
         """Format history for inclusion in LLM context."""
         lines = []
-        for message in messages[-6:]:
-            lines.append(f"{message.get('role', 'user')}: {str(message.get('content', ''))[:500]}")
+        for message in messages[-self.config.policy.context.max_history_messages :]:
+            content = str(message.get("content", ""))
+            lines.append(f"{message.get('role', 'user')}: {self._truncate_message_preview(content)}")
         return "\n".join(lines)

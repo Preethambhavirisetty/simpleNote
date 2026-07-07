@@ -51,6 +51,10 @@ class TruncationPolicyModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     max_artifact_chars: int = Field(2500, ge=200, le=20000)
+    max_string_field_chars: int = Field(400, ge=200, le=20000)
+    max_list_rows_visible: int = Field(100, ge=1, le=5000)
+    dict_list_budget_reserve: int = Field(96, ge=0, le=1000)
+    dict_list_min_budget: int = Field(200, ge=50, le=10000)
     score_weights: dict[str, float] = Field(default_factory=dict)
     freshness_half_life_seconds: float = Field(3600.0, gt=0)
 
@@ -86,6 +90,59 @@ class ReviewerDefaultsModel(BaseModel):
     mode: str = Field("always", pattern="^(always|on_risk)$")
 
 
+class ExecutorDefaultsModel(BaseModel):
+    """Validation model for executor LLM output and display limits."""
+    model_config = ConfigDict(extra="forbid")
+
+    choose_action_max_tokens: int = Field(1200, ge=128, le=16000)
+    native_tool_max_tokens: int = Field(1200, ge=128, le=16000)
+    synthesize_max_tokens: int = Field(2000, ge=128, le=16000)
+    max_native_tools: int = Field(7, ge=1, le=200)
+    tool_description_max_chars: int = Field(1024, ge=128, le=16000)
+    fallback_artifact_limit: int = Field(5, ge=1, le=200)
+    mechanical_artifact_limit: int = Field(12, ge=1, le=200)
+    mechanical_line_limit: int = Field(120, ge=1, le=2000)
+    fallback_summary_chars: int = Field(400, ge=100, le=20000)
+
+
+class FinalizerDefaultsModel(BaseModel):
+    """Validation model for final answer rendering limits."""
+    model_config = ConfigDict(extra="forbid")
+
+    max_tokens: int = Field(2000, ge=128, le=16000)
+    max_artifact_lines: int = Field(12, ge=1, le=200)
+    artifact_line_max_chars: int = Field(1200, ge=200, le=20000)
+
+
+class RouterDefaultsModel(BaseModel):
+    """Validation model for fast-path router limits."""
+    model_config = ConfigDict(extra="forbid")
+
+    fast_path_max_tokens: int = Field(512, ge=128, le=16000)
+    fast_path_max_query_chars: int = Field(180, ge=50, le=2000)
+    fast_path_max_query_words: int = Field(24, ge=5, le=500)
+    fast_path_history_messages: int = Field(4, ge=0, le=100)
+    fast_path_history_content_chars: int = Field(1000, ge=100, le=12000)
+    merge_state_max_events: int = Field(80, ge=10, le=500)
+
+
+class ContextLimitsModel(BaseModel):
+    """Validation model for prompt assembly display limits."""
+    model_config = ConfigDict(extra="forbid")
+
+    system_budget_padding: int = Field(50, ge=0, le=1000)
+    min_artifact_budget_tokens: int = Field(200, ge=0, le=10000)
+    trim_section_min_chars: int = Field(200, ge=50, le=10000)
+    max_tools_in_prompt: int = Field(7, ge=1, le=200)
+    max_tool_calls_in_prompt: int = Field(5, ge=1, le=200)
+    max_artifacts_in_prompt: int = Field(10, ge=1, le=200)
+    max_history_messages: int = Field(6, ge=0, le=100)
+    history_preview_head_chars: int = Field(400, ge=0, le=20000)
+    history_preview_tail_chars: int = Field(400, ge=0, le=20000)
+    artifact_summary_ratio: float = Field(0.75, ge=0.1, le=1.0)
+    artifact_summary_min_chars: int = Field(1200, ge=200, le=20000)
+
+
 class AgentPolicyModel(BaseModel):
     """Validation model for workflow policy settings."""
     model_config = ConfigDict(extra="forbid")
@@ -108,12 +165,19 @@ class AgentPolicyModel(BaseModel):
     enforce_grounding: bool = False
     enable_planner: bool = True
     enable_reviewer: bool = True
+    cross_turn_artifact_persistence: bool = False
+    artifact_store_ttl_seconds: int = Field(86400, ge=60, le=604800)
+    require_tool_on_follow_up: bool = True
     truncation: TruncationPolicyModel = Field(default_factory=TruncationPolicyModel)
     model: str | None = Field(default=None, max_length=255)
     instructions: str = Field("", max_length=60_000)
     tools: ToolPolicyModel = Field(default_factory=ToolPolicyModel)
     planner: PlannerDefaultsModel = Field(default_factory=PlannerDefaultsModel)
     reviewer: ReviewerDefaultsModel = Field(default_factory=ReviewerDefaultsModel)
+    executor: ExecutorDefaultsModel = Field(default_factory=ExecutorDefaultsModel)
+    finalizer: FinalizerDefaultsModel = Field(default_factory=FinalizerDefaultsModel)
+    router: RouterDefaultsModel = Field(default_factory=RouterDefaultsModel)
+    context: ContextLimitsModel = Field(default_factory=ContextLimitsModel)
 
 
 class ToolDiscoveryModel(BaseModel):

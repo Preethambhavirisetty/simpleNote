@@ -16,7 +16,13 @@ class ToolCandidate:
 
 class ToolProvider(Protocol):
     """Protocol required by workflow tool providers."""
-    def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+    def search_tools(
+        self,
+        query: str,
+        *,
+        limit: int = 25,
+        allowlist: list[str] | None = None,
+    ) -> list[ToolCandidate]:
         """Search tools and return matching candidates."""
         ...
 

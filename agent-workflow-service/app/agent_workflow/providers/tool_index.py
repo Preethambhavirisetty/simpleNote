@@ -21,6 +21,7 @@ class ToolIndexProvider(Protocol):
         *,
         owner_scope: str,
         collections: list[str],
+        allowlist: list[str] | None = None,
         query: str,
         limit: int = 25,
     ) -> list[ToolCandidate]:
@@ -35,6 +36,7 @@ class NullToolIndexProvider:
         *,
         owner_scope: str,
         collections: list[str],
+        allowlist: list[str] | None = None,
         query: str,
         limit: int = 25,
     ) -> list[ToolCandidate]:
@@ -64,20 +66,24 @@ class HttpToolIndexProvider:
         *,
         owner_scope: str,
         collections: list[str],
+        allowlist: list[str] | None = None,
         query: str,
         limit: int = 25,
     ) -> list[ToolCandidate]:
         """Search tools and return matching candidates."""
         if not self.available or not collections:
             return []
+        cleaned_allowlist = [str(item).strip() for item in (allowlist or []) if str(item).strip()]
         payload = {
             "version": 1,
             "owner_scope": owner_scope,
             "owner_user_id": owner_scope,
             "collections": collections,
+            "allowlist": cleaned_allowlist,
             "query": query,
             "limit": max(1, min(limit, 50)),
         }
+        log.info(f"tool index cleaned allowlist: providers/tool_index.py: {cleaned_allowlist}")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["X-Internal-Key"] = self.api_key

@@ -94,7 +94,13 @@ def _collect_index_targets(configs: list[McpServerConfig]) -> tuple[list[str], s
     return list(dict.fromkeys(collections)), owner_scope, search_url
 
 
-def _search_via_tool_index(configs: list[McpServerConfig], query: str, *, limit: int) -> list[ToolCandidate]:
+def _search_via_tool_index(
+    configs: list[McpServerConfig],
+    query: str,
+    *,
+    limit: int,
+    allowlist: list[str] | None = None,
+) -> list[ToolCandidate]:
     """Search via tool index and return matching candidates."""
     collections, owner_scope, search_url = _collect_index_targets(configs)
     if not collections:
@@ -108,6 +114,7 @@ def _search_via_tool_index(configs: list[McpServerConfig], query: str, *, limit:
     candidates = provider.search_tools(
         owner_scope=owner_scope,
         collections=collections,
+        allowlist=allowlist,
         query=query,
         limit=limit,
     )
@@ -123,6 +130,14 @@ class _CatalogEntry:
     candidate: ToolCandidate
 
 
+def _filter_catalog_by_allowlist(entries: list[_CatalogEntry], allowlist: list[str] | None) -> list[_CatalogEntry]:
+    """Keep only catalog entries whose exposed name is in the allowlist."""
+    cleaned = {str(item).strip() for item in (allowlist or []) if str(item).strip()}
+    if not cleaned:
+        return entries
+    return [entry for entry in entries if entry.exposed_name in cleaned or entry.raw_name in cleaned]
+
+
 class MultiMcpToolProvider:
     """Tool provider that fans out search and calls across MCP servers."""
     def __init__(self, providers: list[RemoteMcpToolProvider]):
@@ -134,13 +149,19 @@ class MultiMcpToolProvider:
         for provider in self.providers:
             provider.close()
 
-    def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+    def search_tools(
+        self,
+        query: str,
+        *,
+        limit: int = 25,
+        allowlist: list[str] | None = None,
+    ) -> list[ToolCandidate]:
         """Search tools and return matching candidates."""
         configs = [provider.config for provider in self.providers if hasattr(provider, "config")]
-        indexed = _search_via_tool_index(configs, query, limit=limit)
+        indexed = _search_via_tool_index(configs, query, limit=limit, allowlist=allowlist)
         if indexed:
             return indexed
-        entries = self._catalog_entries()
+        entries = _filter_catalog_by_allowlist(self._catalog_entries(), allowlist)
         return _rank_catalog(entries, query, limit=limit)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -214,19 +235,28 @@ class RemoteMcpToolProvider:
         """Release any underlying network or storage resources."""
         self._client.close()
 
-    def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+    def search_tools(
+        self,
+        query: str,
+        *,
+        limit: int = 25,
+        allowlist: list[str] | None = None,
+    ) -> list[ToolCandidate]:
         """Search tools and return matching candidates."""
-        indexed = _search_via_tool_index([self.config], query, limit=limit)
+        indexed = _search_via_tool_index([self.config], query, limit=limit, allowlist=allowlist)
         if indexed:
             return indexed
         try:
             result = self.call_tool(SEMANTIC_SEARCH_TOOL, {"query": query, "limit": limit})
             candidates = _normalize_search_result(result)
             if candidates:
+                cleaned = {str(item).strip() for item in (allowlist or []) if str(item).strip()}
+                if cleaned:
+                    candidates = [candidate for candidate in candidates if candidate.name in cleaned]
                 return candidates[:limit]
         except Exception as exc:  # noqa: BLE001
             log.debug("semantic MCP tool search unavailable; falling back to tools/list", extra={"server": self.server_name, "error": str(exc)})
-        return _rank_catalog(
+        entries = _filter_catalog_by_allowlist(
             [
                 _CatalogEntry(
                     server_name=self.server_name,
@@ -236,9 +266,9 @@ class RemoteMcpToolProvider:
                 )
                 for candidate in self.list_tools()
             ],
-            query,
-            limit=limit,
+            allowlist,
         )
+        return _rank_catalog(entries, query, limit=limit)
 
     def list_tools(self) -> list[ToolCandidate]:
         """List tools."""
@@ -364,7 +394,13 @@ class RemoteMcpToolProvider:
 class EmptyToolProvider:
     """No MCP server configured; useful for fast-path-only apps and explicit test injection."""
 
-    def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+    def search_tools(
+        self,
+        query: str,
+        *,
+        limit: int = 25,
+        allowlist: list[str] | None = None,
+    ) -> list[ToolCandidate]:
         """Search tools and return matching candidates."""
         return []
 

@@ -151,6 +151,49 @@ def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str,
                     "status": status,
                 }
             )
+        elif step == "executor.completed_steps":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "completed",
+                    "label": "Execution complete; extracting facts",
+                    "handoff": entry.get("handoff"),
+                }
+            )
+        elif step == "fact_extractor.completed":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "fact_extraction",
+                    "label": f"Extracted {entry.get('fact_count', 0)} fact(s) from {entry.get('artifact_count', 0)} artifact(s)",
+                    "fact_count": entry.get("fact_count", 0),
+                    "artifact_count": entry.get("artifact_count", 0),
+                    "truncated_source_count": entry.get("truncated_source_count", 0),
+                }
+            )
+        elif step == "synthesizer.completed":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "synthesis",
+                    "label": f"Synthesized draft from {entry.get('fact_count', 0)} fact(s)",
+                    "fact_count": entry.get("fact_count", 0),
+                    "answer_chars": entry.get("answer_chars", 0),
+                }
+            )
+        elif step == "synthesizer.timeout":
+            events.append({"type": "debug", "message": f"Synthesis timed out: {entry.get('error')}"})
+        elif step == "revision.completed":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "revision",
+                    "label": "Revised draft using reviewer issues",
+                    "answer_chars": entry.get("answer_chars", 0),
+                }
+            )
+        elif step in {"revision.timeout", "revision.limit_reached"}:
+            events.append({"type": "debug", "message": f"Revision stopped: {entry.get('error') or step}"})
         elif step == "reviewer.completed":
             verdict = str(entry.get("verdict") or "UNKNOWN")
             issues = entry.get("issues") or []

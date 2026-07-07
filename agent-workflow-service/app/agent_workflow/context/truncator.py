@@ -23,7 +23,7 @@ def truncate_tool_result(
         )
 
     if isinstance(tool_result, dict):
-        summary_obj, truncated = _truncate_dict(tool_result, step_query, policy.max_artifact_chars)
+        summary_obj, truncated = _truncate_dict(tool_result, step_query, policy)
         summary = json.dumps(summary_obj, ensure_ascii=False, indent=2)
         if len(summary) > policy.max_artifact_chars:
             summary = _truncate_text(summary, policy.max_artifact_chars)
@@ -31,10 +31,10 @@ def truncate_tool_result(
         return summary, _compact_raw_ref(tool_result, truncated=truncated), truncated
 
     if isinstance(tool_result, list):
-        summary_obj, truncated = _truncate_list(tool_result, policy.max_artifact_chars)
+        summary_obj, truncated = _truncate_list(tool_result, policy)
         if tool_result and isinstance(tool_result[0], dict):
             lines = []
-            visible = min(len(tool_result), 50)
+            visible = min(len(tool_result), policy.max_list_rows_visible)
             for item in tool_result[:visible]:
                 if isinstance(item, dict):
                     parts = [f"{k}={v}" for k, v in item.items() if v is not None][:4]
@@ -104,37 +104,46 @@ def _truncate_text(text: str, max_chars: int) -> str:
     return text[: max_chars - 20] + "\n...[truncated]..."
 
 
-def _truncate_dict(data: dict[str, Any], step_query: str, max_chars: int) -> tuple[dict[str, Any], bool]:
+def _truncate_dict(data: dict[str, Any], step_query: str, policy: TruncationPolicy) -> tuple[dict[str, Any], bool]:
     """Truncate dict to fit configured context limits."""
+    max_chars = policy.max_artifact_chars
     truncated = False
     output: dict[str, Any] = {}
+    list_fields: list[tuple[str, list[dict[str, Any]]]] = []
     query_terms = set(step_query.lower().split())
 
     for key, value in data.items():
         if isinstance(value, list) and value and isinstance(value[0], dict):
-            head = value[:3]
-            tail = value[-2:] if len(value) > 5 else []
-            output[key] = head
-            if len(value) > 3:
-                output[f"{key}_truncated"] = True
-                output[f"{key}_total"] = len(value)
-                truncated = True
-            if tail and tail != head:
-                output[f"{key}_tail"] = tail
+            list_fields.append((key, value))
             continue
 
-        if isinstance(value, str) and len(value) > 400:
-            output[key] = _truncate_text(value, 400)
+        if isinstance(value, str) and len(value) > policy.max_string_field_chars:
+            output[key] = _truncate_text(value, policy.max_string_field_chars)
             truncated = True
             continue
 
         output[key] = value
 
-    text = json.dumps(output)
+    base_text = json.dumps(output, ensure_ascii=False, indent=2)
+    remaining = max(
+        policy.dict_list_min_budget,
+        max_chars - len(base_text) - policy.dict_list_budget_reserve,
+    )
+
+    for key, value in list_fields:
+        visible, list_truncated = _fit_dict_list_items(value, max_chars=remaining)
+        output[key] = visible
+        if list_truncated:
+            output[f"{key}_truncated"] = True
+            output[f"{key}_total"] = len(value)
+            truncated = True
+        chunk = json.dumps({key: visible}, ensure_ascii=False, indent=2)
+        remaining = max(policy.dict_list_min_budget, remaining - len(chunk))
+
+    text = json.dumps(output, ensure_ascii=False, indent=2)
     if len(text) > max_chars:
         truncated = True
-        # Keep keys matching query terms first
-        prioritized = {}
+        prioritized: dict[str, Any] = {}
         for key, value in output.items():
             if any(term in key.lower() for term in query_terms):
                 prioritized[key] = value
@@ -143,19 +152,45 @@ def _truncate_dict(data: dict[str, Any], step_query: str, max_chars: int) -> tup
     return output, truncated
 
 
-def _truncate_list(items: list[Any], max_chars: int) -> tuple[dict[str, Any], bool]:
+def _fit_dict_list_items(
+    items: list[dict[str, Any]],
+    *,
+    max_chars: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Keep as many dict rows as fit within the remaining character budget."""
+    if not items:
+        return [], False
+    visible: list[dict[str, Any]] = []
+    for item in items:
+        candidate = visible + [item]
+        candidate_text = json.dumps(candidate, ensure_ascii=False, indent=2)
+        if len(candidate_text) > max_chars and visible:
+            return visible, True
+        visible = candidate
+    return visible, len(visible) < len(items)
+
+
+def _truncate_list(items: list[Any], policy: TruncationPolicy) -> tuple[dict[str, Any], bool]:
     """Truncate list to fit configured context limits."""
-    truncated = len(items) > 5
+    max_chars = policy.max_artifact_chars
+    visible_limit = policy.max_list_rows_visible
+    truncated = len(items) > visible_limit
+    visible_items = items[:visible_limit]
     payload = {
-        "items": items[:3],
+        "items": visible_items,
         "total": len(items),
     }
     if truncated:
-        payload["items_tail"] = items[-2:]
         payload["truncated"] = True
     text = json.dumps(payload)
     if len(text) > max_chars:
-        payload["items"] = items[:1]
+        reduced: list[Any] = []
+        for item in visible_items:
+            candidate = reduced + [item]
+            if len(json.dumps({"items": candidate, "total": len(items)}, default=str)) > max_chars and reduced:
+                break
+            reduced = candidate
+        payload["items"] = reduced or visible_items[:1]
         payload["truncated"] = True
     return payload, truncated
 

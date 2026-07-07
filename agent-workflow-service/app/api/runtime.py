@@ -20,28 +20,32 @@ _ALLOWED_CONFIG_DIR = Path(AGENT_CONFIG_DIR).resolve() if AGENT_CONFIG_DIR else 
 _DEFAULT_CONFIG_PATH = _ALLOWED_CONFIG_DIR / "default.yaml"
 
 
-def resolve_engine(payload: AgentWorkflowRunRequest) -> AgentEngine:
-    if payload.config is not None:
-        _validate_outbound_hosts(payload.config)
-        if payload.runtime_overrides:
-            _validate_outbound_hosts(payload.runtime_overrides)
-            return AgentEngine.from_runtime_config(payload.config, payload.runtime_overrides, checkpointer=get_runtime_checkpointer())
-        return AgentEngine.from_dict(payload.config, checkpointer=get_runtime_checkpointer())
 
-    config_path = _resolve_config_path(payload.config_name, payload.config_path)
-    if payload.runtime_overrides:
-        _validate_outbound_hosts(payload.runtime_overrides)
-        return AgentEngine.from_runtime_config(config_path, payload.runtime_overrides, checkpointer=get_runtime_checkpointer())
-    return AgentEngine.from_config(config_path, checkpointer=get_runtime_checkpointer())
+# ---------------- helper functions ----------------
+
+def _host_from_url(value: Any) -> str:
+    """
+    Get the host from the provided URL.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    return (parsed.hostname or "").lower()
 
 
-def resolve_engine_from_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest) -> AgentEngine:
-    overrides = build_runtime_overrides(payload.runtime_bundle)
-    _validate_outbound_hosts(overrides)
-    return AgentEngine.from_runtime_config(_DEFAULT_CONFIG_PATH, overrides, checkpointer=get_runtime_checkpointer())
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def _resolve_config_path(config_name: str | None, config_path: str | None) -> Path:
+    """
+    Resolve the configuration path based on the provided config_name or config_path.
+    """
     if config_name and config_path:
         raise HTTPException(status_code=400, detail="Use config_name or config_path, not both")
     if config_name:
@@ -63,6 +67,9 @@ def _resolve_config_path(config_name: str | None, config_path: str | None) -> Pa
 
 
 def _validate_outbound_hosts(config: dict[str, Any]) -> None:
+    """
+    Validate the outbound hosts based on the provided configuration.
+    """
     hosts = [host for host in _iter_upstream_hosts(config) if host]
     denied = sorted({host for host in hosts if host not in ALLOWED_UPSTREAM_HOSTS})
     if denied:
@@ -74,6 +81,9 @@ def _validate_outbound_hosts(config: dict[str, Any]) -> None:
 
 
 def _iter_upstream_hosts(config: dict[str, Any]) -> Iterator[str]:
+    """
+    Iterate over the upstream hosts based on the provided configuration.
+    """
     llm = config.get("llm") if isinstance(config.get("llm"), dict) else {}
     host = _host_from_url(llm.get("base_url"))
     if host:
@@ -105,22 +115,6 @@ def _iter_upstream_hosts(config: dict[str, Any]) -> Iterator[str]:
             yield host
 
 
-def _host_from_url(value: Any) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    parsed = urlparse(text)
-    return (parsed.hostname or "").lower()
-
-
-def _is_relative_to(path: Path, parent: Path) -> bool:
-    try:
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
 def build_run_request(payload: AgentWorkflowRunRequest | AgentWorkflowRuntimeBundleRequest) -> RunRequest:
     return RunRequest(
         query=payload.query,
@@ -128,6 +122,41 @@ def build_run_request(payload: AgentWorkflowRunRequest | AgentWorkflowRuntimeBun
         history=[message.model_dump(mode="json") for message in payload.history],
         runtime_context=dict(payload.runtime_context or {}),
     )
+
+
+# ---------------- main functions ----------------
+
+def resolve_engine(payload: AgentWorkflowRunRequest) -> AgentEngine:
+    """
+    sample payload:
+    {
+        "config": {
+            "name": "default",
+            "path": "default.yaml",
+            "runtime_overrides": {
+                "name": "default",
+            }
+        }
+    }
+    """
+    if payload.config is not None:
+        _validate_outbound_hosts(payload.config)
+        if payload.runtime_overrides:
+            _validate_outbound_hosts(payload.runtime_overrides)
+            return AgentEngine.from_runtime_config(payload.config, payload.runtime_overrides, checkpointer=get_runtime_checkpointer())
+        return AgentEngine.from_dict(payload.config, checkpointer=get_runtime_checkpointer())
+
+    config_path = _resolve_config_path(payload.config_name, payload.config_path)
+    if payload.runtime_overrides:
+        _validate_outbound_hosts(payload.runtime_overrides)
+        return AgentEngine.from_runtime_config(config_path, payload.runtime_overrides, checkpointer=get_runtime_checkpointer())
+    return AgentEngine.from_config(config_path, checkpointer=get_runtime_checkpointer())
+
+
+def resolve_engine_from_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest) -> AgentEngine:
+    overrides = build_runtime_overrides(payload.runtime_bundle)
+    _validate_outbound_hosts(overrides)
+    return AgentEngine.from_runtime_config(_DEFAULT_CONFIG_PATH, overrides, checkpointer=get_runtime_checkpointer())
 
 
 def stream_sse(payload: AgentWorkflowRunRequest) -> Iterator[str]:

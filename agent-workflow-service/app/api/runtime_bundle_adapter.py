@@ -58,27 +58,40 @@ def _connector_to_mcp_server(connector: dict[str, Any]) -> dict[str, Any]:
     return server
 
 
-def _collect_allowlist(version: dict[str, Any]) -> list[str]:
-    tools = version.get("tools") if isinstance(version.get("tools"), dict) else {}
-    active_tools = tools.get("active_tools")
-    if not isinstance(active_tools, list):
-        active_tools = version.get("config", {}).get("active_tools") if isinstance(version.get("config"), dict) else []
-    allowlist = [str(tool).strip() for tool in (active_tools or []) if str(tool).strip()]
-    if allowlist:
-        return allowlist
+def _normalize_tool_names(names: list[str] | None) -> list[str]:
+    return list(dict.fromkeys(str(name).strip() for name in (names or []) if str(name).strip()))
 
-    manifest_tools: list[str] = []
-    for item in version.get("tool_manifest") or []:
-        if isinstance(item, dict) and item.get("name"):
-            manifest_tools.append(str(item["name"]).strip())
-    for connector in version.get("connectors") or []:
+
+def _connector_active_tools(connectors: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    for connector in connectors or []:
         if not isinstance(connector, dict):
             continue
         for tool in connector.get("active_tools") or []:
             name = str(tool).strip()
             if name:
-                manifest_tools.append(name)
-    return list(dict.fromkeys(manifest_tools))
+                names.append(name)
+    return _normalize_tool_names(names)
+
+
+def _collect_allowlist(version: dict[str, Any]) -> list[str]:
+    """Resolve tool allowlist from version snapshot.
+
+    Prefer explicit top-level active_tools. When empty, use the union of
+    connectors[].active_tools. Do not fall back to the full tool_manifest.
+    """
+    tools = version.get("tools") if isinstance(version.get("tools"), dict) else {}
+    version_config = version.get("config") if isinstance(version.get("config"), dict) else {}
+    connectors = version.get("connectors") if isinstance(version.get("connectors"), list) else []
+
+    top_level = tools.get("active_tools")
+    if not isinstance(top_level, list):
+        top_level = version_config.get("active_tools")
+
+    allowlist = _normalize_tool_names(top_level if isinstance(top_level, list) else None)
+    if allowlist:
+        return allowlist
+    return _connector_active_tools(connectors)
 
 
 def build_runtime_overrides(runtime_bundle: dict[str, Any]) -> dict[str, Any]:

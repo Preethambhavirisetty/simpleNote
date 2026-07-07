@@ -30,6 +30,7 @@ class ManagedCheckpointer:
                 self._context = None
 
 
+# [TODO]: enforce to use one env var for URL instead of multiple
 def create_checkpointer(mode: str = "", url: str = "") -> ManagedCheckpointer:
     """Build a checkpointer; mode/url fall back to environment when empty."""
     mode = (mode or os.getenv("AGENT_WORKFLOW_CHECKPOINTER") or os.getenv("CHECKPOINTER") or "memory").strip().lower()

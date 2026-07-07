@@ -13,6 +13,7 @@ from app.agent_workflow.context import (
     truncate_tool_result,
 )
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
+from app.agent_workflow.follow_up import follow_up_tool_recall_missing
 from app.agent_workflow.parsing import parse_executor_action
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
@@ -39,12 +40,20 @@ def _complete_with_tools_llm(
         return llm.complete_with_tools(messages, tools=tools, max_tokens=max_tokens)
 
 
+def _current_replan_id(state: AgentState) -> int:
+    iteration = state.get("iteration") or {}
+    return int(iteration.get("replans") or 0)
+
+
 def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
-    """Return tool names already called for the current plan step."""
+    """Return tool names already called for the current plan step and replan."""
+    replan_id = _current_replan_id(state)
     return {
         str(artifact.get("tool") or "")
         for artifact in (state.get("artifacts") or [])
-        if int(artifact.get("step_index", -1)) == step_index and artifact.get("tool")
+        if int(artifact.get("step_index", -1)) == step_index
+        and int(artifact.get("replan_id") or 0) == replan_id
+        and artifact.get("tool")
     }
 
 
@@ -255,7 +264,7 @@ def _search_repeat_counter(iteration: dict[str, Any], *, step_index: int) -> int
 
 def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> tuple[str, str]:
     """Return (draft_text, draft_kind); kind is "mechanical" or "llm"."""
-    grounded = _artifact_grounded_answer(state)
+    grounded = _artifact_grounded_answer(state, config=config)
     if grounded:
         return grounded, "mechanical"
     builder = ContextBuilder(config)
@@ -266,17 +275,23 @@ def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: Llm
     )
     try:
         raw = run_with_deadline(
-            lambda: _complete_llm(llm, messages, max_tokens=2000, node="executor", label="synthesize_answer"),
+            lambda: _complete_llm(
+                llm,
+                messages,
+                max_tokens=config.policy.executor.synthesize_max_tokens,
+                node="executor",
+                label="synthesize_answer",
+            ),
             timeout_seconds=config.policy.llm_timeout_seconds,
             label="executor answer synthesis LLM call",
         )
     except DeadlineExceeded:
-        return _fallback_answer(state), "mechanical"
+        return _fallback_answer(state, config=config), "mechanical"
     action = parse_executor_action(raw)
     answer = str(action.get("answer") or raw).strip()
     if answer:
         return answer, "llm"
-    return _fallback_answer(state), "mechanical"
+    return _fallback_answer(state, config=config), "mechanical"
 
 
 def _run_has_risk(state: AgentState) -> bool:
@@ -289,10 +304,11 @@ def _run_has_risk(state: AgentState) -> bool:
     return False
 
 
-def _native_tool_specs(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _native_tool_specs(candidates: list[dict[str, Any]], *, config: AgentConfig) -> list[dict[str, Any]]:
     """Convert discovered tools into OpenAI native tool-call specs."""
+    limits = config.policy.executor
     specs = []
-    for candidate in candidates[:7]:
+    for candidate in candidates[: limits.max_native_tools]:
         name = str(candidate.get("name") or "").strip()
         if not name:
             continue
@@ -302,7 +318,7 @@ def _native_tool_specs(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": str(candidate.get("description") or "")[:1024],
+                    "description": str(candidate.get("description") or "")[: limits.tool_description_max_chars],
                     "parameters": schema if isinstance(schema, dict) and schema else {"type": "object"},
                 },
             }
@@ -331,7 +347,7 @@ def _prefetch_candidate_tools(
     cache_update: dict[str, Any] | None = None
     if not candidate_dicts:
         try:
-            candidates = tools.search_tools(step_query)
+            candidates = tools.search_tools(step_query, allowlist=config.policy.tools.allowlist)
         except Exception as exc:  # noqa: BLE001 — model falls back to its own search action
             return [], [{"step": "executor.search_tools_failed", "query": step_query, "error": str(exc)[:300]}], None
         candidate_dicts = [
@@ -358,7 +374,7 @@ def _prefetch_candidate_tools(
                 "query": step_query,
                 "cache_hit": cache_hit,
                 "tool_count": len(candidate_dicts),
-                "tools": [c["name"] for c in candidate_dicts[:7]],
+                "tools": [c["name"] for c in candidate_dicts[: config.policy.context.max_tools_in_prompt]],
                 "native_prefetch": True,
             }
         )
@@ -535,6 +551,7 @@ def _run_tool_and_record(
         "composite_score": scores["composite"],
         "created_at": time.time(),
         "step_index": step_index,
+        "replan_id": _current_replan_id(state),
         "truncated": truncated,
     }
     artifacts = list(state.get("artifacts") or [])
@@ -572,46 +589,24 @@ def executor_node(
     # The executor owns the active step: it discovers tools, validates tool
     # arguments, records artifacts, and decides when a draft is ready.
     """Execute the current plan step by choosing actions, calling tools, and drafting answers."""
-    reviewer_enabled = config.policy.enable_reviewer and config.policy.reviewer.enabled
-    reviewer_skip_reason = "reviewer_disabled"
-    if reviewer_enabled and config.policy.reviewer.mode == "on_risk" and not _run_has_risk(state):
-        reviewer_enabled = False
-        reviewer_skip_reason = "reviewer_not_required"
     iteration = dict(state.get("iteration") or {})
     iteration["executor_turns"] = int(iteration.get("executor_turns") or 0) + 1
     if iteration["executor_turns"] > config.policy.max_executor_iterations:
-        draft = state.get("draft_answer")
-        draft_kind = str(state.get("draft_kind") or "mechanical")
-        if not draft:
-            draft, draft_kind = _synthesize_draft_answer(state, config=config, llm=llm)
-        phase = "reviewing" if reviewer_enabled else "done"
-        result = {
-            "phase": phase,
-            "draft_answer": draft,
-            "draft_kind": draft_kind,
+        return {
+            "phase": "fact_extracting",
             "iteration": iteration,
-            "events": [{"step": "executor.iteration_limit", "synthesized": True}],
+            "events": [{"step": "executor.iteration_limit", "handoff": "fact_extractor"}],
         }
-        if phase == "done":
-            result["final_answer"] = draft
-        return result
 
     plan = state.get("plan") or {}
     steps = plan.get("steps") or []
     step_index = int(state.get("current_step_index") or 0)
-    if step_index >= len(steps) and not state.get("draft_answer"):
-        draft, draft_kind = _synthesize_draft_answer(state, config=config, llm=llm)
-        phase = "reviewing" if reviewer_enabled else "done"
-        result = {
-            "phase": phase,
-            "draft_answer": draft,
-            "draft_kind": draft_kind,
+    if step_index >= len(steps):
+        return {
+            "phase": "fact_extracting",
             "iteration": iteration,
-            "events": [{"step": "executor.draft_answer", "synthesized": True}],
+            "events": [{"step": "executor.completed_steps", "handoff": "fact_extractor"}],
         }
-        if phase == "done":
-            result["final_answer"] = draft
-        return result
 
     current_step = steps[step_index] if step_index < len(steps) else {}
     step_query = " ".join(
@@ -663,7 +658,10 @@ def executor_node(
             try:
                 response = run_with_deadline(
                     lambda: _complete_with_tools_llm(
-                        llm, messages, tools=_native_tool_specs(native_candidates), max_tokens=1200
+                        llm,
+                        messages,
+                        tools=_native_tool_specs(native_candidates, config=config),
+                        max_tokens=config.policy.executor.native_tool_max_tokens,
                     ),
                     timeout_seconds=config.policy.llm_timeout_seconds,
                     label="executor LLM call",
@@ -697,24 +695,23 @@ def executor_node(
                     raw = str(response.get("content") or "")
         if action is None and not raw:
             raw = run_with_deadline(
-                lambda: _complete_llm(llm, messages, max_tokens=1200, node="executor", label="choose_action"),
+                lambda: _complete_llm(
+                    llm,
+                    messages,
+                    max_tokens=config.policy.executor.choose_action_max_tokens,
+                    node="executor",
+                    label="choose_action",
+                ),
                 timeout_seconds=config.policy.llm_timeout_seconds,
                 label="executor LLM call",
             )
     except DeadlineExceeded as exc:
-        draft = state.get("draft_answer") or _fallback_answer(state)
-        phase = "reviewing" if reviewer_enabled else "done"
-        result = {
-            "phase": phase,
-            "draft_answer": draft,
-            "draft_kind": str(state.get("draft_kind") or "mechanical"),
+        return {
+            "phase": "fact_extracting",
             "iteration": iteration,
             "error": str(exc),
-            "events": [{"step": "executor.timeout", "error": str(exc)}],
+            "events": [{"step": "executor.timeout", "error": str(exc), "handoff": "fact_extractor"}],
         }
-        if phase == "done":
-            result["final_answer"] = draft
-        return result
     if action is None:
         action = parse_executor_action(raw)
     action_type = str(action.get("action") or "").lower()
@@ -803,12 +800,13 @@ def executor_node(
 
         if not candidate_dicts:
             try:
-                candidates = tools.search_tools(query)
+                candidates = tools.search_tools(query, allowlist=config.policy.tools.allowlist)
             except Exception as exc:  # noqa: BLE001
                 return {
                     "error": str(exc),
-                    "phase": "reviewing",
+                    "phase": "fact_extracting",
                     "draft_answer": f"Tool search failed: {exc}",
+                    "draft_kind": "mechanical",
                     "iteration": iteration,
                     "events": updates["events"],
                 }
@@ -829,7 +827,7 @@ def executor_node(
         if not candidate_dicts:
             return {
                 "error": f"No tools matched: {query}",
-                "phase": "reviewing",
+                "phase": "fact_extracting",
                 "draft_answer": (
                     f"No tools matched: {query}. "
                     "Ingest the MCP tool catalog into Qdrant (see mcp-service MCP_TOOL_INDEX_COLLECTION)."
@@ -842,7 +840,7 @@ def executor_node(
         if not candidate_dicts:
             return {
                 "error": "Tool policy blocked all discovered tools for this step.",
-                "phase": "reviewing" if reviewer_enabled else "done",
+                "phase": "fact_extracting",
                 "draft_answer": "No allowed tools are available for this step under the configured tool policy.",
                 "iteration": iteration,
                 "events": updates["events"] + [
@@ -863,7 +861,7 @@ def executor_node(
                 "query": query,
                 "cache_hit": cache_hit,
                 "tool_count": len(candidate_dicts),
-                "tools": [c["name"] for c in candidate_dicts[:7]],
+                "tools": [c["name"] for c in candidate_dicts[: config.policy.context.max_tools_in_prompt]],
             }
         )
         return updates
@@ -919,6 +917,17 @@ def executor_node(
         )
 
     if action_type == "finish_step":
+        missing_follow_up = follow_up_tool_recall_missing(state)
+        if missing_follow_up:
+            updates["events"].append(
+                {
+                    "step": "executor.follow_up_evidence_missing",
+                    "step_index": step_index,
+                    "missing": missing_follow_up,
+                    "message": missing_follow_up[0],
+                }
+            )
+            return updates
         required_tools = _required_tools_for_step(config, current_step)
         missing_required = sorted(required_tools - called_this_step)
         if missing_required:
@@ -936,54 +945,54 @@ def executor_node(
         updates["candidate_tools"] = []
         updates["events"].append({"step": "executor.finish_step", "step_index": step_index})
         if next_index >= len(steps):
-            draft = state.get("draft_answer")
-            draft_kind = str(state.get("draft_kind") or "mechanical")
-            if not draft:
-                draft, draft_kind = _synthesize_draft_answer(state, config=config, llm=llm)
-            updates["draft_answer"] = draft
-            updates["draft_kind"] = draft_kind
-            if reviewer_enabled:
-                updates["phase"] = "reviewing"
-            else:
-                updates["phase"] = "done"
-                updates["final_answer"] = draft
-                updates["review"] = {"verdict": "SKIPPED", "reason": reviewer_skip_reason}
+            updates["phase"] = "fact_extracting"
+            updates["events"].append({"step": "executor.completed_steps", "handoff": "fact_extractor"})
         return updates
 
     answer = str(action.get("answer") or raw).strip()
+    missing_follow_up = follow_up_tool_recall_missing(state)
+    if missing_follow_up:
+        updates["events"].append(
+            {
+                "step": "executor.follow_up_evidence_missing",
+                "step_index": step_index,
+                "missing": missing_follow_up,
+                "message": missing_follow_up[0],
+            }
+        )
+        return updates
     updates["draft_answer"] = answer
-    updates["draft_kind"] = "llm"
-    if reviewer_enabled:
-        updates["phase"] = "reviewing"
-    else:
-        updates["phase"] = "done"
-        updates["final_answer"] = answer
-        updates["review"] = {"verdict": "SKIPPED", "reason": reviewer_skip_reason}
-    updates["events"].append({"step": "executor.draft_answer"})
+    updates["draft_kind"] = "executor_draft"
+    updates["phase"] = "fact_extracting"
+    updates["events"].append({"step": "executor.draft_answer", "handoff": "fact_extractor"})
     return updates
 
 
-def _fallback_answer(state: AgentState) -> str:
+def _fallback_answer(state: AgentState, *, config: AgentConfig) -> str:
     """Build a best-effort answer when normal drafting cannot complete."""
-    grounded = _artifact_grounded_answer(state)
+    limits = config.policy.executor
+    grounded = _artifact_grounded_answer(state, config=config)
     if grounded:
         return grounded
     artifacts = state.get("artifacts") or []
     if not artifacts:
         return "I completed the available steps but could not produce a detailed answer."
     lines = ["Here is what I found:"]
-    for artifact in artifacts[:5]:
-        lines.append(f"- {artifact.get('tool')}: {str(artifact.get('summary', ''))[:400]}")
+    for artifact in artifacts[: limits.fallback_artifact_limit]:
+        lines.append(
+            f"- {artifact.get('tool')}: {str(artifact.get('summary', ''))[: limits.fallback_summary_chars]}"
+        )
     return "\n".join(lines)
 
 
-def _artifact_grounded_answer(state: AgentState) -> str:
+def _artifact_grounded_answer(state: AgentState, *, config: AgentConfig) -> str:
     """Render a deterministic answer directly from collected artifacts."""
+    limits = config.policy.executor
     artifacts = state.get("artifacts") or []
     if not artifacts:
         return ""
     lines = ["Here is what I found from tool results:"]
-    for artifact in artifacts[:5]:
+    for artifact in artifacts[: limits.mechanical_artifact_limit]:
         tool_name = str(artifact.get("tool") or "tool")
         summary = str(artifact.get("summary") or "").strip()
         raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
@@ -998,6 +1007,6 @@ def _artifact_grounded_answer(state: AgentState) -> str:
         else:
             lines.append(f"- {tool_name}:")
         if summary:
-            for line in summary.splitlines()[:60]:
+            for line in summary.splitlines()[: limits.mechanical_line_limit]:
                 lines.append(f"  {line}")
     return "\n".join(lines)

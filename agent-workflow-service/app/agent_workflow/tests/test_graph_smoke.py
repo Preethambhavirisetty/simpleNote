@@ -289,7 +289,7 @@ def test_executor_breaks_repeated_search_loop_with_existing_candidates():
     assert any(event.get("step") == "executor.finish_step" for event in third["events"])
 
 
-def test_executor_finish_last_step_generates_artifact_grounded_draft():
+def test_executor_finish_last_step_hands_off_to_fact_extractor():
     from pathlib import Path
 
     from app.agent_workflow.config import load_agent_config
@@ -311,35 +311,40 @@ def test_executor_finish_last_step_generates_artifact_grounded_draft():
 
     updates = executor_node(state, config=config, llm=FinishStepLlm(), tools=MockTools())
 
-    assert updates["phase"] == "reviewing"
-    assert "draft_answer" in updates
-    assert "list_dashboards: 1 item(s)" in updates["draft_answer"]
-    assert "dbx_overview" in updates["draft_answer"]
+    assert updates["phase"] == "fact_extracting"
+    assert any(event.get("step") == "executor.completed_steps" for event in updates["events"])
+    assert "draft_answer" not in updates
 
 
-def test_reviewer_replan_keeps_artifacts_and_tool_calls():
+def test_reviewer_revise_keeps_artifacts_and_tool_calls():
     from pathlib import Path
 
     from app.agent_workflow.config import load_agent_config
     from app.agent_workflow.nodes.reviewer import reviewer_node
 
     config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
-    config.policy.reviewer.reject_action = "replan"
     state = {
         "phase": "reviewing",
-        "iteration": {"review_cycles": 0, "replans": 0},
+        "iteration": {"review_cycles": 0, "revision_cycles": 0},
         "draft_answer": "ungrounded answer",
         "artifacts": [{"id": "a1", "tool": "list_dashboards", "summary": "dashboards"}],
         "tool_calls": [{"name": "list_dashboards", "status": "ok"}],
         "candidate_tools": [{"name": "list_dashboards"}],
     }
 
-    updates = reviewer_node(state, config=config, llm=RejectReviewerLlm())
+    class ReviseReviewerLlm:
+        def complete(self, messages, *, max_tokens: int = 1024) -> str:
+            return '{"verdict":"REVISE","issues":["unsupported"],"required_changes":["Use the facts only"]}'
 
-    assert updates["phase"] == "planning"
+        def stream(self, messages, *, max_tokens: int = 1024):
+            yield self.complete(messages, max_tokens=max_tokens)
+
+    updates = reviewer_node(state, config=config, llm=ReviseReviewerLlm())
+
+    assert updates["phase"] == "revising"
     assert "artifacts" not in updates
     assert "tool_calls" not in updates
-    assert updates["candidate_tools"] == []
+    assert "candidate_tools" not in updates
 
 
 def test_executor_prunes_retained_artifacts_and_tool_calls():
@@ -485,3 +490,83 @@ def test_executor_validates_discovered_tool_schema_before_calling():
     assert tools.calls == []
     assert updates["tool_calls"][-1]["status"] == "invalid_args"
     assert "missing required argument: query" in updates["tool_calls"][-1]["error"]
+
+
+def test_reviewer_blocks_approve_when_trello_cards_missing():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.reviewer import reviewer_node
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+
+    class ApproveReviewerLlm(LlmProvider):
+        def complete(self, messages, *, max_tokens: int = 1024) -> str:
+            return (
+                "### Verdict\nAPPROVE\n### Issues found\nNone\n### Missing evidence\nNone\n"
+                "### Required changes\nNone\n### Approved answer\nThere are 0 cards on the board."
+            )
+
+        def stream(self, messages, *, max_tokens: int = 1024):
+            yield self.complete(messages, max_tokens=max_tokens)
+
+    state = {
+        "user_query": "How many cards are on my Trello board?",
+        "phase": "reviewing",
+        "iteration": {"review_cycles": 0},
+        "draft_answer": "There are 0 cards on the board.",
+        "artifacts": [],
+        "tool_calls": [{"name": "list_boards", "status": "ok"}],
+    }
+
+    updates = reviewer_node(state, config=config, llm=ApproveReviewerLlm())
+
+    assert updates["review"]["verdict"] == "REVISE"
+    assert updates["phase"] == "revising"
+    assert any("get_cards" in item for item in updates["review"].get("required_changes") or [])
+
+
+class DuplicateToolLlm(LlmProvider):
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        return '{"action":"call_tool","name":"list_boards","arguments":{}}'
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_executor_allows_retry_after_replan_despite_prior_step_zero_artifacts():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.executor import executor_node
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    tools = MockTools()
+    candidates = [
+        {
+            "name": "list_boards",
+            "title": "List Boards",
+            "description": "List Trello boards",
+            "score": 0.9,
+            "input_schema": {"type": "object", "properties": {}},
+        }
+    ]
+    state = _executor_state(
+        iteration={"replans": 1},
+        candidate_tools=candidates,
+        artifacts=[
+            {
+                "id": "old-boards",
+                "tool": "list_boards",
+                "summary": "old boards",
+                "step_index": 0,
+                "replan_id": 0,
+                "composite_score": 0.5,
+            }
+        ],
+    )
+
+    updates = executor_node(state, config=config, llm=DuplicateToolLlm(), tools=tools)
+
+    assert tools.calls == [("list_boards", {})]
+    assert not any(event.get("step") == "executor.duplicate_tool_skipped" for event in updates["events"])

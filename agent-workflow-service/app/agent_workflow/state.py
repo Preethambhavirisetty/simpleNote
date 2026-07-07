@@ -46,7 +46,19 @@ class Artifact(TypedDict, total=False):
     composite_score: float
     created_at: float
     step_index: int
+    replan_id: int
     truncated: bool
+
+
+class Fact(TypedDict, total=False):
+    """Compact claim extracted from artifacts for synthesis and review."""
+    id: str
+    text: str
+    source_artifact_id: str
+    tool: str
+    source_ref: dict[str, Any]
+    confidence: float
+    truncated_source: bool
 
 
 class ToolCallRecord(TypedDict, total=False):
@@ -62,7 +74,9 @@ class IterationCounters(TypedDict, total=False):
     """Counters used to cap loops and review cycles."""
     executor_turns: int
     review_cycles: int
+    revision_cycles: int
     tool_calls: int
+    replans: int
 
 
 class AgentState(TypedDict, total=False):
@@ -77,6 +91,7 @@ class AgentState(TypedDict, total=False):
     tool_discovery_cache: dict[str, list[dict[str, Any]]]
     artifacts: list[Artifact]
     tool_calls: list[ToolCallRecord]
+    facts: list[Fact]
     draft_answer: str
     draft_kind: str  # "mechanical" (deterministic artifact dump) | "llm" (prose)
     review: ReviewResult

@@ -1,0 +1,62 @@
+name: sample-agent
+prompts:
+  planner: prompts/planner.md
+  executor: prompts/executor.md
+  reviewer: prompts/reviewer.md
+llm:
+  base_url: ${LLM_API_BASE}
+  api_key: ${LLM_API_KEY}
+  model: ${LLM_REASONER_MODEL}
+  send_auth_header: ${LLM_SEND_AUTH_HEADER}
+  default_max_tokens: 2048
+  temperature: ${LLM_TEMPERATURE}
+  top_p: ${LLM_TOP_P}
+  top_k: ${LLM_TOP_K}
+  seed: ${LLM_SEED}
+mcp:
+  url: ${MCP_URL}
+  auth_token: ${MCP_AUTH_TOKEN}
+policy:
+  instructions: |
+    You are a helpful assistant that can help with tasks such as getting the current time.
+  max_executor_iterations: 10
+  max_review_cycles: 2
+  max_tool_calls_per_step: 3
+  max_context_tokens: 12000
+  llm_timeout_seconds: 60
+  tool_timeout_seconds: 120
+  max_retained_artifacts: 20
+  max_retained_tool_calls: 32
+  max_retained_events: 80
+  reject_action: replan
+  destructive_tools:
+    - do_nothing
+  require_destructive_confirmation: true
+  enable_fast_path: true
+  enable_planner: false
+  enable_reviewer: true
+  render_final_answer: true
+  enforce_grounding: true
+  tools:
+    allowlist:
+      - get_current_time
+    argument_injection:
+      get_current_time:
+        timezone: timezone
+  planner:
+    enabled: false
+  reviewer:
+    enabled: true
+    mode: always
+    max_cycles: 2
+  truncation:
+    max_artifact_chars: 2500
+    score_weights:
+      relevance: 0.45
+      freshness: 0.25
+      uniqueness: 0.15
+      actionability: 0.15
+resources:
+  checkpointer:
+    mode: ${AGENT_WORKFLOW_CHECKPOINTER}
+    url: ${AGENT_WORKFLOW_REDIS_URL}

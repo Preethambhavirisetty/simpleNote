@@ -63,6 +63,30 @@ def test_build_runtime_overrides_maps_instructions_model_and_mcp_servers():
     assert overrides["policy"]["tools"]["allowlist"] == ["list_dashboards"]
 
 
+def test_build_runtime_overrides_uses_connector_active_tools_when_top_level_empty():
+    bundle = _sample_runtime_bundle()
+    bundle["active_version"]["tools"]["active_tools"] = []
+    bundle["active_version"]["connectors"][0]["active_tools"] = [
+        "list_dashboards",
+        "search_panels",
+        "get_dashboard",
+        "get_panel_data",
+    ]
+    bundle["active_version"]["tool_manifest"] = [
+        {"name": "qdrant_query_collection_exact"},
+        {"name": "list_dashboards"},
+    ]
+
+    overrides = build_runtime_overrides(bundle)
+
+    assert overrides["policy"]["tools"]["allowlist"] == [
+        "list_dashboards",
+        "search_panels",
+        "get_dashboard",
+        "get_panel_data",
+    ]
+
+
 def test_build_runtime_overrides_merges_top_level_runtime_overrides():
     bundle = _sample_runtime_bundle()
     bundle["runtime_overrides"] = {

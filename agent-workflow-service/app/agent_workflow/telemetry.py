@@ -278,9 +278,33 @@ def record_workflow_update(update: dict[str, Any], previous_state: dict[str, Any
         elif step == "executor.finish_step":
             trace.add(f"executor finished plan step {int(event.get('step_index', 0)) + 1}")
         elif step == "executor.draft_answer":
-            trace.add(f"executor drafted answer; synthesized: {bool(event.get('synthesized'))}")
+            trace.add(f"executor received draft action; handoff: {_preview(event.get('handoff'))}")
+        elif step == "executor.completed_steps":
+            trace.add(f"executor completed planned steps; handoff: {_preview(event.get('handoff'))}")
         elif step == "executor.iteration_limit":
-            trace.add(f"executor hit iteration limit; synthesized draft: {bool(event.get('synthesized'))}")
+            trace.add(f"executor hit iteration limit; handoff: {_preview(event.get('handoff'))}")
+        elif step == "fact_extractor.completed":
+            trace.add(
+                "fact extractor completed; "
+                f"facts: {event.get('fact_count')}; artifacts: {event.get('artifact_count')}; "
+                f"truncated sources: {event.get('truncated_source_count')}"
+            )
+        elif step == "synthesizer.completed":
+            trace.add(
+                "synthesizer completed; "
+                f"facts: {event.get('fact_count')}; answer chars: {event.get('answer_chars')}"
+            )
+        elif step == "synthesizer.timeout":
+            trace.add(f"synthesizer timed out; error: {_preview(event.get('error'))}")
+        elif step == "revision.completed":
+            trace.add(
+                "revision completed; "
+                f"cycles: {event.get('revision_cycles')}; answer chars: {event.get('answer_chars')}"
+            )
+        elif step == "revision.timeout":
+            trace.add(f"revision timed out; error: {_preview(event.get('error'))}")
+        elif step == "revision.limit_reached":
+            trace.add(f"revision limit reached; cycles: {event.get('revision_cycles')}")
         elif step == "executor.tool_args_invalid":
             trace.add(f"executor rejected tool arguments; tool: {_preview(event.get('tool'))}; error: {_preview(event.get('error'))}")
         elif step in {
@@ -304,12 +328,15 @@ def record_workflow_update(update: dict[str, Any], previous_state: dict[str, Any
                 f"verdict: {_preview(event.get('verdict'))}; issues: {len(event.get('issues') or [])}; "
                 f"missing evidence: {len(event.get('missing_evidence') or [])}; "
                 f"required changes: {len(event.get('required_changes') or [])}; "
-                f"artifacts: {event.get('artifact_count')}; tool calls: {event.get('tool_call_count')}"
+                f"facts: {event.get('fact_count')}; artifacts: {event.get('artifact_count')}; "
+                f"tool calls: {event.get('tool_call_count')}"
             )
         elif step == "reviewer.skipped":
             trace.add(f"reviewer skipped; reason: {_preview(event.get('reason'))}")
         elif step == "reviewer.timeout":
             trace.add(f"reviewer timed out; error: {_preview(event.get('error'))}")
+        elif step == "reviewer.limit_reached":
+            trace.add(f"reviewer limit reached; cycles: {event.get('review_cycles')}")
         elif step.startswith("finalizer."):
             trace.add(f"{step.replace('.', ' ')}; details: {_preview(event)}")
 

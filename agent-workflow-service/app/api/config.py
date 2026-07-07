@@ -25,7 +25,7 @@ MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
 AGENT_CONFIG_DIR = (os.getenv("AGENT_CONFIG_DIR") or "").strip()
 ALLOWED_UPSTREAM_HOSTS = {
     item.strip().lower()
-    for item in (os.getenv("ALLOWED_UPSTREAM_HOSTS") or "localhost,127.0.0.1,::1").split(",")
+    for item in (os.getenv("ALLOWED_UPSTREAM_HOSTS") or "10.201.62.184,localhost,127.0.0.1,::1").split(",")
     if item.strip()
 }
 

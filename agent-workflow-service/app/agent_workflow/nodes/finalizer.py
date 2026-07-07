@@ -56,15 +56,21 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
         }
 
     writer = _stream_writer()
-    messages = _terminal_answer_messages(state, existing)
+    messages = _terminal_answer_messages(state, existing, config=config)
+    finalizer_cfg = config.policy.finalizer
 
     def _render() -> str:
         """Helper for render."""
-        with llm_call(node="finalizer", label="render_final_answer", messages=messages, max_tokens=2000):
+        with llm_call(
+            node="finalizer",
+            label="render_final_answer",
+            messages=messages,
+            max_tokens=finalizer_cfg.max_tokens,
+        ):
             if writer is None:
-                return llm.complete(messages, max_tokens=2000)
+                return llm.complete(messages, max_tokens=finalizer_cfg.max_tokens)
             parts: list[str] = []
-            for token in llm.stream(messages, max_tokens=2000):
+            for token in llm.stream(messages, max_tokens=finalizer_cfg.max_tokens):
                 if not token:
                     continue
                 parts.append(token)
@@ -98,14 +104,17 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     }
 
 
-def _terminal_answer_messages(state: AgentState, approved: str) -> list[dict[str, str]]:
+def _terminal_answer_messages(state: AgentState, approved: str, *, config: AgentConfig) -> list[dict[str, str]]:
     """Build the finalizer prompt from the approved draft and artifacts."""
+    finalizer_cfg = config.policy.finalizer
     artifacts = state.get("artifacts") or []
     source_lines = []
-    for artifact in artifacts[:12]:
+    for artifact in artifacts[: finalizer_cfg.max_artifact_lines]:
         source_ref = artifact.get("source_ref") or {}
         source_lines.append(
-            f"- {artifact.get('tool', 'tool')}: {artifact.get('summary', '')} source_ref={source_ref}"[:1200]
+            f"- {artifact.get('tool', 'tool')}: {artifact.get('summary', '')} source_ref={source_ref}"[
+                : finalizer_cfg.artifact_line_max_chars
+            ]
         )
 
     return [

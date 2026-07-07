@@ -75,6 +75,10 @@ def _as_float(value: Any, default: float) -> float:
 class TruncationPolicy:
     """Runtime settings for trimming and scoring artifacts."""
     max_artifact_chars: int = 2500
+    max_string_field_chars: int = 400
+    max_list_rows_visible: int = 100
+    dict_list_budget_reserve: int = 96
+    dict_list_min_budget: int = 200
     score_weights: dict[str, float] = field(
         default_factory=lambda: {
             "relevance": 0.4,
@@ -106,10 +110,59 @@ class PlannerDefaults:
 class ReviewerDefaults:
     """Runtime reviewer defaults."""
     enabled: bool = True
-    max_tokens: int = 1200
+    max_tokens: int = 2400
     max_cycles: int = 2
     reject_action: str = "replan"
     mode: str = "always"  # always | on_risk
+
+
+@dataclass
+class ExecutorDefaults:
+    """Runtime executor LLM output and display limits."""
+    choose_action_max_tokens: int = 1200
+    native_tool_max_tokens: int = 1200
+    synthesize_max_tokens: int = 2000
+    max_native_tools: int = 7
+    tool_description_max_chars: int = 1024
+    fallback_artifact_limit: int = 5
+    mechanical_artifact_limit: int = 12
+    mechanical_line_limit: int = 120
+    fallback_summary_chars: int = 400
+
+
+@dataclass
+class FinalizerDefaults:
+    """Runtime finalizer rendering limits."""
+    max_tokens: int = 2000
+    max_artifact_lines: int = 12
+    artifact_line_max_chars: int = 1200
+
+
+@dataclass
+class RouterDefaults:
+    """Runtime fast-path router limits."""
+    fast_path_max_tokens: int = 512
+    fast_path_max_query_chars: int = 180
+    fast_path_max_query_words: int = 24
+    fast_path_history_messages: int = 4
+    fast_path_history_content_chars: int = 1000
+    merge_state_max_events: int = 80
+
+
+@dataclass
+class ContextLimits:
+    """Runtime prompt assembly display limits."""
+    system_budget_padding: int = 50
+    min_artifact_budget_tokens: int = 200
+    trim_section_min_chars: int = 200
+    max_tools_in_prompt: int = 7
+    max_tool_calls_in_prompt: int = 5
+    max_artifacts_in_prompt: int = 10
+    max_history_messages: int = 6
+    history_preview_head_chars: int = 400
+    history_preview_tail_chars: int = 400
+    artifact_summary_ratio: float = 0.75
+    artifact_summary_min_chars: int = 1200
 
 
 @dataclass
@@ -133,10 +186,17 @@ class AgentPolicy:
     enforce_grounding: bool = False
     enable_planner: bool = True
     enable_reviewer: bool = True
+    cross_turn_artifact_persistence: bool = False
+    artifact_store_ttl_seconds: int = 86400
+    require_tool_on_follow_up: bool = True
     truncation: TruncationPolicy = field(default_factory=TruncationPolicy)
     tools: ToolPolicy = field(default_factory=ToolPolicy)
     planner: PlannerDefaults = field(default_factory=PlannerDefaults)
     reviewer: ReviewerDefaults = field(default_factory=ReviewerDefaults)
+    executor: ExecutorDefaults = field(default_factory=ExecutorDefaults)
+    finalizer: FinalizerDefaults = field(default_factory=FinalizerDefaults)
+    router: RouterDefaults = field(default_factory=RouterDefaults)
+    context: ContextLimits = field(default_factory=ContextLimits)
     model: str | None = None
     instructions: str = ""
 
@@ -297,8 +357,15 @@ class AgentConfig:
                 "enforce_grounding": policy.enforce_grounding,
                 "enable_planner": policy.enable_planner,
                 "enable_reviewer": policy.enable_reviewer,
+                "cross_turn_artifact_persistence": policy.cross_turn_artifact_persistence,
+                "artifact_store_ttl_seconds": policy.artifact_store_ttl_seconds,
+                "require_tool_on_follow_up": policy.require_tool_on_follow_up,
                 "truncation": {
                     "max_artifact_chars": policy.truncation.max_artifact_chars,
+                    "max_string_field_chars": policy.truncation.max_string_field_chars,
+                    "max_list_rows_visible": policy.truncation.max_list_rows_visible,
+                    "dict_list_budget_reserve": policy.truncation.dict_list_budget_reserve,
+                    "dict_list_min_budget": policy.truncation.dict_list_min_budget,
                     "score_weights": dict(policy.truncation.score_weights),
                     "freshness_half_life_seconds": policy.truncation.freshness_half_life_seconds,
                 },
@@ -318,6 +385,43 @@ class AgentConfig:
                     "max_cycles": policy.reviewer.max_cycles,
                     "reject_action": policy.reviewer.reject_action,
                     "mode": policy.reviewer.mode,
+                },
+                "executor": {
+                    "choose_action_max_tokens": policy.executor.choose_action_max_tokens,
+                    "native_tool_max_tokens": policy.executor.native_tool_max_tokens,
+                    "synthesize_max_tokens": policy.executor.synthesize_max_tokens,
+                    "max_native_tools": policy.executor.max_native_tools,
+                    "tool_description_max_chars": policy.executor.tool_description_max_chars,
+                    "fallback_artifact_limit": policy.executor.fallback_artifact_limit,
+                    "mechanical_artifact_limit": policy.executor.mechanical_artifact_limit,
+                    "mechanical_line_limit": policy.executor.mechanical_line_limit,
+                    "fallback_summary_chars": policy.executor.fallback_summary_chars,
+                },
+                "finalizer": {
+                    "max_tokens": policy.finalizer.max_tokens,
+                    "max_artifact_lines": policy.finalizer.max_artifact_lines,
+                    "artifact_line_max_chars": policy.finalizer.artifact_line_max_chars,
+                },
+                "router": {
+                    "fast_path_max_tokens": policy.router.fast_path_max_tokens,
+                    "fast_path_max_query_chars": policy.router.fast_path_max_query_chars,
+                    "fast_path_max_query_words": policy.router.fast_path_max_query_words,
+                    "fast_path_history_messages": policy.router.fast_path_history_messages,
+                    "fast_path_history_content_chars": policy.router.fast_path_history_content_chars,
+                    "merge_state_max_events": policy.router.merge_state_max_events,
+                },
+                "context": {
+                    "system_budget_padding": policy.context.system_budget_padding,
+                    "min_artifact_budget_tokens": policy.context.min_artifact_budget_tokens,
+                    "trim_section_min_chars": policy.context.trim_section_min_chars,
+                    "max_tools_in_prompt": policy.context.max_tools_in_prompt,
+                    "max_tool_calls_in_prompt": policy.context.max_tool_calls_in_prompt,
+                    "max_artifacts_in_prompt": policy.context.max_artifacts_in_prompt,
+                    "max_history_messages": policy.context.max_history_messages,
+                    "history_preview_head_chars": policy.context.history_preview_head_chars,
+                    "history_preview_tail_chars": policy.context.history_preview_tail_chars,
+                    "artifact_summary_ratio": policy.context.artifact_summary_ratio,
+                    "artifact_summary_min_chars": policy.context.artifact_summary_min_chars,
                 },
                 "model": policy.model,
                 "instructions": policy.instructions,
@@ -375,8 +479,15 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         enforce_grounding=_as_bool(policy_raw.enforce_grounding, False),
         enable_planner=planner_enabled,
         enable_reviewer=reviewer_enabled,
+        cross_turn_artifact_persistence=_as_bool(policy_raw.cross_turn_artifact_persistence, False),
+        artifact_store_ttl_seconds=_as_int(policy_raw.artifact_store_ttl_seconds, 86400),
+        require_tool_on_follow_up=_as_bool(policy_raw.require_tool_on_follow_up, True),
         truncation=TruncationPolicy(
             max_artifact_chars=_as_int(trunc_raw.max_artifact_chars, 2500),
+            max_string_field_chars=_as_int(trunc_raw.max_string_field_chars, 400),
+            max_list_rows_visible=_as_int(trunc_raw.max_list_rows_visible, 100),
+            dict_list_budget_reserve=_as_int(trunc_raw.dict_list_budget_reserve, 96),
+            dict_list_min_budget=_as_int(trunc_raw.dict_list_min_budget, 200),
             score_weights=dict(trunc_raw.score_weights or _default_score_weights()),
             freshness_half_life_seconds=_as_float(trunc_raw.freshness_half_life_seconds, 3600.0),
         ),
@@ -395,10 +506,47 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         ),
         reviewer=ReviewerDefaults(
             enabled=reviewer_enabled,
-            max_tokens=_as_int(policy_raw.reviewer.max_tokens, 1200),
+            max_tokens=_as_int(policy_raw.reviewer.max_tokens, 2400),
             max_cycles=review_max_cycles,
             reject_action=reject_action,
             mode=str(policy_raw.reviewer.mode or "always"),
+        ),
+        executor=ExecutorDefaults(
+            choose_action_max_tokens=_as_int(policy_raw.executor.choose_action_max_tokens, 1200),
+            native_tool_max_tokens=_as_int(policy_raw.executor.native_tool_max_tokens, 1200),
+            synthesize_max_tokens=_as_int(policy_raw.executor.synthesize_max_tokens, 2000),
+            max_native_tools=_as_int(policy_raw.executor.max_native_tools, 7),
+            tool_description_max_chars=_as_int(policy_raw.executor.tool_description_max_chars, 1024),
+            fallback_artifact_limit=_as_int(policy_raw.executor.fallback_artifact_limit, 5),
+            mechanical_artifact_limit=_as_int(policy_raw.executor.mechanical_artifact_limit, 12),
+            mechanical_line_limit=_as_int(policy_raw.executor.mechanical_line_limit, 120),
+            fallback_summary_chars=_as_int(policy_raw.executor.fallback_summary_chars, 400),
+        ),
+        finalizer=FinalizerDefaults(
+            max_tokens=_as_int(policy_raw.finalizer.max_tokens, 2000),
+            max_artifact_lines=_as_int(policy_raw.finalizer.max_artifact_lines, 12),
+            artifact_line_max_chars=_as_int(policy_raw.finalizer.artifact_line_max_chars, 1200),
+        ),
+        router=RouterDefaults(
+            fast_path_max_tokens=_as_int(policy_raw.router.fast_path_max_tokens, 512),
+            fast_path_max_query_chars=_as_int(policy_raw.router.fast_path_max_query_chars, 180),
+            fast_path_max_query_words=_as_int(policy_raw.router.fast_path_max_query_words, 24),
+            fast_path_history_messages=_as_int(policy_raw.router.fast_path_history_messages, 4),
+            fast_path_history_content_chars=_as_int(policy_raw.router.fast_path_history_content_chars, 1000),
+            merge_state_max_events=_as_int(policy_raw.router.merge_state_max_events, 80),
+        ),
+        context=ContextLimits(
+            system_budget_padding=_as_int(policy_raw.context.system_budget_padding, 50),
+            min_artifact_budget_tokens=_as_int(policy_raw.context.min_artifact_budget_tokens, 200),
+            trim_section_min_chars=_as_int(policy_raw.context.trim_section_min_chars, 200),
+            max_tools_in_prompt=_as_int(policy_raw.context.max_tools_in_prompt, 7),
+            max_tool_calls_in_prompt=_as_int(policy_raw.context.max_tool_calls_in_prompt, 5),
+            max_artifacts_in_prompt=_as_int(policy_raw.context.max_artifacts_in_prompt, 10),
+            max_history_messages=_as_int(policy_raw.context.max_history_messages, 6),
+            history_preview_head_chars=_as_int(policy_raw.context.history_preview_head_chars, 400),
+            history_preview_tail_chars=_as_int(policy_raw.context.history_preview_tail_chars, 400),
+            artifact_summary_ratio=_as_float(policy_raw.context.artifact_summary_ratio, 0.75),
+            artifact_summary_min_chars=_as_int(policy_raw.context.artifact_summary_min_chars, 1200),
         ),
         model=policy_raw.model,
         instructions=str(policy_raw.instructions or ""),
@@ -568,8 +716,15 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "enforce_grounding": base.policy.enforce_grounding,
             "enable_planner": base.policy.enable_planner,
             "enable_reviewer": base.policy.enable_reviewer,
+            "cross_turn_artifact_persistence": base.policy.cross_turn_artifact_persistence,
+            "artifact_store_ttl_seconds": base.policy.artifact_store_ttl_seconds,
+            "require_tool_on_follow_up": base.policy.require_tool_on_follow_up,
             "truncation": {
                 "max_artifact_chars": base.policy.truncation.max_artifact_chars,
+                "max_string_field_chars": base.policy.truncation.max_string_field_chars,
+                "max_list_rows_visible": base.policy.truncation.max_list_rows_visible,
+                "dict_list_budget_reserve": base.policy.truncation.dict_list_budget_reserve,
+                "dict_list_min_budget": base.policy.truncation.dict_list_min_budget,
                 "score_weights": dict(base.policy.truncation.score_weights),
                 "freshness_half_life_seconds": base.policy.truncation.freshness_half_life_seconds,
             },
@@ -589,6 +744,43 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
                 "max_cycles": base.policy.reviewer.max_cycles,
                 "reject_action": base.policy.reviewer.reject_action,
                 "mode": base.policy.reviewer.mode,
+            },
+            "executor": {
+                "choose_action_max_tokens": base.policy.executor.choose_action_max_tokens,
+                "native_tool_max_tokens": base.policy.executor.native_tool_max_tokens,
+                "synthesize_max_tokens": base.policy.executor.synthesize_max_tokens,
+                "max_native_tools": base.policy.executor.max_native_tools,
+                "tool_description_max_chars": base.policy.executor.tool_description_max_chars,
+                "fallback_artifact_limit": base.policy.executor.fallback_artifact_limit,
+                "mechanical_artifact_limit": base.policy.executor.mechanical_artifact_limit,
+                "mechanical_line_limit": base.policy.executor.mechanical_line_limit,
+                "fallback_summary_chars": base.policy.executor.fallback_summary_chars,
+            },
+            "finalizer": {
+                "max_tokens": base.policy.finalizer.max_tokens,
+                "max_artifact_lines": base.policy.finalizer.max_artifact_lines,
+                "artifact_line_max_chars": base.policy.finalizer.artifact_line_max_chars,
+            },
+            "router": {
+                "fast_path_max_tokens": base.policy.router.fast_path_max_tokens,
+                "fast_path_max_query_chars": base.policy.router.fast_path_max_query_chars,
+                "fast_path_max_query_words": base.policy.router.fast_path_max_query_words,
+                "fast_path_history_messages": base.policy.router.fast_path_history_messages,
+                "fast_path_history_content_chars": base.policy.router.fast_path_history_content_chars,
+                "merge_state_max_events": base.policy.router.merge_state_max_events,
+            },
+            "context": {
+                "system_budget_padding": base.policy.context.system_budget_padding,
+                "min_artifact_budget_tokens": base.policy.context.min_artifact_budget_tokens,
+                "trim_section_min_chars": base.policy.context.trim_section_min_chars,
+                "max_tools_in_prompt": base.policy.context.max_tools_in_prompt,
+                "max_tool_calls_in_prompt": base.policy.context.max_tool_calls_in_prompt,
+                "max_artifacts_in_prompt": base.policy.context.max_artifacts_in_prompt,
+                "max_history_messages": base.policy.context.max_history_messages,
+                "history_preview_head_chars": base.policy.context.history_preview_head_chars,
+                "history_preview_tail_chars": base.policy.context.history_preview_tail_chars,
+                "artifact_summary_ratio": base.policy.context.artifact_summary_ratio,
+                "artifact_summary_min_chars": base.policy.context.artifact_summary_min_chars,
             },
             "model": base.policy.model,
             "instructions": base.policy.instructions,

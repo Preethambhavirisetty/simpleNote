@@ -43,3 +43,30 @@ def test_load_default_agent_config():
     config = load_agent_config(path)
     assert config.name == "default-agent"
     assert config.prompt_text("planner")
+    assert config.policy.max_executor_iterations == 16
+    assert config.policy.max_context_tokens == 48000
+    assert config.policy.truncation.max_artifact_chars == 20000
+    assert config.policy.executor.choose_action_max_tokens == 2000
+    assert config.policy.finalizer.max_tokens == 4000
+
+
+def test_format_history_uses_head_and_tail_preview():
+    from pathlib import Path
+
+    from app.agent_workflow.config import AgentConfig, AgentPolicy, McpConfig, TruncationPolicy, LlmConfig
+
+    config = AgentConfig(
+        name="test",
+        prompts={},
+        llm=LlmConfig(base_url="http://localhost:8001/v1", api_key="FAKE-API-KEY", model="LOCAL-MODEL"),
+        mcp=McpConfig(),
+        policy=AgentPolicy(truncation=TruncationPolicy()),
+        base_dir=Path(__file__).resolve().parents[1],
+    )
+    builder = ContextBuilder(config)
+    content = ("START-" + ("x" * 500) + "-END")
+    rendered = builder._format_history([{"role": "user", "content": content}])
+    assert "START-" in rendered
+    assert "-END" in rendered
+    assert "...[middle omitted]..." in rendered
+    assert content not in rendered

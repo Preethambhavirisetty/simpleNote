@@ -12,7 +12,9 @@ from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from app.agent_workflow.cache import get_or_create_graph, get_or_create_provider
+from app.agent_workflow.artifact_store import get_artifact_store, is_cross_turn_persistence_active
 from app.agent_workflow.checkpointing import delete_thread, get_shared_checkpointer
+from app.agent_workflow.follow_up import apply_follow_up_runtime_context, resolve_follow_up_policy
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
 from app.agent_workflow.graph import build_graph
 from app.agent_workflow.providers import OpenAiChatCompletionsProvider, create_tool_provider
@@ -234,7 +236,8 @@ class AgentEngine:
             return False, "forced_agent"
         if request.history and len(query.split()) > 8:
             return False, "conversation_context"
-        if len(query) > 180 or len(query.split()) > 24:
+        router = self.config.policy.router
+        if len(query) > router.fast_path_max_query_chars or len(query.split()) > router.fast_path_max_query_words:
             return False, "too_long"
         if _TOOL_INTENT_RE.search(query) or _COMPLEX_INTENT_RE.search(query):
             return False, "tool_or_complex_intent"
@@ -257,19 +260,28 @@ class AgentEngine:
                 ),
             }
         ]
-        for item in request.history[-4:]:
+        router = self.config.policy.router
+        for item in request.history[-router.fast_path_history_messages :]:
             role = str(item.get("role") or "user")
             if role not in {"system", "user", "assistant"}:
                 role = "user"
-            messages.append({"role": role, "content": str(item.get("content") or "")[:1000]})
+            messages.append(
+                {"role": role, "content": str(item.get("content") or "")[: router.fast_path_history_content_chars]}
+            )
         messages.append({"role": "user", "content": request.query.strip()})
         return messages
 
     def _fast_path_result(self, request: RunRequest, thread_id: str, reason: str) -> RunResult:
         """Helper for fast path result."""
+        router = self.config.policy.router
         messages = self._direct_answer_messages(request)
-        with llm_call(node="router", label="fast_path_complete", messages=messages, max_tokens=512):
-            answer = self.llm.complete(messages, max_tokens=512).strip()
+        with llm_call(
+            node="router",
+            label="fast_path_complete",
+            messages=messages,
+            max_tokens=router.fast_path_max_tokens,
+        ):
+            answer = self.llm.complete(messages, max_tokens=router.fast_path_max_tokens).strip()
         return RunResult(
             answer=answer,
             review={"verdict": "SKIPPED", "reason": reason},
@@ -294,19 +306,30 @@ class AgentEngine:
                 "thread_id": thread_id,
             }
         )
+        router = self.config.policy.router
         parts: list[str] = []
         messages = self._direct_answer_messages(request)
         try:
-            with llm_call(node="router", label="fast_path_stream", messages=messages, max_tokens=512):
-                for token in self.llm.stream(messages, max_tokens=512):
+            with llm_call(
+                node="router",
+                label="fast_path_stream",
+                messages=messages,
+                max_tokens=router.fast_path_max_tokens,
+            ):
+                for token in self.llm.stream(messages, max_tokens=router.fast_path_max_tokens):
                     if not token:
                         continue
                     parts.append(token)
                     yield self._emit_fast_path_event({"type": "delta", "content": token, "thread_id": thread_id})
         except Exception as exc:
             if not parts:
-                with llm_call(node="router", label="fast_path_stream_fallback", messages=messages, max_tokens=512):
-                    answer = self.llm.complete(messages, max_tokens=512).strip()
+                with llm_call(
+                    node="router",
+                    label="fast_path_stream_fallback",
+                    messages=messages,
+                    max_tokens=router.fast_path_max_tokens,
+                ):
+                    answer = self.llm.complete(messages, max_tokens=router.fast_path_max_tokens).strip()
                 parts.append(answer)
                 yield self._emit_fast_path_event({"type": "delta", "content": answer, "thread_id": thread_id})
             yield self._emit_fast_path_event(
@@ -325,7 +348,33 @@ class AgentEngine:
             }
         )
 
-    def _initial_state(self, request: RunRequest) -> AgentState:
+    def _prepare_session(self, request: RunRequest) -> tuple[RunRequest, list[dict[str, Any]]]:
+        """Load persisted artifacts and apply follow-up runtime policy for this turn."""
+        policy = self.config.policy
+        persistence_active = is_cross_turn_persistence_active(enabled=policy.cross_turn_artifact_persistence)
+        persisted_artifacts: list[dict[str, Any]] = []
+        if persistence_active and request.session_id:
+            store = get_artifact_store()
+            if store is not None:
+                persisted_artifacts = store.load(request.session_id)
+
+        follow_up = resolve_follow_up_policy(
+            query=request.query,
+            history=request.history,
+            persisted_artifacts=persisted_artifacts,
+            persistence_active=persistence_active,
+            require_tool_on_follow_up=policy.require_tool_on_follow_up,
+        )
+        runtime_context = apply_follow_up_runtime_context(dict(request.runtime_context), follow_up)
+        prepared = RunRequest(
+            query=request.query,
+            session_id=request.session_id,
+            history=list(request.history),
+            runtime_context=runtime_context,
+        )
+        return prepared, persisted_artifacts
+
+    def _initial_state(self, request: RunRequest, *, persisted_artifacts: list[dict[str, Any]] | None = None) -> AgentState:
         """Helper for initial state."""
         plan = {}
         phase = "planning"
@@ -352,13 +401,14 @@ class AgentEngine:
             current_step_index=0,
             candidate_tools=[],
             tool_discovery_cache={},
-            artifacts=[],
+            artifacts=list(persisted_artifacts or []),
             tool_calls=[],
+            facts=[],
             draft_answer="",
             draft_kind="",
             review={},
             review_feedback="",
-            iteration={"executor_turns": 0, "review_cycles": 0, "tool_calls": 0},
+            iteration={"executor_turns": 0, "review_cycles": 0, "revision_cycles": 0, "tool_calls": 0},
             events=[],
             phase=phase,
             final_answer="",
@@ -385,11 +435,12 @@ class AgentEngine:
         """Helper for thread config."""
         review_cycles = max(0, self.config.policy.reviewer.max_cycles)
         review_passes = max(1, review_cycles + 1)
-        replan_passes = max(1, review_cycles + 1)
-        executor_budget = self.config.policy.max_executor_iterations * review_passes * replan_passes
+        # The optimized graph no longer replans through reviewer loops. Keep the
+        # recursion budget focused on executor turns plus one fact/synthesis/revision path.
+        executor_budget = self.config.policy.max_executor_iterations * review_passes
         return {
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": max(25, executor_budget + 8),
+            "recursion_limit": max(25, executor_budget + 12),
         }
 
     @staticmethod
@@ -407,7 +458,7 @@ class AgentEngine:
         if not answer and state.get("artifacts"):
             from app.agent_workflow.nodes.executor import _fallback_answer
 
-            answer = _fallback_answer(state)
+            answer = _fallback_answer(state, config=self.config)
         return RunResult(
             answer=answer,
             review=dict(state.get("review") or {}),
@@ -534,6 +585,32 @@ class AgentEngine:
             "thread_id": thread_id,
         }
 
+    def _persist_session_artifacts(self, request: RunRequest, state: AgentState) -> None:
+        """Save pruned artifacts for cross-turn reuse when persistence is active."""
+        policy = self.config.policy
+        if not is_cross_turn_persistence_active(enabled=policy.cross_turn_artifact_persistence):
+            return
+        if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
+            return
+        if not request.session_id:
+            return
+        store = get_artifact_store()
+        if store is None:
+            return
+        artifacts = list(state.get("artifacts") or [])
+        max_items = max(0, int(policy.max_retained_artifacts or 0))
+        if max_items and len(artifacts) > max_items:
+            artifacts = sorted(
+                artifacts,
+                key=lambda item: float(item.get("composite_score") or item.get("score") or 0.0),
+                reverse=True,
+            )[:max_items]
+        store.save(
+            request.session_id,
+            artifacts,
+            ttl_seconds=policy.artifact_store_ttl_seconds,
+        )
+
     def _cleanup_thread_if_terminal(self, state: AgentState, thread_id: str) -> None:
         """Helper for cleanup thread if terminal."""
         if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
@@ -593,7 +670,8 @@ class AgentEngine:
         if fast_path:
             usage_start = self._llm_usage_snapshot()
             return self._attach_usage_event(self._fast_path_result(request, thread_id, reason), usage_start)
-        holder = {"state": self._initial_state(request)}
+        request, persisted_artifacts = self._prepare_session(request)
+        holder = {"state": self._initial_state(request, persisted_artifacts=persisted_artifacts)}
         usage_start = self._llm_usage_snapshot()
         try:
             stream = self.graph.stream(
@@ -604,10 +682,12 @@ class AgentEngine:
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             self._attach_usage_event(result, usage_start)
+            self._persist_session_artifacts(request, holder["state"])
             self._cleanup_thread_if_terminal(holder["state"], thread_id)
             return result
         result = self._result_from_state(holder["state"], thread_id)
         self._attach_usage_event(result, usage_start)
+        self._persist_session_artifacts(request, holder["state"])
         self._cleanup_thread_if_terminal(holder["state"], thread_id)
         return result
 
@@ -621,7 +701,8 @@ class AgentEngine:
             yield from self._stream_fast_path(request, thread_id, reason)
             return
 
-        holder = {"state": self._initial_state(request)}
+        request, persisted_artifacts = self._prepare_session(request)
+        holder = {"state": self._initial_state(request, persisted_artifacts=persisted_artifacts)}
         usage_start = self._llm_usage_snapshot()
         yielded_pending_approval = False
         streamed_answer = False
@@ -649,6 +730,7 @@ class AgentEngine:
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
+            self._persist_session_artifacts(request, holder["state"])
             self._cleanup_thread_if_terminal(holder["state"], thread_id)
             return
 
@@ -675,6 +757,7 @@ class AgentEngine:
             if self.callbacks.on_event:
                 self.callbacks.on_event(final)
             yield final
+        self._persist_session_artifacts(request, holder["state"])
         self._cleanup_thread_if_terminal(holder["state"], thread_id)
 
     def resume(self, thread_id: str, *, approved: bool) -> RunResult:

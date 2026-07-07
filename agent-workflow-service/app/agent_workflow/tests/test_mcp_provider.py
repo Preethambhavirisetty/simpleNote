@@ -112,3 +112,45 @@ def test_multi_provider_validates_against_input_schema_before_dispatch():
 
     with pytest.raises(ValueError, match="missing required argument: query"):
         provider.call_tool("search_notes", {})
+
+
+def test_http_tool_index_provider_sends_allowlist(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"ok": True, "tools": []}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent_workflow.providers.tool_index.httpx.Client", FakeClient)
+
+    from app.agent_workflow.providers.tool_index import HttpToolIndexProvider
+
+    provider = HttpToolIndexProvider(search_url="http://example/internal/connector-tools/search")
+    provider.search_tools(
+        owner_scope="550e8400-e29b-41d4-a716-446655440000",
+        collections=["ct_550e8400e29b41d4a716446655440000_tools"],
+        allowlist=["list_dashboards"],
+        query="dashboards",
+        limit=10,
+    )
+
+    payload = captured["json"]
+    assert payload["allowlist"] == ["list_dashboards"]
