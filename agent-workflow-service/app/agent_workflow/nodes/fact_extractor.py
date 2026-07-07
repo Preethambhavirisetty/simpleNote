@@ -7,6 +7,25 @@ from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.state import AgentState, Fact
 
 
+# Structured facts, when a tool provides them, are preferred over line-splitting.
+# These are generic contract locations; app/MCP tools opt in by populating them.
+# Rich per-tool extractors are intended to live MCP-side later, not here.
+_FACT_PATHS: tuple[tuple[str, ...], ...] = (
+    ("facts",),
+    ("data", "facts"),
+    ("display", "facts"),
+    ("metadata", "facts"),
+)
+_COLLECTION_PATHS: tuple[tuple[str, ...], ...] = (
+    ("display", "tables"),
+    ("items",),
+    ("results",),
+    ("rows",),
+    ("panels",),
+)
+_MAX_FACT_CHARS = 500
+
+
 def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, Any]:
     """Convert raw artifacts into compact facts for later LLM nodes."""
     # This node is deterministic on purpose. Downstream nodes should reason over
@@ -53,11 +72,68 @@ def _extract_facts(artifacts: list[dict[str, Any]], *, max_facts: int) -> list[F
         raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
         if raw_ref.get("type") == "list" and isinstance(raw_ref.get("total"), int):
             facts.append(_make_fact(artifact, f"{artifact.get('tool', 'tool')} returned {raw_ref['total']} item(s)."))
+        remaining = max_facts - len(facts)
+        if remaining <= 0:
+            break
+
+        # Prefer structured facts a tool supplies, then generic collections, and
+        # only fall back to summary line-splitting when nothing structured exists.
+        structured = _structured_entries(raw_ref, _FACT_PATHS)
+        if structured is not None:
+            for entry in structured[:remaining]:
+                fact = _make_structured_fact(artifact, entry)
+                if fact["text"]:
+                    facts.append(fact)
+            continue
+
+        rows = _structured_entries(raw_ref, _COLLECTION_PATHS)
+        if rows is not None:
+            for entry in rows[:remaining]:
+                text = _entry_text(entry)
+                if text:
+                    facts.append(_make_fact(artifact, _clip(text)))
+            continue
+
         for line in _summary_lines(str(artifact.get("summary") or "")):
             if len(facts) >= max_facts:
                 break
             facts.append(_make_fact(artifact, line))
     return facts
+
+
+def _structured_entries(raw_ref: dict[str, Any], paths: tuple[tuple[str, ...], ...]) -> list[Any] | None:
+    """Return the first non-empty list found at any of the given nested paths."""
+    for path in paths:
+        node = _dig(raw_ref, path)
+        if isinstance(node, list) and node:
+            return node
+    return None
+
+
+def _dig(obj: Any, path: tuple[str, ...]) -> Any:
+    """Walk a nested dict path, returning None if any hop is missing."""
+    current = obj
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _entry_text(entry: Any) -> str:
+    """Render one collection entry (row/item/panel) as a compact fact line."""
+    if isinstance(entry, dict):
+        parts: list[str] = []
+        for key, value in entry.items():
+            if value in (None, "", [], {}) or isinstance(value, (dict, list)):
+                continue
+            parts.append(f"{key}={value}")
+            if len(parts) >= 8:
+                break
+        return ", ".join(parts)
+    if isinstance(entry, (str, int, float, bool)):
+        return str(entry).strip()
+    return ""
 
 
 def _summary_lines(summary: str) -> list[str]:
@@ -67,13 +143,17 @@ def _summary_lines(summary: str) -> list[str]:
         line = raw.strip().lstrip("-*").strip()
         if not line or line.lower().startswith("[truncated]"):
             continue
-        if len(line) > 500:
-            line = line[:497].rstrip() + "..."
-        lines.append(line)
+        lines.append(_clip(line))
     if not lines and summary.strip():
-        text = summary.strip()
-        lines.append(text[:497].rstrip() + "..." if len(text) > 500 else text)
+        lines.append(_clip(summary.strip()))
     return lines
+
+
+def _clip(text: str) -> str:
+    """Trim a fact line to the maximum fact length."""
+    if len(text) > _MAX_FACT_CHARS:
+        return text[: _MAX_FACT_CHARS - 3].rstrip() + "..."
+    return text
 
 
 def _make_fact(artifact: dict[str, Any], text: str) -> Fact:
@@ -87,6 +167,29 @@ def _make_fact(artifact: dict[str, Any], text: str) -> Fact:
         "confidence": float(artifact.get("composite_score") or 0.0),
         "truncated_source": bool(artifact.get("truncated")),
     }
+
+
+def _make_structured_fact(artifact: dict[str, Any], entry: Any) -> Fact:
+    """Create a fact from a tool-supplied structured fact entry."""
+    if isinstance(entry, dict):
+        text = str(
+            entry.get("text")
+            or entry.get("summary")
+            or entry.get("label")
+            or _entry_text(entry)
+            or ""
+        ).strip()
+        fact = _make_fact(artifact, _clip(text))
+        if "confidence" in entry:
+            try:
+                fact["confidence"] = float(entry["confidence"])
+            except (TypeError, ValueError):
+                pass
+        source_ref = entry.get("source_ref")
+        if isinstance(source_ref, dict) and source_ref:
+            fact["source_ref"] = source_ref
+        return fact
+    return _make_fact(artifact, _clip(str(entry).strip()))
 
 
 def _fact_id(seed: str, text: str) -> str:

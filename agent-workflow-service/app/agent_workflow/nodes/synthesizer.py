@@ -16,10 +16,14 @@ def synthesizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider
     facts = list(state.get("facts") or [])
     if not facts and state.get("draft_answer"):
         draft = str(state.get("draft_answer") or "").strip()
-        return _done_or_reviewing(state, config, draft, "executor_draft", skipped_reason="no_facts")
+        result = _done_or_reviewing(state, config, draft, "executor_draft", skipped_reason="no_facts")
+        result["events"] = [{"step": "synthesizer.skipped", "reason": "no_facts_executor_draft", "answer_chars": len(draft)}]
+        return result
     if not facts:
         draft = _fallback_from_state(state)
-        return _done_or_reviewing(state, config, draft, "mechanical", skipped_reason="no_facts")
+        result = _done_or_reviewing(state, config, draft, "mechanical", skipped_reason="no_facts")
+        result["events"] = [{"step": "synthesizer.fallback", "reason": "no_facts", "answer_chars": len(draft)}]
+        return result
 
     messages = _messages(state, config=config)
     try:
@@ -30,13 +34,18 @@ def synthesizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider
         ).strip()
     except DeadlineExceeded as exc:
         draft = _fallback_from_facts(facts)
-        return {
-            **_done_or_reviewing(state, config, draft, "mechanical", skipped_reason="synthesis_timeout"),
-            "error": str(exc),
-            "events": [{"step": "synthesizer.timeout", "error": str(exc), "fact_count": len(facts)}],
-        }
+        result = _done_or_reviewing(state, config, draft, "mechanical", skipped_reason="synthesis_timeout")
+        result["error"] = str(exc)
+        result["events"] = [{"step": "synthesizer.timeout", "error": str(exc), "fact_count": len(facts), "answer_chars": len(draft)}]
+        return result
 
-    result = _done_or_reviewing(state, config, draft or _fallback_from_facts(facts), "llm")
+    if not draft:
+        draft = _fallback_from_facts(facts)
+        result = _done_or_reviewing(state, config, draft, "mechanical", skipped_reason="empty_synthesis")
+        result["events"] = [{"step": "synthesizer.fallback", "reason": "empty_synthesis", "fact_count": len(facts), "answer_chars": len(draft)}]
+        return result
+
+    result = _done_or_reviewing(state, config, draft, "llm")
     result["events"] = [{"step": "synthesizer.completed", "fact_count": len(facts), "answer_chars": len(result.get("draft_answer", ""))}]
     return result
 

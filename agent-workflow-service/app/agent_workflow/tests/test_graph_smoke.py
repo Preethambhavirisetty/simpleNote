@@ -11,7 +11,7 @@ class MockTools(ToolProvider):
         self.searches: list[str] = []
         self.calls: list[tuple[str, dict]] = []
 
-    def search_tools(self, query: str, *, limit: int = 25) -> list[ToolCandidate]:
+    def search_tools(self, query: str, *, limit: int = 25, allowlist: list[str] | None = None) -> list[ToolCandidate]:
         self.searches.append(query)
         return [
             ToolCandidate(
@@ -66,6 +66,104 @@ class MockLlm(LlmProvider):
     def stream(self, messages, *, max_tokens: int = 1024):
         yield "Found "
         yield "SLA in doc-1 page 2."
+
+
+_PLAN_MD = (
+    "### Goal\nFind SLA\n### Assumptions\nNone\n### Risks and edge cases\nNone\n"
+    "### Execution plan\n1. **Search** — Action: search — Tool hint: search_documents\n"
+    "### Acceptance criteria\n- SLA found\n### Suggested user-facing structure\nSummary"
+)
+
+
+class RoleAwareLlm(LlmProvider):
+    """A mock LLM that plays each node by its prompt, not by call order.
+
+    Call-count mocks drift whenever the node sequence changes and can feed one
+    node's output to another (e.g. an executor action to the reviewer). Keying
+    on the node's own system prompt keeps golden-path tests stable.
+    """
+
+    def __init__(self, *, reviewer_output: str | None = None):
+        # By default the reviewer approves cleanly with JSON.
+        self.reviewer_output = reviewer_output or '{"verdict":"APPROVE","issues":[],"missing_evidence":[],"required_changes":[]}'
+        self.executor_step = 0
+        self.roles: list[str] = []
+
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        system = messages[0]["content"] if messages else ""
+        user = messages[-1]["content"] if messages else ""
+        if "planner markdown sections" in user or system.startswith("# Planner"):
+            self.roles.append("planner")
+            return _PLAN_MD
+        if "synthesizer node" in system:
+            self.roles.append("synthesizer")
+            return "Found SLA in doc-1 page 2."
+        if "reviewer node" in system:
+            self.roles.append("reviewer")
+            return self.reviewer_output
+        if "revision node" in system:
+            self.roles.append("revision")
+            return "Found SLA in doc-1 page 2 (revised)."
+        if "final answer renderer" in system:
+            self.roles.append("finalizer")
+            return "Found SLA in doc-1 page 2."
+        # Otherwise this is the executor choosing the next action.
+        self.roles.append("executor")
+        actions = [
+            '{"action":"search_tools","query":"SLA documents"}',
+            '{"action":"call_tool","name":"search_documents","arguments":{"query":"SLA documents"}}',
+            '{"action":"finish_step"}',
+        ]
+        action = actions[min(self.executor_step, len(actions) - 1)]
+        self.executor_step += 1
+        return action
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_golden_path_runs_all_nodes_and_approves():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    llm = RoleAwareLlm()
+    engine = AgentEngine(config=config, llm=llm, tools=MockTools(), callbacks=HostCallbacks())
+
+    result = engine.run(RunRequest(query="Find SLA mentions"))
+
+    # planner -> executor -> fact_extractor -> synthesizer -> reviewer -> finalizer
+    assert result.review.get("verdict") == "APPROVE"
+    assert "SLA" in result.answer
+    assert result.error is None
+    assert result.artifacts, "the executor should have produced a tool-backed artifact"
+    assert "planner" in llm.roles
+    assert "synthesizer" in llm.roles
+    assert "reviewer" in llm.roles
+    steps = [event.get("step") for event in result.events]
+    assert "fact_extractor.completed" in steps
+    assert "synthesizer.completed" in steps
+    assert "reviewer.completed" in steps
+
+
+def test_revise_path_runs_revision_before_finalizing():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    llm = RoleAwareLlm(reviewer_output='{"verdict":"REVISE","issues":["tighten wording"],"required_changes":["cite the doc"]}')
+    engine = AgentEngine(config=config, llm=llm, tools=MockTools(), callbacks=HostCallbacks())
+
+    result = engine.run(RunRequest(query="Find SLA mentions"))
+
+    # reviewer -> revision -> finalizer
+    assert "revised" in result.answer
+    assert "revision" in llm.roles
+    steps = [event.get("step") for event in result.events]
+    assert "reviewer.completed" in steps
+    assert "revision.completed" in steps
 
 
 class DirectLlm(LlmProvider):
@@ -128,7 +226,7 @@ def test_graph_smoke_approve_path():
     from app.agent_workflow.config import load_agent_config
 
     config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
-    engine = AgentEngine(config=config, llm=MockLlm(), tools=MockTools(), callbacks=HostCallbacks())
+    engine = AgentEngine(config=config, llm=RoleAwareLlm(), tools=MockTools(), callbacks=HostCallbacks())
     result = engine.run(RunRequest(query="Find SLA mentions"))
     assert "SLA" in result.answer
     assert result.review.get("verdict") == "APPROVE"

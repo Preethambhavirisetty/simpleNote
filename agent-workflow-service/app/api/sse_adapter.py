@@ -23,6 +23,11 @@ _ACTIVITY_FIELDS = (
     "query",
     "tool_count",
     "tools",
+    "fact_count",
+    "handoff",
+    "answer_chars",
+    "revision_cycles",
+    "truncated_source_count",
 )
 
 

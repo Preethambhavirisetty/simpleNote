@@ -181,8 +181,31 @@ def map_graph_update(update: dict[str, Any], prev: AgentState) -> list[dict[str,
                     "answer_chars": entry.get("answer_chars", 0),
                 }
             )
+        elif step == "synthesizer.skipped":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "synthesis",
+                    "label": f"Synthesis skipped ({entry.get('reason', 'skipped')}); using existing draft",
+                    "answer_chars": entry.get("answer_chars", 0),
+                }
+            )
+        elif step == "synthesizer.fallback":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "synthesis",
+                    "label": f"Synthesis fell back to a deterministic answer ({entry.get('reason', 'fallback')})",
+                    "fact_count": entry.get("fact_count", 0),
+                    "answer_chars": entry.get("answer_chars", 0),
+                }
+            )
         elif step == "synthesizer.timeout":
             events.append({"type": "debug", "message": f"Synthesis timed out: {entry.get('error')}"})
+        elif step == "reviewer.parse_failed":
+            events.append({"type": "debug", "message": "Reviewer output was not parseable; defaulting to REVISE"})
+        elif step == "finalizer.unexpected_phase":
+            events.append({"type": "debug", "message": f"Finalizer reached an unexpected phase ({entry.get('phase', '')}); returning best-effort answer"})
         elif step == "revision.completed":
             events.append(
                 {

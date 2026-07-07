@@ -93,7 +93,7 @@ class AgentState(TypedDict, total=False):
     tool_calls: list[ToolCallRecord]
     facts: list[Fact]
     draft_answer: str
-    draft_kind: str  # "mechanical" (deterministic artifact dump) | "llm" (prose)
+    draft_kind: str  # "mechanical" (deterministic artifact dump) | "llm" (prose) | "executor_draft" (raw executor answer)
     review: ReviewResult
     review_feedback: str
     iteration: IterationCounters

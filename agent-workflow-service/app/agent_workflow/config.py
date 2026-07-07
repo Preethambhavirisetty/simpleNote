@@ -112,6 +112,10 @@ class ReviewerDefaults:
     enabled: bool = True
     max_tokens: int = 2400
     max_cycles: int = 2
+    # NOTE: reject_action is currently informational only. A REJECT verdict
+    # returns the best-available draft and stops; the graph does not route back
+    # to the planner, so "replan" is not yet wired. "abort" reflects the real
+    # behavior. Keep this until replan-on-reject is implemented.
     reject_action: str = "replan"
     mode: str = "always"  # always | on_risk
 
@@ -178,7 +182,9 @@ class AgentPolicy:
     max_retained_tool_calls: int = 40
     max_retained_events: int = 80
     tool_discovery_cache_size: int = 16
-    reject_action: str = "replan"  # replan | abort
+    # See ReviewerDefaults.reject_action: "replan" is not yet wired; a REJECT
+    # verdict returns the best-available draft. "abort" is the honest setting.
+    reject_action: str = "replan"  # replan (not yet implemented) | abort
     destructive_tools: list[str] = field(default_factory=list)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True

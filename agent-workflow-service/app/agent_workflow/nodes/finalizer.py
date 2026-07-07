@@ -34,10 +34,29 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     """Produce the final user-facing answer from an approved or mechanical draft."""
     # The finalizer is the last rendering pass. It preserves the approved
     # meaning and only spends another LLM call for mechanical artifact dumps.
-    if state.get("phase") != "done" or state.get("pending_destructive"):
+    if state.get("pending_destructive"):
         return {}
 
     existing = str(state.get("final_answer") or state.get("draft_answer") or "").strip()
+
+    # A router should only send terminal ("done") states here. Any other phase
+    # is a routing bug; finalize defensively with an error instead of ending
+    # the graph on an empty response.
+    if state.get("phase") != "done":
+        answer = existing or "I could not complete the request due to an unexpected workflow state."
+        return {
+            "phase": "done",
+            "final_answer": answer,
+            "error": state.get("error") or f"Workflow reached the finalizer in an unexpected phase: {state.get('phase')!r}.",
+            "events": [
+                {
+                    "step": "finalizer.unexpected_phase",
+                    "phase": str(state.get("phase") or ""),
+                    "answer_chars": len(answer),
+                }
+            ],
+        }
+
     if not existing:
         return {}
     if not config.policy.render_final_answer:

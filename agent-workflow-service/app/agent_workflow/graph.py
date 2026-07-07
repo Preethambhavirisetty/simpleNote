@@ -172,9 +172,9 @@ def route_after_executor(state: AgentState, *, config: AgentConfig) -> str:
         return "fact_extractor"
     if phase == "executing":
         return "executor"
-    if phase == "done":
-        return "finalizer"
-    return END
+    # Any other phase (including "done" and unexpected values) finalizes; the
+    # finalizer emits an error for phases that should never reach it.
+    return "finalizer"
 
 
 def route_after_synthesizer(state: AgentState) -> str:
@@ -182,9 +182,8 @@ def route_after_synthesizer(state: AgentState) -> str:
     phase = state.get("phase") or ""
     if phase == "reviewing":
         return "reviewer"
-    if phase == "done":
-        return "finalizer"
-    return END
+    # "done" and any unexpected phase both finalize safely.
+    return "finalizer"
 
 
 def route_after_reviewer(state: AgentState) -> str:
@@ -192,6 +191,5 @@ def route_after_reviewer(state: AgentState) -> str:
     phase = state.get("phase") or ""
     if phase == "revising":
         return "revision"
-    if phase == "done":
-        return "finalizer"
-    return END
+    # "done" and any unexpected phase both finalize safely.
+    return "finalizer"

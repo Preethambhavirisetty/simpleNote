@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.follow_up import follow_up_approval_gaps
-from app.agent_workflow.parsing import parse_executor_action
+from app.agent_workflow.parsing import parse_review_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import llm_call
+
+
+_VERDICTS = {"APPROVE", "REVISE", "REJECT"}
+_REVIEW_LIST_KEYS = ("issues", "missing_evidence", "required_changes")
 
 
 def _successful_tools(state: AgentState) -> set[str]:
@@ -98,7 +103,7 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
             "events": [{"step": "reviewer.timeout", "error": str(exc)}],
         }
 
-    review = _parse_review_json(raw)
+    review, parse_failed = _parse_review(raw)
     verdict = str(review.get("verdict") or "REVISE").upper()
     if verdict not in {"APPROVE", "REVISE", "REJECT"}:
         verdict = "REVISE"
@@ -126,7 +131,10 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         if verdict == "REJECT":
             updates["error"] = state.get("error") or "Reviewer rejected the draft; returning best available answer with existing facts."
 
-    updates["events"] = [
+    events: list[dict[str, Any]] = []
+    if parse_failed:
+        events.append({"step": "reviewer.parse_failed", "raw_preview": (raw or "")[:300]})
+    events.append(
         {
             "step": "reviewer.completed",
             "verdict": verdict,
@@ -139,7 +147,8 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
             "tool_call_count": len(state.get("tool_calls") or []),
             "draft_answer_preview": (state.get("draft_answer") or "")[:300],
         }
-    ]
+    )
+    updates["events"] = events
     return updates
 
 
@@ -167,12 +176,63 @@ def _messages(state: AgentState) -> list[dict[str, str]]:
         },
     ]
 
-def _parse_review_json(text: str) -> dict[str, Any]:
-    """Parse reviewer JSON and normalize list fields."""
-    parsed = parse_executor_action(text)
-    if not isinstance(parsed, dict):
-        parsed = {}
-    for key in ("issues", "missing_evidence", "required_changes"):
+def _parse_review(text: str) -> tuple[dict[str, Any], bool]:
+    """Parse a reviewer response, trying JSON then markdown before a safe fallback.
+
+    Returns the normalized review and whether parsing fell through to the safe
+    REVISE default (so the caller can emit a ``reviewer.parse_failed`` event).
+    """
+    data = _try_json_object(text)
+    if isinstance(data, dict) and _has_review_signal(data):
+        return _normalize_review_fields(data), False
+
+    if "###" in (text or ""):
+        return _normalize_review_fields(dict(parse_review_markdown(text))), False
+
+    return (
+        {
+            "verdict": "REVISE",
+            "issues": ["Reviewer output was not valid JSON or markdown"],
+            "missing_evidence": [],
+            "required_changes": [],
+        },
+        True,
+    )
+
+
+def _try_json_object(text: str) -> dict[str, Any] | None:
+    """Return a JSON object from the text, or None when it is not JSON."""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, dict):
+                return data
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _has_review_signal(data: dict[str, Any]) -> bool:
+    """Return whether a parsed object actually looks like a reviewer verdict."""
+    if str(data.get("verdict") or "").upper() in _VERDICTS:
+        return True
+    return any(key in data for key in (*_REVIEW_LIST_KEYS, "scorecard"))
+
+
+def _normalize_review_fields(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Coerce reviewer list fields and guarantee a JSON-serializable result."""
+    for key in _REVIEW_LIST_KEYS:
         value = parsed.get(key)
         if isinstance(value, str):
             parsed[key] = [value] if value.strip() else []

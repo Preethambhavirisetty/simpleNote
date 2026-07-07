@@ -30,6 +30,8 @@ policy:
   max_retained_tool_calls: 32
   max_retained_events: 100
   tool_discovery_cache_size: 16
+  # "abort" is the honest setting today: a REJECT verdict returns the best
+  # available draft. "replan" (route back to the planner) is not yet wired.
   reject_action: abort
   enable_fast_path: true
   render_final_answer: true
@@ -91,6 +93,16 @@ policy:
     artifact_summary_ratio: 0.65
     artifact_summary_min_chars: 1000
 
+  # Evidence-fidelity budgets. These are moderate defaults for a generic tool
+  # agent. Fact extraction runs on the artifact summaries these limits produce,
+  # so an agent whose tools return large structured payloads should raise them
+  # per-agent (in its own YAML or via the Studio runtime override) rather than
+  # here. Suggested overrides by workload:
+  #   - dashboards / reports:   max_artifact_chars: 12000-20000
+  #   - high-volume tables:     raise max_list_rows_visible
+  #   - quick chat / lookups:   keep these defaults (or lower)
+  # Prefer structured facts from the tool (see fact_extractor contract) over
+  # simply enlarging these budgets.
   truncation:
     max_artifact_chars: 6000
     max_string_field_chars: 1200
