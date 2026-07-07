@@ -69,6 +69,8 @@ class ToolCallRecord(TypedDict, total=False):
     status: str
     latency_ms: int
     error: str | None
+    step_index: int  # plan step this call belongs to (survives artifact compaction)
+    replan_id: int
 
 
 class IterationCounters(TypedDict, total=False):
@@ -98,6 +100,7 @@ class AgentState(TypedDict, total=False):
     draft_answer: str
     draft_kind: str  # "mechanical" (deterministic artifact dump) | "llm" (prose) | "executor_draft" (raw executor answer)
     running_summary: str  # compressed memo of summarized-away artifacts (see summarizer node)
+    summary_sources: list[dict[str, Any]]  # structured provenance for folded artifacts (id/tool/source_ref)
     review: ReviewResult
     review_feedback: str
     iteration: IterationCounters

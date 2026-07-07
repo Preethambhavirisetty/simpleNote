@@ -4,6 +4,46 @@ from app.agent_workflow.follow_up import build_search_query
 from app.agent_workflow.parsing import parse_plan_markdown
 
 
+class _NoopLlm:
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        return '{"action":"finish_step"}'
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+class _NoopTools:
+    def search_tools(self, query: str, *, limit: int = 25, allowlist=None):
+        return []
+
+    def call_tool(self, name: str, arguments: dict):
+        return {"ok": True}
+
+
+def test_initial_state_sets_search_query_when_planner_disabled():
+    # Finding 2: with the planner disabled the graph skips planner_node, so the
+    # deterministic rewrite must be seeded in _initial_state, not only in planner.
+    from app.agent_workflow.config import parse_agent_config
+    from app.agent_workflow.engine import AgentEngine
+    from app.agent_workflow.streaming import HostCallbacks, RunRequest
+
+    config = parse_agent_config(
+        {
+            "name": "np",
+            "prompts_inline": {"planner": "p", "executor": "e", "reviewer": "r"},
+            "llm": {"base_url": "http://llm.local/v1", "model": "m"},
+            "policy": {"enable_planner": False, "enable_fast_path": False},
+        }
+    )
+    engine = AgentEngine(config=config, llm=_NoopLlm(), tools=_NoopTools(), callbacks=HostCallbacks())
+    request = engine._validate_request(
+        RunRequest(query="how many are there?", history=[{"role": "user", "content": "show the aiera dashboard"}])
+    )
+    state = engine._initial_state(request)
+    assert "aiera dashboard" in state["search_query"]
+    assert "how many are there?" in state["search_query"]
+
+
 def test_build_search_query_returns_standalone_query_unchanged():
     assert build_search_query("list all Splunk dashboards", []) == "list all Splunk dashboards"
 

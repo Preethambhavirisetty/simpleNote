@@ -113,6 +113,77 @@ def test_builder_injects_running_summary_for_executor_only():
     assert "Working memory" not in planner_msg
 
 
+def test_called_tools_survive_artifact_compaction():
+    # Finding 1: after the summarizer drops a step's artifact, the executor must
+    # still know the tool ran (via tool_calls), preventing duplicate/required-tool loops.
+    from app.agent_workflow.nodes.executor import _called_tools_for_step
+
+    state = {
+        "iteration": {"replans": 0},
+        "artifacts": [],  # summarizer folded them away
+        "tool_calls": [
+            {"name": "get_dashboard", "status": "ok", "step_index": 0, "replan_id": 0},
+            {"name": "other_tool", "status": "ok", "step_index": 1, "replan_id": 0},
+        ],
+    }
+    called = _called_tools_for_step(state, 0)
+    assert "get_dashboard" in called
+    assert "other_tool" not in called  # belongs to a different step
+
+
+def test_summarizer_memo_includes_source_markers():
+    # Finding 3: folded artifacts contribute provenance so seeded facts stay citable.
+    config = _cfg(compact_after_artifacts=2, keep_after_summary=0)
+    config.policy.llm_timeout_seconds = 0.01  # force the deterministic memo path
+    artifacts = [
+        {"id": "a1", "tool": "get_dashboard", "summary": "panel count = 16", "source_ref": {"doc_id": "dash-7", "page": 2}, "composite_score": 0.5},
+        {"id": "a2", "tool": "search", "summary": "SLA is 99.9%", "source_ref": {"doc_id": "doc-1"}, "composite_score": 0.4},
+    ]
+    out = summarizer_node({"artifacts": artifacts, "iteration": {}}, config=config, llm=_SlowLlm())
+    memo = out["running_summary"]
+    assert "doc_id=dash-7" in memo
+    assert "id=a1" in memo
+
+
+def test_summarizer_populates_structured_source_sidecar_on_llm_path():
+    # Structural guarantee: even when the LLM memo (here "panel count = 16",
+    # no markers) omits provenance, summary_sources still carries source refs.
+    config = _cfg(compact_after_artifacts=2, keep_after_summary=0)
+    artifacts = [
+        {"id": "a1", "tool": "get_dashboard", "summary": "panels", "source_ref": {"doc_id": "dash-7", "page": 2}, "composite_score": 0.5},
+        {"id": "a2", "tool": "search", "summary": "sla", "source_ref": {"doc_id": "doc-1"}, "composite_score": 0.4},
+        {"id": "a3", "tool": "noref", "summary": "x", "composite_score": 0.3},  # no source_ref
+    ]
+    out = summarizer_node({"artifacts": artifacts, "iteration": {}}, config=config, llm=_MemoLlm())
+    sources = out["summary_sources"]
+    assert {s["id"] for s in sources} == {"a1", "a2"}  # a3 skipped (no source_ref)
+    assert {"doc_id": "dash-7", "page": 2} in [s["source_ref"] for s in sources]
+
+
+def test_summary_sources_are_deduped_across_cycles():
+    config = _cfg(compact_after_artifacts=2, keep_after_summary=0)
+    existing = [{"id": "a1", "tool": "t", "source_ref": {"doc_id": "d1"}}]
+    artifacts = [
+        {"id": "a1", "tool": "t", "summary": "dup", "source_ref": {"doc_id": "d1"}, "composite_score": 0.5},
+        {"id": "a9", "tool": "t", "summary": "new", "source_ref": {"doc_id": "d9"}, "composite_score": 0.4},
+    ]
+    out = summarizer_node(
+        {"artifacts": artifacts, "iteration": {}, "summary_sources": existing}, config=config, llm=_MemoLlm()
+    )
+    ids = [s["id"] for s in out["summary_sources"]]
+    assert ids.count("a1") == 1  # not duplicated
+    assert "a9" in ids
+
+
+def test_finalizer_grounds_from_summary_sources_when_artifacts_folded():
+    from app.agent_workflow.nodes.finalizer import _ensure_grounding, _grounding_source_refs
+
+    state = {"artifacts": [], "summary_sources": [{"id": "a1", "tool": "t", "source_ref": {"doc_id": "dash-7"}}]}
+    refs = _grounding_source_refs(state)
+    grounded = _ensure_grounding("The answer.", refs)
+    assert "doc_id=dash-7" in grounded  # citation survives artifact compaction
+
+
 def test_graph_detours_through_summarizer_and_still_completes():
     # End-to-end: with a low compaction threshold the executor loop must detour
     # through the summarizer, populate running memory, and still finish.

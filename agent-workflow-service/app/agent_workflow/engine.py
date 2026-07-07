@@ -14,7 +14,7 @@ from langgraph.types import Command
 from app.agent_workflow.cache import get_or_create_graph, get_or_create_provider
 from app.agent_workflow.artifact_store import get_artifact_store, is_cross_turn_persistence_active
 from app.agent_workflow.checkpointing import delete_thread, get_shared_checkpointer
-from app.agent_workflow.follow_up import apply_follow_up_runtime_context, resolve_follow_up_policy
+from app.agent_workflow.follow_up import apply_follow_up_runtime_context, build_search_query, resolve_follow_up_policy
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
 from app.agent_workflow.graph import build_graph
 from app.agent_workflow.providers import OpenAiChatCompletionsProvider, create_tool_provider
@@ -395,6 +395,10 @@ class AgentEngine:
         return AgentState(
             messages=list(request.history),
             user_query=request.query.strip(),
+            # Deterministic standalone-query fallback. The planner overwrites this
+            # with its history-aware rewrite when enabled; when the planner is
+            # disabled it is the only source, so it must be set here.
+            search_query=build_search_query(request.query.strip(), list(request.history)),
             session_id=request.session_id,
             runtime_context=dict(request.runtime_context),
             plan=plan,

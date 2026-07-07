@@ -46,15 +46,29 @@ def _current_replan_id(state: AgentState) -> int:
 
 
 def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
-    """Return tool names already called for the current plan step and replan."""
+    """Return tool names already called for the current plan step and replan.
+
+    Reads both artifacts and tool_calls: the summarizer can compact artifacts
+    away mid-loop, but tool_calls persist, so duplicate-tool and required-tool
+    checks must not forget a call just because its artifact was folded.
+    """
     replan_id = _current_replan_id(state)
-    return {
-        str(artifact.get("tool") or "")
-        for artifact in (state.get("artifacts") or [])
-        if int(artifact.get("step_index", -1)) == step_index
-        and int(artifact.get("replan_id") or 0) == replan_id
-        and artifact.get("tool")
-    }
+    called: set[str] = set()
+    for artifact in state.get("artifacts") or []:
+        if (
+            int(artifact.get("step_index", -1)) == step_index
+            and int(artifact.get("replan_id") or 0) == replan_id
+            and artifact.get("tool")
+        ):
+            called.add(str(artifact.get("tool")))
+    for record in state.get("tool_calls") or []:
+        if (
+            int(record.get("step_index", -1)) == step_index
+            and int(record.get("replan_id") or 0) == replan_id
+            and record.get("name")
+        ):
+            called.add(str(record.get("name")))
+    return called
 
 
 def _cache_key(query: str) -> str:
@@ -520,6 +534,8 @@ def _run_tool_and_record(
         "status": status,
         "latency_ms": latency_ms,
         "error": error,
+        "step_index": step_index,
+        "replan_id": _current_replan_id(state),
     }
     tool_calls = list(state.get("tool_calls") or [])
     tool_calls.append(record)

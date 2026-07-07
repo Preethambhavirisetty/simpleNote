@@ -68,7 +68,7 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     if state.get("draft_kind") == "llm" and not _is_mechanical_text(existing):
         final_answer = existing
         if config.policy.enforce_grounding:
-            final_answer = _ensure_grounding(final_answer, state.get("artifacts") or [])
+            final_answer = _ensure_grounding(final_answer, _grounding_source_refs(state))
         return {
             "final_answer": final_answer,
             "events": [{"step": "finalizer.reused_draft", "draft_kind": "llm", "answer_chars": len(final_answer)}],
@@ -109,7 +109,7 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
 
     final_answer = rendered or existing
     if config.policy.enforce_grounding:
-        final_answer = _ensure_grounding(final_answer, state.get("artifacts") or [])
+        final_answer = _ensure_grounding(final_answer, _grounding_source_refs(state))
     return {
         "final_answer": final_answer,
         "events": [
@@ -158,11 +158,22 @@ def _terminal_answer_messages(state: AgentState, approved: str, *, config: Agent
     ]
 
 
-def _ensure_grounding(answer: str, artifacts: list[dict[str, Any]]) -> str:
+def _grounding_source_refs(state: AgentState) -> list[dict[str, Any]]:
+    """Source refs for grounding, including artifacts the summarizer folded away."""
+    refs: list[dict[str, Any]] = [
+        artifact.get("source_ref") or {} for artifact in (state.get("artifacts") or [])
+    ]
+    # The summarizer drops folded artifacts, but preserves their provenance in
+    # summary_sources so citations still survive compaction.
+    refs.extend(entry.get("source_ref") or {} for entry in (state.get("summary_sources") or []))
+    return refs
+
+
+def _ensure_grounding(answer: str, source_refs: list[dict[str, Any]]) -> str:
     """Append source references when grounding is required and missing."""
-    if not artifacts:
+    if not source_refs:
         return answer
-    refs = [_source_ref_text(artifact.get("source_ref") or {}) for artifact in artifacts[:3]]
+    refs = [_source_ref_text(source_ref or {}) for source_ref in source_refs[:3]]
     refs = [ref for ref in refs if ref]
     if not refs:
         return answer
