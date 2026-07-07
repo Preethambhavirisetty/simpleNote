@@ -75,6 +75,16 @@ def test_planner_markdown_parses_search_query_section():
     assert plan["search_query"] == "count of panels in the aiera power management dashboard"
 
 
+def test_planner_markdown_parses_risks_section():
+    text = (
+        "### Goal\nAnswer safely\n"
+        "### Risks / Edge Cases\n- dashboard may be missing\n- panel count may be zero\n"
+        "### Execution Plan\n1. **Fetch** — Action: list dashboards\n"
+    )
+    plan = parse_plan_markdown(text)
+    assert plan["risks"] == ["dashboard may be missing", "panel count may be zero"]
+
+
 def test_planner_markdown_search_query_optional():
     text = "### Goal\nDo the thing\n### Execution Plan\n1. **Step** — Action: do"
     plan = parse_plan_markdown(text)

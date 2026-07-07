@@ -124,7 +124,7 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         updates["phase"] = "done"
         updates["final_answer"] = str(state.get("draft_answer") or "").strip()
         updates["error"] = None
-    elif verdict == "REVISE" and int(iteration.get("revision_cycles") or 0) < 1:
+    elif verdict == "REVISE" and int(iteration.get("revision_cycles") or 0) < config.policy.revision.max_cycles:
         updates["phase"] = "revising"
         required = review.get("required_changes") or review.get("issues") or review.get("missing_evidence") or []
         updates["review_feedback"] = "\n".join(f"- {item}" for item in required)

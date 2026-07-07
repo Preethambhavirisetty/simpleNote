@@ -60,9 +60,9 @@ State is the key to iterative understanding. If candidate tools, failed attempts
 
 ## 10. Phase
 
-Phase is the run's current mode. The main phases are planning, executing, awaiting approval, reviewing, and done.
+Phase is the run's current mode. The phases are planning, executing, awaiting approval, compacting, fact extracting, synthesizing, reviewing, revising, and done.
 
-The phase controls routing through the graph. Planning routes to execution. Execution may route back to itself, to approval, to review, or to finalization. Approval routes back to execution. Review can route back to execution, back to planning, or forward to finalization.
+The phase controls routing through the graph. Planning routes to execution. Execution routes back to itself, to approval, to the summarizer for memory compaction, or forward to fact extraction once the plan is complete. Fact extraction routes to synthesis; synthesis routes to review or straight to finalization; review routes to a single revision pass or to finalization; revision routes to finalization. Approval and the summarizer both return to execution. Notably, review never routes back to the executor — a revision is a separate, bounded rewrite — which is what prevents review-execute loops.
 
 ## 11. LangGraph
 
@@ -72,9 +72,9 @@ Using a graph makes the loop explicit. Instead of a hidden while loop, the frame
 
 ## 12. Graph Nodes
 
-A graph node is a unit of agent behavior. This service has planner, executor, approval, reviewer, and finalizer nodes.
+A graph node is a unit of agent behavior. This service has planner, executor, approval, summarizer, fact extractor, synthesizer, reviewer, revision, and finalizer nodes.
 
-Each node has one job. The planner decomposes the request. The executor does work. The approval node handles destructive actions. The reviewer checks output. The finalizer produces the final answer.
+Each node has one job, and the separation is deliberate. The planner decomposes the request. The executor orchestrates tools only — it never writes the final answer. The approval node handles destructive actions. The summarizer compacts memory mid-loop. The fact extractor deterministically distills artifacts into compact facts. The synthesizer writes the single draft answer from those facts. The reviewer judges the draft without rewriting it. The revision node applies one bounded rewrite when the reviewer asks. The finalizer renders or reuses the terminal answer.
 
 ## 13. Router And Fast Path
 
@@ -98,9 +98,9 @@ A good plan is short, concrete, and tool-shaped. A poor plan is vague and causes
 
 ## 16. Executor
 
-The executor is the main agent loop. On each turn, it sees the current state and chooses one action: search for tools, call a tool, finish the current step, or draft an answer.
+The executor is the main agent loop. On each turn, it sees the current state and chooses one action: search for tools, call a tool, or finish the current step. A direct draft action also exists but is only a fallback; on the normal path the executor finishes its steps and hands off, leaving authoring to the synthesizer.
 
-The executor is intentionally constrained to one action per turn. This makes tool policy enforcement, approval gates, event streaming, retries, and state updates predictable.
+The executor is intentionally constrained to one action per turn. This makes tool policy enforcement, approval gates, event streaming, retries, and state updates predictable. When the last plan step finishes, the executor hands off to deterministic fact extraction rather than writing the answer itself — authoring belongs to the synthesizer, not the tool loop.
 
 ## 17. Executor Iteration
 
@@ -252,15 +252,15 @@ A denied destructive tool is remembered so the executor does not ask for the sam
 
 ## 41. Reviewer
 
-The reviewer checks the draft answer against the plan, acceptance criteria, tool results, and evidence. It can approve, request revision, or reject.
+The reviewer checks the draft answer against the plan, acceptance criteria, tool results, and evidence. It can approve, request revision, or reject. It is a judge only: it never rewrites the answer. Its parsing is layered — it accepts a verdict as JSON or markdown and falls back to a safe revise when the reply cannot be parsed — and before it accepts an approval it runs deterministic completion checks that can override an over-eager verdict.
 
 Reviewer behavior is configurable. It can run on every run or only when deterministic risk signals exist, such as failed tool calls, denied tools, or errors.
 
 ## 42. Review Verdicts
 
-An approve verdict allows finalization. A revise verdict sends the run back to the executor with feedback. A reject verdict can route back to planning or abort, depending on policy.
+An approve verdict allows finalization. A revise verdict routes to a single bounded revision pass — not back to the executor — which rewrites the draft from the same evidence and then finalizes. A reject verdict returns the best available draft; routing back to the planner ("replan") is a configured option that is not currently wired, so in practice reject behaves like abort.
 
-Review cycles are capped. This prevents endless revise-review loops.
+Review and revision cycles are capped. Because revision is a separate node with no edge back to the executor, there is no revise-execute spiral.
 
 ## 43. Risk-Gated Review
 
@@ -686,15 +686,15 @@ Without acceptance criteria, review becomes generic quality judgment rather than
 
 ## 116. Reviewer Feedback
 
-Reviewer feedback is stored in state and included in planner or executor context. It tells the next loop what was missing or wrong.
+Reviewer feedback is stored in state and consumed by the revision node; it is also available to planner and executor context. It tells the bounded rewrite what was missing or wrong.
 
 This is how the agent improves within a run rather than simply being judged at the end.
 
 ## 117. Replanning
 
-Replanning happens when the reviewer rejects the current approach and policy allows returning to the planner. It is useful when the original plan was wrong or incomplete.
+Replanning is the idea of returning to the planner when the reviewer rejects the current approach. The configuration exposes a reject action for this, but the edge is not currently wired: a reject verdict returns the best available draft instead. The honest current setting is abort, and the configuration and docs are kept consistent with that.
 
-Replanning is bounded by review-cycle limits, because repeated replanning can otherwise become expensive and unproductive.
+The design keeps replanning bounded by review-cycle limits for when it is implemented, because repeated replanning can otherwise become expensive and unproductive.
 
 ## 118. Final Answer Rendering
 
@@ -782,7 +782,7 @@ An agent framework must assume models and tools will fail sometimes. The runtime
 
 ## 132. Performance Optimization
 
-Major performance features include fast path routing, optional planner, native tool calling, conditional finalizer, risk-gated reviewer, provider caching, graph caching, catalog caching, discovery caching, and bounded context packing.
+Major performance features include fast path routing, optional planner, native tool calling, conditional finalizer, risk-gated reviewer, provider caching, graph caching, catalog caching, discovery caching, bounded context packing, deterministic fact extraction, a single synthesis pass, and in-loop memory compaction.
 
 These reduce model calls, network calls, and token usage without removing safety controls.
 
@@ -893,3 +893,57 @@ Avoid adding application-specific logic to planner, executor, reviewer, or final
 Think of the service as a governed, checkpointed, tool-using reasoning loop. The model proposes actions, but the framework decides what is allowed, validates inputs, injects trusted scope, records evidence, controls memory, checks the answer, streams events, and stops safely.
 
 The model provides judgment. The framework provides structure.
+
+## 151. The Evidence-To-Answer Pipeline
+
+The framework separates evidence gathering from answer writing into distinct nodes. After the executor finishes the plan, the run flows through fact extraction, synthesis, optional review, optional revision, and finalization. The shape is: planner, then the executor loop, then fact extractor, then synthesizer, then reviewer if warranted, then revision if requested, then finalizer.
+
+The point of the separation is that the executor only orchestrates tools, deterministic extraction compresses evidence, one model call writes the answer, and the reviewer judges rather than rewrites. This keeps each model call small and removes the old failure where a revise verdict sent the run back into the tool loop.
+
+## 152. Fact Extractor
+
+The fact extractor is a deterministic node — no model call — that converts artifacts into small, source-linked facts. Downstream authoring nodes then reason over compact claims instead of raw tool payloads.
+
+Deterministic extraction is a cost and stability optimization: compressing evidence into facts costs nothing, and the synthesizer and reviewer never have to carry large tool output.
+
+## 153. Structured Fact Contract
+
+Tools can return rich structure. The fact extractor prefers structured facts a tool supplies at known locations — a facts list, or facts nested under data, display, or metadata — and generic collections such as items, results, rows, panels, or tables, before falling back to splitting an artifact summary into lines.
+
+For this to work end to end, truncation preserves a bounded copy of those recognized structured fields in the artifact's compact reference instead of reducing them to counts. The practical guidance: a tool that returns a large collection should expose it under one of these keys so the agent can extract it richly, rather than as a bare top-level list.
+
+## 154. Synthesizer
+
+The synthesizer is the single normal authoring pass. It writes one draft answer from facts only and tags it with a draft kind — model prose, a deterministic mechanical dump, or a passed-through executor draft. It emits an event on every path, including when it skips the model or falls back, so streaming always shows synthesis activity, and it decides whether the draft even needs review.
+
+A single authoring call is the norm; the reviewer and revision run only when warranted.
+
+## 155. Revision Node
+
+The revision node applies exactly one bounded rewrite using the same facts and the reviewer's issues. It calls no tools, and there is deliberately no edge from it back to the executor. If the facts are insufficient, it is instructed to state the limitation rather than invent. This is what makes a revise verdict safe: it improves wording and grounding without reopening the tool loop.
+
+## 156. Follow-Up Query Rewrite
+
+On a follow-up turn, a bare question ("how many are there?") carries no nouns for semantic tool search. The planner is asked to emit a standalone, pronoun-resolved search query, which becomes the retrieval query the executor uses for tool discovery — so search matches on real nouns rather than pronouns.
+
+The rewrite lives in the planner because the planner already runs once and already sees history, so it costs no extra model call. A deterministic fallback — prepending the most recent user turn on follow-ups — is used when the planner is disabled, and it is seeded into initial state so a retrieval query is always present. The literal user request is never overwritten, so the final answer still addresses what was actually asked.
+
+## 157. In-Loop Memory Compaction (Running Summary)
+
+For long investigations, evidence accumulates faster than either the model context or the run's memory should hold. Rather than blindly dropping low-scoring artifacts, the summarizer node compresses before it drops. When retained artifacts approach the cap, the executor loop detours through the summarizer, which makes one model call to fold the lower-scoring artifacts into a compact running summary, keeps the highest-scoring artifacts intact, and returns to the executor with freed context.
+
+The running summary is injected high in the executor's context and seeded into the fact extractor, so evidence that was summarized away still reaches the answer. The feature is optional and bounded three ways: a hard cycle cap, a keep-count clamped below the trigger so compaction always makes progress, and a deterministic fallback memo if the model call times out.
+
+## 158. Provenance Sidecar
+
+Citations must survive compaction. Alongside the prose running summary, the summarizer keeps a structured sidecar recording each folded artifact's identifier, tool, and source reference. This is independent of the memo text, so it cannot be mangled by the model.
+
+Two mechanisms then complement each other: the memo carries inline source markers keyed by artifact identifier for the model to cite in prose, and the sidecar gives the finalizer structured references to cite when grounding is enforced — so a citation can survive even a fully compacted run.
+
+## 159. Execution Memory After Compaction
+
+Because the summarizer drops artifacts, the executor cannot rely on artifacts alone to remember which tools already ran for a step. Duplicate-tool prevention and required-tool checks therefore read both artifacts and tool-call records, and tool-call records carry their plan-step and replan identifiers and are not dropped by compaction. This keeps loop control correct even after aggressive memory compaction.
+
+## 160. Exactly-Once Terminal Event
+
+Several nodes set the done phase as a routing signal, but only the finalizer should emit the terminal done event. The event mapper is told which node produced each update and emits done only for the finalizer's update, so hosts and callbacks never see duplicate or premature terminal events. Every terminal path is routed through the finalizer for this reason, and any unexpected phase is also routed there so a run never ends on an empty response.

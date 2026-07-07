@@ -276,48 +276,6 @@ def _search_repeat_counter(iteration: dict[str, Any], *, step_index: int) -> int
     return count
 
 
-def _synthesize_draft_answer(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> tuple[str, str]:
-    """Return (draft_text, draft_kind); kind is "mechanical" or "llm"."""
-    grounded = _artifact_grounded_answer(state, config=config)
-    if grounded:
-        return grounded, "mechanical"
-    builder = ContextBuilder(config)
-    messages = builder.build(state, "executor")
-    messages[-1]["content"] += (
-        "\n\nAll plan steps are complete. Write the final user-facing answer using the artifacts above.\n"
-        'Return ONLY JSON: {"action":"draft_answer","answer":"..."}'
-    )
-    try:
-        raw = run_with_deadline(
-            lambda: _complete_llm(
-                llm,
-                messages,
-                max_tokens=config.policy.executor.synthesize_max_tokens,
-                node="executor",
-                label="synthesize_answer",
-            ),
-            timeout_seconds=config.policy.llm_timeout_seconds,
-            label="executor answer synthesis LLM call",
-        )
-    except DeadlineExceeded:
-        return _fallback_answer(state, config=config), "mechanical"
-    action = parse_executor_action(raw)
-    answer = str(action.get("answer") or raw).strip()
-    if answer:
-        return answer, "llm"
-    return _fallback_answer(state, config=config), "mechanical"
-
-
-def _run_has_risk(state: AgentState) -> bool:
-    """Deterministic risk signals that justify a reviewer pass."""
-    if state.get("error"):
-        return True
-    for record in state.get("tool_calls") or []:
-        if str(record.get("status") or "") != "ok":
-            return True
-    return False
-
-
 def _native_tool_specs(candidates: list[dict[str, Any]], *, config: AgentConfig) -> list[dict[str, Any]]:
     """Convert discovered tools into OpenAI native tool-call specs."""
     limits = config.policy.executor

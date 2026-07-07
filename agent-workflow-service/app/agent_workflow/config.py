@@ -112,10 +112,7 @@ class ReviewerDefaults:
     enabled: bool = True
     max_tokens: int = 2400
     max_cycles: int = 2
-    # NOTE: reject_action is currently informational only. A REJECT verdict
-    # returns the best-available draft and stops; the graph does not route back
-    # to the planner, so "replan" is legacy/not yet wired. "abort" reflects the
-    # real behavior. Keep this until replan-on-reject is implemented.
+    # REJECT returns the best-available draft and stops; replan-on-reject is not wired.
     reject_action: str = "abort"
     mode: str = "always"  # always | on_risk
 
@@ -149,6 +146,12 @@ class SummaryDefaults:
     keep_after_summary: int = 6  # highest-scoring artifacts kept verbatim after compaction
     max_cycles: int = 3  # hard cap on summarizer invocations per run
     max_tokens: int = 700
+
+
+@dataclass
+class RevisionDefaults:
+    """Runtime settings for the bounded revision node."""
+    max_cycles: int = 1
 
 
 @dataclass
@@ -191,9 +194,8 @@ class AgentPolicy:
     max_retained_tool_calls: int = 40
     max_retained_events: int = 80
     tool_discovery_cache_size: int = 16
-    # See ReviewerDefaults.reject_action: "replan" is legacy/not yet wired; a
-    # REJECT verdict returns the best-available draft. "abort" is the honest setting.
-    reject_action: str = "abort"  # abort | replan (legacy, not yet implemented)
+    # REJECT returns the best-available draft and stops; replan-on-reject is not wired.
+    reject_action: str = "abort"
     destructive_tools: list[str] = field(default_factory=list)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True
@@ -212,6 +214,7 @@ class AgentPolicy:
     executor: ExecutorDefaults = field(default_factory=ExecutorDefaults)
     finalizer: FinalizerDefaults = field(default_factory=FinalizerDefaults)
     summary: SummaryDefaults = field(default_factory=SummaryDefaults)
+    revision: RevisionDefaults = field(default_factory=RevisionDefaults)
     router: RouterDefaults = field(default_factory=RouterDefaults)
     context: ContextLimits = field(default_factory=ContextLimits)
     model: str | None = None
@@ -384,6 +387,9 @@ class AgentConfig:
                     "max_cycles": policy.summary.max_cycles,
                     "max_tokens": policy.summary.max_tokens,
                 },
+                "revision": {
+                    "max_cycles": policy.revision.max_cycles,
+                },
                 "truncation": {
                     "max_artifact_chars": policy.truncation.max_artifact_chars,
                     "max_string_field_chars": policy.truncation.max_string_field_chars,
@@ -482,7 +488,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
     planner_enabled = _as_bool(policy_raw.planner.enabled, _as_bool(policy_raw.enable_planner, True))
     reviewer_enabled = _as_bool(policy_raw.reviewer.enabled, _as_bool(policy_raw.enable_reviewer, True))
     review_max_cycles = _as_int(policy_raw.reviewer.max_cycles, _as_int(policy_raw.max_review_cycles, 2))
-    reject_action = str(policy_raw.reviewer.reject_action or policy_raw.reject_action or "replan")
+    reject_action = str(policy_raw.reviewer.reject_action or policy_raw.reject_action or "abort")
 
     policy = AgentPolicy(
         max_executor_iterations=_as_int(policy_raw.max_executor_iterations, 12),
@@ -557,6 +563,9 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
             keep_after_summary=_as_int(policy_raw.summary.keep_after_summary, 6),
             max_cycles=_as_int(policy_raw.summary.max_cycles, 3),
             max_tokens=_as_int(policy_raw.summary.max_tokens, 700),
+        ),
+        revision=RevisionDefaults(
+            max_cycles=_as_int(policy_raw.revision.max_cycles, 1),
         ),
         router=RouterDefaults(
             fast_path_max_tokens=_as_int(policy_raw.router.fast_path_max_tokens, 512),
@@ -756,6 +765,9 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
                 "keep_after_summary": base.policy.summary.keep_after_summary,
                 "max_cycles": base.policy.summary.max_cycles,
                 "max_tokens": base.policy.summary.max_tokens,
+            },
+            "revision": {
+                "max_cycles": base.policy.revision.max_cycles,
             },
             "truncation": {
                 "max_artifact_chars": base.policy.truncation.max_artifact_chars,

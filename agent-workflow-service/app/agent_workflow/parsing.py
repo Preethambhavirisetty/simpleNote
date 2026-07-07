@@ -14,7 +14,7 @@ def parse_plan_markdown(text: str) -> Plan:
     return Plan(
         goal=sections.get("goal", "").strip(),
         assumptions=_bullets(sections.get("assumptions", "")),
-        risks=_bullets(sections.get("risks and edge cases", "")),
+        risks=_bullets(sections.get("risks / edge cases") or sections.get("risks and edge cases", "")),
         steps=steps,
         acceptance_criteria=_bullets(sections.get("acceptance criteria", "")),
         suggested_structure=sections.get("suggested user-facing structure", "").strip(),

@@ -13,7 +13,8 @@ def revision_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
     # are insufficient, it should make the limitation clear instead of looping.
     iteration = dict(state.get("iteration") or {})
     iteration["revision_cycles"] = int(iteration.get("revision_cycles") or 0) + 1
-    if iteration["revision_cycles"] > 1:
+    max_cycles = max(1, int(config.policy.revision.max_cycles or 1))
+    if iteration["revision_cycles"] > max_cycles:
         return {
             "phase": "done",
             "final_answer": state.get("draft_answer") or "",

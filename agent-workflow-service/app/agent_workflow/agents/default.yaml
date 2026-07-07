@@ -30,8 +30,6 @@ policy:
   max_retained_tool_calls: 32
   max_retained_events: 100
   tool_discovery_cache_size: 16
-  # "abort" is the honest setting today: a REJECT verdict returns the best
-  # available draft. "replan" (route back to the planner) is not yet wired.
   reject_action: abort
   enable_fast_path: true
   render_final_answer: true
@@ -51,6 +49,9 @@ policy:
     keep_after_summary: 6
     max_cycles: 3
     max_tokens: 700
+
+  revision:
+    max_cycles: 1
 
   # Keep planning cheap; the executor/fact/synthesis path handles the detail.
   planner:
@@ -96,7 +97,7 @@ policy:
     trim_section_min_chars: 400
     max_tools_in_prompt: 8
     max_tool_calls_in_prompt: 6
-    max_artifacts_in_prompt: 10
+    max_artifacts_in_prompt: 30
     max_history_messages: 6
     history_preview_head_chars: 500
     history_preview_tail_chars: 500

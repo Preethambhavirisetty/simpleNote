@@ -30,7 +30,7 @@ policy:
   max_retained_tool_calls: 40
   max_retained_events: 80
   tool_discovery_cache_size: 16
-  reject_action: abort  # "replan" is legacy/not yet wired; a REJECT returns the best draft
+  reject_action: abort
   destructive_tools:
     - delete_document
     - update_document

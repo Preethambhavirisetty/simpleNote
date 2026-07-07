@@ -92,9 +92,8 @@ class ReviewerDefaultsModel(BaseModel):
     # None = inherit the flat `max_review_cycles` (which itself defaults to 2),
     # so nested wins only when explicitly set (mirrors the enabled flag).
     max_cycles: int | None = Field(None, ge=1, le=20)
-    # "replan" is legacy and not yet wired: a REJECT verdict returns the best
-    # available draft (same as "abort"). Still accepted so existing configs load.
-    reject_action: str = Field("abort", pattern="^(replan|abort)$")
+    # REJECT returns the best available draft and stops. Replan-on-reject is not wired.
+    reject_action: str = Field("abort", pattern="^abort$")
     # always: review every run; on_risk: review only runs with failed/denied
     # tool calls or errors — clean runs skip the reviewer LLM call.
     mode: str = Field("always", pattern="^(always|on_risk)$")
@@ -132,6 +131,13 @@ class SummaryDefaultsModel(BaseModel):
     keep_after_summary: int = Field(6, ge=0, le=200)
     max_cycles: int = Field(3, ge=1, le=20)
     max_tokens: int = Field(700, ge=128, le=16000)
+
+
+class RevisionDefaultsModel(BaseModel):
+    """Validation model for the bounded revision node."""
+    model_config = ConfigDict(extra="forbid")
+
+    max_cycles: int = Field(1, ge=1, le=5)
 
 
 class RouterDefaultsModel(BaseModel):
@@ -179,8 +185,8 @@ class AgentPolicyModel(BaseModel):
     max_retained_tool_calls: int = Field(40, ge=0, le=300)
     max_retained_events: int = Field(80, ge=0, le=500)
     tool_discovery_cache_size: int = Field(16, ge=0, le=200)
-    # "replan" is legacy and not yet wired (see ReviewerDefaultsModel.reject_action).
-    reject_action: str = Field("abort", pattern="^(replan|abort)$")
+    # REJECT returns the best available draft and stops. Replan-on-reject is not wired.
+    reject_action: str = Field("abort", pattern="^abort$")
     destructive_tools: list[str] = Field(default_factory=list, max_length=256)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True
@@ -201,6 +207,7 @@ class AgentPolicyModel(BaseModel):
     executor: ExecutorDefaultsModel = Field(default_factory=ExecutorDefaultsModel)
     finalizer: FinalizerDefaultsModel = Field(default_factory=FinalizerDefaultsModel)
     summary: SummaryDefaultsModel = Field(default_factory=SummaryDefaultsModel)
+    revision: RevisionDefaultsModel = Field(default_factory=RevisionDefaultsModel)
     router: RouterDefaultsModel = Field(default_factory=RouterDefaultsModel)
     context: ContextLimitsModel = Field(default_factory=ContextLimitsModel)
 
