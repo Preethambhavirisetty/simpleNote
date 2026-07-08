@@ -22,6 +22,12 @@ policy:
   # override these for heavy reports, long audits, or risky infrastructure work.
   max_executor_iterations: 10
   max_review_cycles: 1
+  # Bounded reviewer-driven re-exploration: when review reports missing evidence
+  # (not just wording), re-enter the executor to gather more tools rather than
+  # rewriting from the same facts. Bounded by both this and max_review_cycles.
+  # Exploration agents that need this reliably should also run the reviewer in
+  # "always" mode so shallow-but-clean runs are still checked for gaps.
+  max_explore_cycles: 1
   max_tool_calls_per_step: 3
   max_context_tokens: 24000
   llm_timeout_seconds: 90

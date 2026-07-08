@@ -81,6 +81,7 @@ class IterationCounters(TypedDict, total=False):
     tool_calls: int
     replans: int
     summaries: int
+    explore_cycles: int  # reviewer-driven re-entries to the executor to gather missing evidence
 
 
 class AgentState(TypedDict, total=False):

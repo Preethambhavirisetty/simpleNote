@@ -150,6 +150,7 @@ def build_graph(
         "reviewer",
         route_after_reviewer,
         {
+            "executor": "executor",
             "revision": "revision",
             "finalizer": "finalizer",
             END: END,
@@ -211,8 +212,11 @@ def route_after_synthesizer(state: AgentState) -> str:
 
 
 def route_after_reviewer(state: AgentState) -> str:
-    """Route reviewer verdicts to one revision or finalization."""
+    """Route reviewer verdicts to re-exploration, one revision, or finalization."""
     phase = state.get("phase") or ""
+    if phase == "executing":
+        # Evidence-revise: re-enter the executor (bounded) to gather missing tools.
+        return "executor"
     if phase == "revising":
         return "revision"
     # "done" and any unexpected phase both finalize safely.

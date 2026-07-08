@@ -177,6 +177,9 @@ class AgentPolicyModel(BaseModel):
     # Legacy flat alias for reviewer.max_cycles; an enabled reviewer runs at
     # least once, so the cap starts at 1. Disable review via enable_reviewer.
     max_review_cycles: int = Field(2, ge=1, le=20)
+    # Cap on reviewer-driven re-entries to the executor for missing evidence.
+    # 0 disables re-exploration (REVISE then only routes to text revision).
+    max_explore_cycles: int = Field(1, ge=0, le=10)
     max_tool_calls_per_step: int = Field(4, ge=1, le=20)
     max_context_tokens: int = Field(12000, ge=1000, le=200000)
     llm_timeout_seconds: float = Field(60.0, ge=1.0, le=600.0)

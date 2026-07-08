@@ -71,6 +71,23 @@ def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
     return called
 
 
+def _step_call_signatures_and_count(state: AgentState, step_index: int) -> tuple[set[tuple[str, str]], int]:
+    """Return (name, args-preview) signatures and the total call count for a step.
+
+    Signatures are what the duplicate guard compares against, so the same tool
+    with different arguments is allowed while an identical repeat is skipped. The
+    count is the per-step tool-call budget denominator.
+    """
+    replan_id = _current_replan_id(state)
+    signatures: set[tuple[str, str]] = set()
+    count = 0
+    for record in state.get("tool_calls") or []:
+        if int(record.get("step_index", -1)) == step_index and int(record.get("replan_id") or 0) == replan_id and record.get("name"):
+            signatures.add((str(record.get("name")), str(record.get("args_preview") or "")))
+            count += 1
+    return signatures, count
+
+
 def _cache_key(query: str) -> str:
     """Normalize a query into a short stable cache key."""
     return " ".join(query.lower().split())[:300]
@@ -748,15 +765,29 @@ def executor_node(
 
     if action_type == "call_tool":
         tool_name = str(action.get("name") or "")
-        step_call_count = len(called_this_step)
+        # Compare the post-injection argument preview (the same shape stored on the
+        # tool-call record) so the same tool with *different* arguments is allowed —
+        # e.g. a second get_panel_data with different panel_tokens — while an exact
+        # repeat is skipped. The per-step budget counts total calls, not distinct
+        # tool names, so a re-explore step gets a fresh budget of its own.
+        proposed_args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+        injected_args = _apply_argument_injection(
+            tool_name=tool_name,
+            arguments=proposed_args,
+            schema=_schema_for_tool(tool_name, candidate_tools),
+            runtime_context=dict(state.get("runtime_context") or {}),
+            config=config,
+        )
+        call_signature = (tool_name, json.dumps(injected_args)[:300])
+        called_signatures, step_call_count = _step_call_signatures_and_count(state, step_index)
         max_per_step = config.policy.max_tool_calls_per_step
-        if tool_name in called_this_step:
+        if call_signature in called_signatures:
             action_type = "finish_step"
             updates["events"].append(
                 {
                     "step": "executor.duplicate_tool_skipped",
                     "tool": tool_name,
-                    "message": "Tool was already called for this step; finishing instead of overriding the model choice.",
+                    "message": "Tool was already called with identical arguments for this step; finishing instead of repeating it.",
                 }
             )
         elif step_call_count >= max_per_step:

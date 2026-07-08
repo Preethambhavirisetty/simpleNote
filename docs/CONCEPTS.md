@@ -62,7 +62,7 @@ State is the key to iterative understanding. If candidate tools, failed attempts
 
 Phase is the run's current mode. The phases are planning, executing, awaiting approval, compacting, fact extracting, synthesizing, reviewing, revising, and done.
 
-The phase controls routing through the graph. Planning routes to execution. Execution routes back to itself, to approval, to the summarizer for memory compaction, or forward to fact extraction once the plan is complete. Fact extraction routes to synthesis; synthesis routes to review or straight to finalization; review routes to a single revision pass or to finalization; revision routes to finalization. Approval and the summarizer both return to execution. Notably, review never routes back to the executor — a revision is a separate, bounded rewrite — which is what prevents review-execute loops.
+The phase controls routing through the graph. Planning routes to execution. Execution routes back to itself, to approval, to the summarizer for memory compaction, or forward to fact extraction once the plan is complete. Fact extraction routes to synthesis; synthesis routes to review or straight to finalization; review routes to one of three places — back to the executor to gather missing evidence (evidence-revise), to a single text-revision pass, or to finalization; revision routes to finalization. Approval and the summarizer both return to execution. The reviewer→executor path exists only for evidence gaps and is bounded by an explore-cycle cap, so the agent can gather more data without spiralling; a plain wording fix still goes to the separate revision node.
 
 ## 11. LangGraph
 
@@ -258,9 +258,9 @@ Reviewer behavior is configurable. It can run on every run or only when determin
 
 ## 42. Review Verdicts
 
-An approve verdict allows finalization. A revise verdict routes to a single bounded revision pass — not back to the executor — which rewrites the draft from the same evidence and then finalizes. A reject verdict returns the best available draft; routing back to the planner ("replan") is a configured option that is not currently wired, so in practice reject behaves like abort.
+An approve verdict allows finalization. A revise verdict now splits by cause. When the reviewer reports missing evidence — a gap a rewrite from the same facts cannot fix — it is an evidence-revise: the run re-enters the executor to gather more tool data, bounded by an explore-cycle cap. When the draft is only worded poorly or incomplete but the facts are sufficient, it is a text-revise: a single bounded revision pass rewrites it. A reject verdict returns the best available draft; routing back to the planner ("replan") is a configured option that is not currently wired, so in practice reject behaves like abort.
 
-Review and revision cycles are capped. Because revision is a separate node with no edge back to the executor, there is no revise-execute spiral.
+Review, revision, and explore cycles are all capped. Evidence-revise re-enters the executor but cannot spiral, because each re-entry consumes one bounded explore cycle.
 
 ## 43. Risk-Gated Review
 
@@ -630,7 +630,7 @@ This prevents exploratory loops from burning unbounded tool calls.
 
 ## 106. Duplicate Tool Prevention
 
-The executor detects when the same tool has already been called for the current step and can skip duplicate calls. This avoids the model repeatedly overwriting its own choice.
+The executor detects when the same tool has already been called with the same arguments for the current step and skips that exact repeat. This avoids the model overwriting its own identical choice. A repeat with different arguments is allowed, so genuine multi-step exploration — the same tool aimed at different targets (e.g. panel data for different panels) — is not blocked.
 
 Duplicate prevention is a loop-control technique, not a guarantee that the first call was semantically sufficient.
 
@@ -898,7 +898,7 @@ The model provides judgment. The framework provides structure.
 
 The framework separates evidence gathering from answer writing into distinct nodes. After the executor finishes the plan, the run flows through fact extraction, synthesis, optional review, optional revision, and finalization. The shape is: planner, then the executor loop, then fact extractor, then synthesizer, then reviewer if warranted, then revision if requested, then finalizer.
 
-The point of the separation is that the executor only orchestrates tools, deterministic extraction compresses evidence, one model call writes the answer, and the reviewer judges rather than rewrites. This keeps each model call small and removes the old failure where a revise verdict sent the run back into the tool loop.
+The point of the separation is that the executor only orchestrates tools, deterministic extraction compresses evidence, one model call writes the answer, and the reviewer judges rather than rewrites. This keeps each model call small. The reviewer can still send the run back to the executor to gather missing evidence, but only through a bounded evidence-revise path (see the re-exploration section) — not the old unbounded revise-execute loop.
 
 ## 152. Fact Extractor
 
@@ -920,7 +920,7 @@ A single authoring call is the norm; the reviewer and revision run only when war
 
 ## 155. Revision Node
 
-The revision node applies exactly one bounded rewrite using the same facts and the reviewer's issues. It calls no tools, and there is deliberately no edge from it back to the executor. If the facts are insufficient, it is instructed to state the limitation rather than invent. This is what makes a revise verdict safe: it improves wording and grounding without reopening the tool loop.
+The revision node applies exactly one bounded rewrite using the same facts and the reviewer's issues. It calls no tools, and there is deliberately no edge from it back to the executor. It handles text-revise only — improving wording and grounding from the facts already gathered. When the reviewer instead finds that evidence is genuinely missing, that is handled by the separate, bounded evidence-revise path (see the next section), not by this node.
 
 ## 156. Follow-Up Query Rewrite
 
@@ -947,3 +947,15 @@ Because the summarizer drops artifacts, the executor cannot rely on artifacts al
 ## 160. Exactly-Once Terminal Event
 
 Several nodes set the done phase as a routing signal, but only the finalizer should emit the terminal done event. The event mapper is told which node produced each update and emits done only for the finalizer's update, so hosts and callbacks never see duplicate or premature terminal events. Every terminal path is routed through the finalizer for this reason, and any unexpected phase is also routed there so a run never ends on an empty response.
+
+## 161. Evidence-Revise: Reviewer-Driven Re-Exploration
+
+A judge-only reviewer whose only recourse is text-revision cannot fix a "missing evidence" gap — rewriting from the same facts cannot add data. So a REVISE is split by cause. When the reviewer reports missing evidence, the run performs an evidence-revise: it re-enters the executor to gather more tool results, then flows normally back through fact extraction, synthesis, and review. This is what makes genuine autonomous exploration possible — the agent can notice a gap and go fill it, rather than dressing up an incomplete answer.
+
+The re-entry is bounded, not the old unbounded loop. Each re-entry consumes one explore cycle, capped by configuration (zero disables it entirely), and it is also bounded by the review-cycle cap. The reviewer appends a short "gather missing evidence" step and passes its feedback into the executor prompt, so the next tool choice is guided rather than a blind retry, and the appended step gets its own fresh per-step tool budget. Text-revise — wording fixes from sufficient facts — still goes to the separate revision node. The distinction is deterministic: a non-empty missing-evidence list, plus available tools and remaining budget, routes to the executor; otherwise the REVISE is a text fix.
+
+One operational note: re-exploration only helps if the reviewer actually runs. An agent that relies on it for shallow-but-clean runs should run the reviewer in "always" mode rather than the risk-gated mode, so a thin answer with no tool failure is still checked for gaps.
+
+## 162. Turn-Scoped Evidence
+
+Cross-turn artifact persistence lets a follow-up reuse the prior turn's evidence, but a genuinely new question must not inherit stale facts from the last turn. The runtime therefore reuses persisted artifacts only when the turn is detected as a follow-up; on a new topic it starts clean. This prevents a weak prior result (for example, one shallow search) from bleeding its facts into an unrelated next question.

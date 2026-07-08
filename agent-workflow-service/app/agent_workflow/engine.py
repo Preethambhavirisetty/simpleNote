@@ -365,6 +365,11 @@ class AgentEngine:
             persistence_active=persistence_active,
             require_tool_on_follow_up=policy.require_tool_on_follow_up,
         )
+        # Only reuse a prior turn's artifacts when this turn actually refers back
+        # to it. A genuinely new question must not inherit stale facts from the
+        # last turn's evidence (e.g. a weak search bleeding into the next topic).
+        if not follow_up.is_follow_up:
+            persisted_artifacts = []
         runtime_context = apply_follow_up_runtime_context(dict(request.runtime_context), follow_up)
         prepared = RunRequest(
             query=request.query,
@@ -438,9 +443,10 @@ class AgentEngine:
     def _thread_config(self, thread_id: str) -> dict[str, Any]:
         """Helper for thread config."""
         review_cycles = max(0, self.config.policy.reviewer.max_cycles)
-        review_passes = max(1, review_cycles + 1)
-        # The optimized graph no longer replans through reviewer loops. Keep the
-        # recursion budget focused on executor turns plus one fact/synthesis/revision path.
+        explore_cycles = max(0, self.config.policy.max_explore_cycles)
+        # Reviewer-driven re-exploration re-enters the executor loop, so its
+        # bounded cycles add to the recursion budget alongside review passes.
+        review_passes = max(1, review_cycles + explore_cycles + 1)
         executor_budget = self.config.policy.max_executor_iterations * review_passes
         return {
             "configurable": {"thread_id": thread_id},

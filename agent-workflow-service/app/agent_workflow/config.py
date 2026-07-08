@@ -186,6 +186,10 @@ class AgentPolicy:
     """Runtime policy controlling workflow limits and gates."""
     max_executor_iterations: int = 12
     max_review_cycles: int = 2
+    # Cap on reviewer-driven re-entries to the executor to gather missing
+    # evidence (evidence-revise). 0 disables re-exploration; the reviewer then
+    # only ever routes a REVISE to the text-revision node.
+    max_explore_cycles: int = 1
     max_tool_calls_per_step: int = 4
     max_context_tokens: int = 12000
     llm_timeout_seconds: float = 60.0
@@ -361,6 +365,7 @@ class AgentConfig:
             "policy": {
                 "max_executor_iterations": policy.max_executor_iterations,
                 "max_review_cycles": policy.max_review_cycles,
+                "max_explore_cycles": policy.max_explore_cycles,
                 "max_tool_calls_per_step": policy.max_tool_calls_per_step,
                 "max_context_tokens": policy.max_context_tokens,
                 "llm_timeout_seconds": policy.llm_timeout_seconds,
@@ -493,6 +498,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
     policy = AgentPolicy(
         max_executor_iterations=_as_int(policy_raw.max_executor_iterations, 12),
         max_review_cycles=review_max_cycles,
+        max_explore_cycles=_as_int(policy_raw.max_explore_cycles, 1),
         max_tool_calls_per_step=_as_int(policy_raw.max_tool_calls_per_step, 4),
         max_context_tokens=_as_int(policy_raw.max_context_tokens, 12000),
         llm_timeout_seconds=_as_float(policy_raw.llm_timeout_seconds, 60.0),
@@ -740,6 +746,7 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
         "policy": {
             "max_executor_iterations": base.policy.max_executor_iterations,
             "max_review_cycles": base.policy.max_review_cycles,
+            "max_explore_cycles": base.policy.max_explore_cycles,
             "max_tool_calls_per_step": base.policy.max_tool_calls_per_step,
             "max_context_tokens": base.policy.max_context_tokens,
             "llm_timeout_seconds": base.policy.llm_timeout_seconds,

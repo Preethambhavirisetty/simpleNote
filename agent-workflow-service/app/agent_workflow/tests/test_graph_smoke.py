@@ -640,9 +640,14 @@ def test_reviewer_blocks_approve_when_trello_cards_missing():
 
     updates = reviewer_node(state, config=config, llm=ApproveReviewerLlm())
 
+    # The gap is missing tool evidence (get_cards was never called), so this is an
+    # evidence-revise: the reviewer re-enters the executor to gather it rather than
+    # rewriting the draft from the same facts.
     assert updates["review"]["verdict"] == "REVISE"
-    assert updates["phase"] == "revising"
+    assert updates["phase"] == "executing"
+    assert updates["iteration"]["explore_cycles"] == 1
     assert any("get_cards" in item for item in updates["review"].get("required_changes") or [])
+    assert updates["plan"]["steps"][-1]["title"] == "Gather missing evidence"
 
 
 class DuplicateToolLlm(LlmProvider):

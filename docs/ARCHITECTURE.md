@@ -104,11 +104,11 @@ The synthesizer (`nodes/synthesizer.py`) is the **single normal authoring pass**
 
 ### 4.7 Reviewer — `reviewer_node`
 
-The reviewer (`nodes/reviewer.py`) is a **judge only** — it never rewrites the answer. It returns a verdict (`APPROVE`, `REVISE`, `REJECT`) plus issues and required changes. Parsing is layered and robust (`_parse_review`): JSON first, then markdown (`parse_review_markdown`), then a safe `REVISE` default with a `reviewer.parse_failed` event. Before it accepts an `APPROVE`, it runs deterministic `_completion_gaps` checks (e.g. "the user asked about cards but no card evidence exists") that can override an over-eager approval into a `REVISE`. It is bounded by `max_cycles`.
+The reviewer (`nodes/reviewer.py`) is a **judge only** — it never rewrites the answer. It returns a verdict (`APPROVE`, `REVISE`, `REJECT`) plus issues and required changes. Parsing is layered and robust (`_parse_review`): JSON first, then markdown (`parse_review_markdown`), then a safe `REVISE` default with a `reviewer.parse_failed` event. Before it accepts an `APPROVE`, it runs deterministic `_completion_gaps` checks (e.g. "the user asked about cards but no card evidence exists") that can override an over-eager approval into a `REVISE`. A `REVISE` is then split by cause (`_needs_re_explore`): when `missing_evidence` is present and tools remain, it is an **evidence-revise** that re-enters the executor to gather more — appending a "gather missing evidence" step, passing feedback via `review_feedback`, and setting `phase: "executing"`; otherwise it is a text-revise to the revision node. It is bounded by `max_cycles` and, for re-exploration, `max_explore_cycles`.
 
 ### 4.8 Revision — `revision_node`
 
-The revision node (`nodes/revision.py`) applies exactly **one** bounded rewrite using the same facts and the reviewer's issues. It calls no tools. If facts are insufficient, it is instructed to state the limitation rather than invent. After it runs, control goes straight to the finalizer — there is deliberately **no edge back to the executor**, which is what prevents the classic review→re-execute spiral.
+The revision node (`nodes/revision.py`) applies exactly **one** bounded rewrite using the same facts and the reviewer's issues. It calls no tools, and after it runs control goes straight to the finalizer — there is deliberately **no edge from revision back to the executor**. It handles the *text-revise* case only (wording/grounding fixes from sufficient facts). The complementary *evidence-revise* case is handled by the reviewer re-entering the executor directly (§4.7), bounded by `max_explore_cycles`, so gathering more data and rewording remain distinct, separately-capped loops rather than one unbounded spiral.
 
 ### 4.9 Finalizer — `finalizer_node`
 
@@ -234,7 +234,8 @@ The service is tuned for **cost and stability**, not just raw speed. The main le
 - **Conditional finalizer render.** LLM prose drafts are reused, not re-rendered.
 - **Native tool calling with prefetch.** Saves the separate search round-trip when the model supports it.
 - **Tool discovery cache + catalog TTL.** Repeated searches and tool listings are free within a turn / TTL window.
-- **Bounded loops everywhere.** Executor iterations, review cycles, revision cycles, and summarizer cycles are all capped; the graph physically cannot spiral.
+- **Bounded loops everywhere.** Executor iterations, review cycles, revision cycles, explore (re-exploration) cycles, and summarizer cycles are all capped; the graph physically cannot spiral.
+- **Reviewer-driven re-exploration.** When review reports missing evidence, the run re-enters the executor to gather more (evidence-revise) instead of rewriting from the same facts — bounded by `max_explore_cycles`, so autonomous exploration cannot loop forever.
 - **In-loop memory compaction.** Trades one summarizer call for freed context so long investigations stay within budget instead of dropping evidence.
 - **Cross-turn artifact reuse.** Follow-ups can skip re-running tools by loading persisted evidence.
 

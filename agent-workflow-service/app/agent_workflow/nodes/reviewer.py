@@ -60,6 +60,42 @@ def _completion_gaps(state: AgentState) -> list[str]:
     return gaps
 
 
+def _needs_re_explore(state: AgentState, review: dict[str, Any], config: AgentConfig) -> bool:
+    """Return whether a REVISE should re-enter the executor to gather evidence.
+
+    Evidence-revise (as opposed to text-revise) fires when the reviewer reports
+    missing evidence, the run still has tools it can call, and the bounded
+    re-exploration budget is not exhausted. A missing_evidence list is the
+    reviewer literally saying "evidence is absent" — which a text rewrite from
+    the same facts cannot fix.
+    """
+    if int(config.policy.max_explore_cycles) <= 0:
+        return False
+    iteration = state.get("iteration") or {}
+    if int(iteration.get("explore_cycles") or 0) >= int(config.policy.max_explore_cycles):
+        return False
+    missing = [str(item).strip() for item in (review.get("missing_evidence") or []) if str(item).strip()]
+    if not missing:
+        return False
+    # Re-exploration is only useful if the agent actually has tools to call.
+    return bool(state.get("tool_calls") or state.get("candidate_tools"))
+
+
+def _plan_with_explore_step(state: AgentState, feedback: str) -> dict[str, Any]:
+    """Append a bounded 'gather missing evidence' step for the executor to work."""
+    plan = dict(state.get("plan") or {})
+    steps = list(plan.get("steps") or [])
+    steps.append(
+        {
+            "title": "Gather missing evidence",
+            "action": feedback or "Gather the missing evidence identified in review.",
+            "tool_hint": "auto",
+        }
+    )
+    plan["steps"] = steps
+    return plan
+
+
 def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
     """Judge the synthesized draft against facts without authoring a new answer."""
     # The reviewer is only a gate. It returns pass/revise/reject metadata; the
@@ -120,10 +156,27 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         review["required_changes"] = list(dict.fromkeys((review.get("required_changes") or []) + completion_gaps))
 
     updates: dict[str, Any] = {"review": review, "iteration": iteration}
+    re_explored = False
     if verdict == "APPROVE":
         updates["phase"] = "done"
         updates["final_answer"] = str(state.get("draft_answer") or "").strip()
         updates["error"] = None
+    elif verdict == "REVISE" and _needs_re_explore(state, review, config):
+        # Evidence-revise: the gap is missing tool evidence, not wording. Rewriting
+        # from the same facts cannot fix that, so re-enter the executor to gather
+        # more. Bounded by explore_cycles; the guidance is passed as feedback and a
+        # fresh "gather missing evidence" plan step gives the executor real work.
+        re_explored = True
+        iteration["explore_cycles"] = int(iteration.get("explore_cycles") or 0) + 1
+        required = review.get("missing_evidence") or review.get("required_changes") or review.get("issues") or []
+        feedback = "\n".join(f"- {item}" for item in required)
+        plan = _plan_with_explore_step(state, feedback)
+        updates["iteration"] = iteration
+        updates["review_feedback"] = feedback
+        updates["plan"] = plan
+        updates["current_step_index"] = max(0, len(plan.get("steps") or []) - 1)
+        updates["candidate_tools"] = []
+        updates["phase"] = "executing"
     elif verdict == "REVISE" and int(iteration.get("revision_cycles") or 0) < config.policy.revision.max_cycles:
         updates["phase"] = "revising"
         required = review.get("required_changes") or review.get("issues") or review.get("missing_evidence") or []
@@ -137,10 +190,19 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
     events: list[dict[str, Any]] = []
     if parse_failed:
         events.append({"step": "reviewer.parse_failed", "raw_preview": (raw or "")[:300]})
+    if re_explored:
+        events.append(
+            {
+                "step": "reviewer.re_explore",
+                "explore_cycles": int(iteration.get("explore_cycles") or 0),
+                "missing_evidence": review.get("missing_evidence") or [],
+            }
+        )
     events.append(
         {
             "step": "reviewer.completed",
             "verdict": verdict,
+            "re_explore": re_explored,
             "issues": review.get("issues") or [],
             "missing_evidence": review.get("missing_evidence") or [],
             "required_changes": review.get("required_changes") or [],
