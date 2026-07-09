@@ -330,6 +330,62 @@ class AgentConfig:
             return prompt_path.read_text(encoding="utf-8")
         return path
 
+    def safe_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe view of the config with secrets redacted.
+
+        Used by inspection/action endpoints. The full policy is emitted via
+        dataclasses.asdict, so newly added policy fields appear automatically;
+        credentials (API key, MCP auth tokens, checkpointer URL) are redacted.
+        """
+        from dataclasses import asdict
+
+        def _redact(value: str) -> str:
+            return "***" if value else ""
+
+        return {
+            "name": self.name,
+            "prompts": dict(self.prompts),
+            "prompts_inline": dict(self.prompts_inline),
+            "llm": {
+                "base_url": self.llm.base_url,
+                "model": self.llm.model,
+                "send_auth_header": self.llm.send_auth_header,
+                "default_max_tokens": self.llm.default_max_tokens,
+                "temperature": self.llm.temperature,
+                "top_p": self.llm.top_p,
+                "top_k": self.llm.top_k,
+                "seed": self.llm.seed,
+                "native_tool_calling": self.llm.native_tool_calling,
+                "api_key": _redact(self.llm.api_key),
+            },
+            "mcp": {
+                "url": self.mcp.url,
+                "timeout_seconds": self.mcp.timeout_seconds,
+                "verify_ssl": self.mcp.verify_ssl,
+                "auth_token": _redact(self.mcp.auth_token),
+                "servers": [
+                    {
+                        "name": server.name,
+                        "url": server.url,
+                        "timeout_seconds": server.timeout_seconds,
+                        "verify_ssl": server.verify_ssl,
+                        "proxy_url": server.proxy_url,
+                        "auth_token": _redact(server.auth_token),
+                        "tool_discovery": asdict(server.tool_discovery),
+                    }
+                    for server in self.mcp.servers
+                ],
+            },
+            "policy": asdict(self.policy),
+            "resources": {
+                "checkpointer": {
+                    "mode": self.resources.checkpointer.mode,
+                    "url": _redact(self.resources.checkpointer.url),
+                },
+                "tool_index": asdict(self.resources.tool_index),
+            },
+        }
+
     def signature(self) -> str:
         """Return a stable cache key for this config without exposing secrets."""
         policy = self.policy

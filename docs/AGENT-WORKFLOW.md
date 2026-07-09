@@ -959,3 +959,35 @@ One operational note: re-exploration only helps if the reviewer actually runs. A
 ## 162. Turn-Scoped Evidence
 
 Cross-turn artifact persistence lets a follow-up reuse the prior turn's evidence, but a genuinely new question must not inherit stale facts from the last turn. The runtime therefore reuses persisted artifacts only when the turn is detected as a follow-up; on a new topic it starts clean. This prevents a weak prior result (for example, one shallow search) from bleeding its facts into an unrelated next question.
+
+## 163. Exploration Profiles (Quick and Heavy Modes)
+
+An exploration profile is a named preset — quick or heavy — that reshapes the whole pipeline for a workload without new config files. Quick mode favors latency: the fast path is on, re-exploration is off, and the reviewer runs only on risk. Heavy mode favors depth: the planner and always-on review are enabled, and the executor-iteration, re-exploration, no-progress, truncation, and output budgets are all larger.
+
+The mode is chosen per request from trusted runtime context, or falls back to an environment default, then to quick. It is applied by deep-merging the preset into the request's overrides, with a clear precedence: base config, then the mode preset, then any explicit caller override — so the mode sets the baseline while an explicit tweak still wins. Because the merged configuration changes the config signature, each mode caches its own graph and providers in isolation. This is how one deployed service offers both a snappy read assistant and a deep research agent, selectable per call or from the UI.
+
+## 164. Stagnation Early Stop
+
+Hard caps guarantee a run cannot loop forever, but they bound a count, not usefulness — so an agent calling tools that return nothing could still burn its entire budget. The stagnation stop closes that gap. It tracks a generic, score-based progress signal: the number of gathered artifacts scoring above a small relevance threshold. If several consecutive tool-calling turns add no new useful artifact, the executor stops exploring and answers with what it already has.
+
+This is deliberately app-agnostic — no tool names, no intent keywords, only artifact scores. Search-only turns (which gather nothing yet) are not counted, and a single useful new result resets the counter. The effect is to turn the safety caps into an efficiency stop: the agent quits when it is clearly spinning, not only when it hits the ceiling. The threshold and the number of tolerated unproductive turns are configurable, and heavy mode tolerates a few more before giving up.
+
+## 165. Primary Evidence In Synthesis
+
+Compressing tool results into small facts is ideal when evidence comes from many sources, but it is lossy when the answer comes from one rich result — a report or a large table shredded into fact lines loses content. To fix this, the synthesizer reads two things: the top tool-result summaries verbatim (primary evidence, highest-scored first, within a bounded budget) and the compact facts as a provenance index over them.
+
+For a single rich result its whole summary is included, so nothing is lost; for many results the strongest few are included verbatim and the facts cover the tail. The evidence budget and the facts budget are both derived from the context window so the combined synthesis prompt stays in bounds. This complements, rather than replaces, deterministic fact extraction.
+
+## 166. Generic Completion Checks
+
+Before accepting an APPROVE, the reviewer runs deterministic checks — but they are generic, with no application-specific tool names or intents. They split into two kinds by what fixes them. Evidence gaps mean tool data is genuinely missing; they can trigger a bounded re-exploration. Rewrite-fixable gaps mean the evidence exists but the draft mishandled it — for example, the draft claims nothing was found while a tool actually returned rows, or the answer lacks basic markdown structure; these route to a text revision, never to re-exploration.
+
+Keeping these two categories separate is what makes autonomous behavior correct: the agent only goes back to gather more when data is actually missing, and merely rewrites when the data is already in hand. The distinction is deterministic and does not depend on the reviewer model guessing.
+
+## 167. Non-Truncation Of Small Results
+
+Truncation exists to bound large tool results, not to shrink small ones. A string field is kept verbatim and only clipped when the whole result exceeds the artifact budget, and then the largest fields are clipped first. The per-fact character cap fed to synthesis is generous and configurable, and a total-facts budget derived from the context window bounds the aggregate. The net effect is that a small or medium result survives whole into the answer, while a pathologically large one is still bounded — the earlier failure mode of tiny results being needlessly truncated is gone.
+
+## 168. Action Controller (Per-Stage Testing)
+
+Alongside the run, stream, and resume endpoints, an action endpoint runs one isolated pipeline stage per call for manual or Postman testing. It can load and inspect a configuration (with secrets redacted), validate a request, build initial state, check the fast path, resolve or apply an exploration profile, parse planner or reviewer markdown, exercise truncation and scoring, evaluate a routing function, or run any single node against scripted mock providers. It is the tool for verifying one node's behavior in isolation without driving the whole graph, and it enumerates its own supported actions.

@@ -83,8 +83,10 @@ Its responsibilities, all bounded by policy:
 - **Loop breaking.** Repeated `search_tools` with candidates already in hand is detected (`_search_repeat_counter`) and forced forward, so the model cannot loop on discovery.
 - **Duplicate / required-tool tracking.** `_called_tools_for_step` computes which tools already ran for the current step, reading **both** artifacts and `tool_calls` (this dual source is deliberate — see §6.5).
 - **Retention.** `_prune_artifacts` and `_prune_tool_calls` keep only the best/most-recent records within `max_retained_artifacts` / `max_retained_tool_calls`.
+- **Stagnation early stop.** `_update_no_progress` tracks a generic, score-based progress signal: the count of artifacts scoring at least `min_progress_score`. If `max_no_progress_turns` consecutive tool-calling turns add no new useful artifact, the executor stops exploring and hands off (`executor.no_progress_stop`) rather than burning the full iteration budget. Search-only turns create no tool calls and are not counted; a new useful artifact resets the counter. This is app-agnostic — no tool names or intents.
+- **Duplicate guard by arguments.** The same tool with *different* arguments is allowed; only an identical repeat (same post-injection argument signature) is skipped, so genuine multi-step exploration is not blocked.
 
-When the last plan step finishes, the executor hands off with `phase: "fact_extracting"` — it never writes the final answer itself.
+When the last plan step finishes — or when the stagnation stop fires — the executor hands off with `phase: "fact_extracting"`. It never writes the final answer itself.
 
 ### 4.3 Approval — `approval_node`
 
@@ -100,11 +102,15 @@ The fact extractor (`nodes/fact_extractor.py`) is **deterministic on purpose** (
 
 ### 4.6 Synthesizer — `synthesizer_node`
 
-The synthesizer (`nodes/synthesizer.py`) is the **single normal authoring pass**. It writes one draft answer from facts only, tagging it with a `draft_kind` (`"llm"` prose, `"mechanical"` deterministic dump, or `"executor_draft"`). It emits an event on every path (`completed`, `skipped`, `fallback`, `timeout`) so streaming always shows synthesis activity. Crucially, it uses `_done_or_reviewing` to decide whether the draft needs a reviewer at all — clean runs skip straight to finalization (risk-gating, §8).
+The synthesizer (`nodes/synthesizer.py`) is the **single normal authoring pass**. It writes one draft answer, tagging it with a `draft_kind` (`"llm"` prose, `"mechanical"` deterministic dump, or `"executor_draft"`). Its prompt (`_messages`) carries two evidence sections: a **primary-evidence** block of the top artifact **summaries verbatim** (`_primary_evidence`, highest-scored first, bounded to ~a third of the context window) plus the compact facts as a provenance index. This is the fix for the lossy fact round-trip: a single rich tool result reaches the writer intact instead of being shredded into and rebuilt from clipped facts, while many-source runs still lean on the compressed facts. It emits an event on every path (`completed`, `skipped`, `fallback`, `timeout`) so streaming always shows synthesis activity, and uses `_done_or_reviewing` to decide whether the draft needs a reviewer at all — clean runs skip straight to finalization (risk-gating, §8).
 
 ### 4.7 Reviewer — `reviewer_node`
 
-The reviewer (`nodes/reviewer.py`) is a **judge only** — it never rewrites the answer. It returns a verdict (`APPROVE`, `REVISE`, `REJECT`) plus issues and required changes. Parsing is layered and robust (`_parse_review`): JSON first, then markdown (`parse_review_markdown`), then a safe `REVISE` default with a `reviewer.parse_failed` event. Before it accepts an `APPROVE`, it runs deterministic `_completion_gaps` checks (e.g. "the user asked about cards but no card evidence exists") that can override an over-eager approval into a `REVISE`. A `REVISE` is then split by cause (`_needs_re_explore`): when `missing_evidence` is present and tools remain, it is an **evidence-revise** that re-enters the executor to gather more — appending a "gather missing evidence" step, passing feedback via `review_feedback`, and setting `phase: "executing"`; otherwise it is a text-revise to the revision node. It is bounded by `max_cycles` and, for re-exploration, `max_explore_cycles`.
+The reviewer (`nodes/reviewer.py`) is a **judge only** — it never rewrites the answer. It returns a verdict (`APPROVE`, `REVISE`, `REJECT`) plus issues and required changes. Parsing is layered and robust (`_parse_review`): JSON first, then markdown (`parse_review_markdown`), then a safe `REVISE` default with a `reviewer.parse_failed` event. Before it accepts an `APPROVE`, it runs two families of **generic, app-agnostic** deterministic checks (no tool names or intents):
+- `_completion_gaps` — **evidence gaps** (missing tool data, from `follow_up_approval_gaps`). These land in `missing_evidence`.
+- `_synthesis_gaps` — **rewrite-fixable gaps** fixable from existing facts: `_contradiction_gaps` (the draft claims nothing was found while a tool's `raw_ref` actually returned data) and `_formatting_gaps` (missing markdown structure). These land only in `required_changes`.
+
+A `REVISE` is then split by cause (`_needs_re_explore`): when `missing_evidence` is present and tools remain, it is an **evidence-revise** that re-enters the executor to gather more — appending a "gather missing evidence" step, passing feedback via `review_feedback`, and setting `phase: "executing"`. A synthesis-only gap (contradiction/formatting) is a **text-revise** to the revision node, because the evidence already exists. Bounded by `max_cycles` and, for re-exploration, `max_explore_cycles`.
 
 ### 4.8 Revision — `revision_node`
 
@@ -127,7 +133,7 @@ Routing functions are pure functions of state: `route_after_start`, `route_after
 
 ### 5.1 State model — `state.py`
 
-`AgentState` is the `TypedDict` that flows through the graph. Key fields: `user_query`, `search_query`, `plan`, `current_step_index`, `candidate_tools`, `tool_discovery_cache`, `artifacts`, `tool_calls`, `facts`, `draft_answer`, `draft_kind`, `review`, `review_feedback`, `running_summary`, `summary_sources`, `iteration`, `phase`, `final_answer`, `error`, `pending_destructive`. Supporting shapes: `Plan`, `PlanStep`, `Artifact`, `Fact`, `ReviewResult`, `ToolCallRecord`, `IterationCounters`. The counters (`executor_turns`, `review_cycles`, `revision_cycles`, `summaries`, `replans`) are what cap the loops.
+`AgentState` is the `TypedDict` that flows through the graph. Key fields: `user_query`, `search_query`, `plan`, `current_step_index`, `candidate_tools`, `tool_discovery_cache`, `artifacts`, `tool_calls`, `facts`, `draft_answer`, `draft_kind`, `review`, `review_feedback`, `running_summary`, `summary_sources`, `iteration`, `phase`, `final_answer`, `error`, `pending_destructive`. Supporting shapes: `Plan`, `PlanStep`, `Artifact`, `Fact`, `ReviewResult`, `ToolCallRecord`, `IterationCounters`. The counters (`executor_turns`, `review_cycles`, `revision_cycles`, `explore_cycles`, `summaries`, `replans`, `no_progress_turns`, `useful_artifacts_seen`) are what cap and short-circuit the loops.
 
 ### 5.2 Context assembly — `context/builder.py`
 
@@ -136,6 +142,8 @@ Routing functions are pure functions of state: `route_after_start`, `route_after
 ### 5.3 Truncation and structured facts — `context/truncator.py`
 
 `truncate_tool_result` produces two views of every tool result: a human/LLM-readable `summary` (bounded by `max_artifact_chars`) and a compact `raw_ref` structured reference. Strings, dicts, and lists each have tailored handling (`_truncate_dict`, `_truncate_list`, `_fit_dict_list_items`). `_compact_raw_ref` normally reduces big collections to counts and keys, but `_preserve_structured_fields` keeps a **bounded copy** of recognized structured fields (`facts`, `items`, `rows`, `panels`, `tables`, and nested `data.facts` / `display.tables`) so the fact extractor can use them. `_fit_structured_value` enforces the size bound and, critically, drops a single oversized item rather than exceeding budget. `extract_source_ref` pulls citation metadata; `make_artifact_id` fingerprints content for stable ids.
+
+**Truncate only to fit, never below.** `_truncate_dict` keeps string fields **verbatim** and clips them (largest-first, down to `max_string_field_chars`) *only* when the whole payload exceeds `max_artifact_chars` — so a small result whose one field happens to be long is not needlessly truncated. The fact extractor's per-fact cap is the separate, configurable `max_fact_chars` (generous by default), and a total-facts budget derived from `max_context_tokens` bounds the aggregate. Together these mean small/medium results survive whole into synthesis, while pathologically large ones stay bounded.
 
 ### 5.4 Scoring — `context/scorer.py`
 
@@ -151,7 +159,11 @@ Tool discovery is two-tier: a **semantic search** tool on the MCP server (`SEMAN
 
 Configuration is a two-layer system. `runtime_schema.py` holds **pydantic validation models** (`AgentConfigModel` and friends) with `extra="forbid"` and per-field bounds — this is the strict gate that rejects unknown keys and out-of-range values. `config.py` holds the **runtime dataclasses** (`AgentConfig`, `AgentPolicy`, and the sub-policies `TruncationPolicy`, `ToolPolicy`, `PlannerDefaults`, `ReviewerDefaults`, `ExecutorDefaults`, `FinalizerDefaults`, `SummaryDefaults`, `RouterDefaults`, `ContextLimits`).
 
-`parse_agent_config` validates raw input, resolves `${ENV_VAR}` placeholders, and coerces values into the dataclasses. `load_agent_config` reads a YAML/JSON file. `merge_agent_config` applies runtime overrides onto a base config (used by the runtime-bundle API). `AgentConfig.signature` produces a **stable, secret-free hash** of the whole config that keys the graph/provider caches. `AgentConfig.prompt_text` resolves a role's system prompt (inline text or a prompt file).
+`parse_agent_config` validates raw input, resolves `${ENV_VAR}` placeholders, and coerces values into the dataclasses. `load_agent_config` reads a YAML/JSON file. `merge_agent_config` applies runtime overrides onto a base config (used by the runtime-bundle API). `AgentConfig.signature` produces a **stable, secret-free hash** of the whole config that keys the graph/provider caches. `AgentConfig.prompt_text` resolves a role's system prompt (inline text or a prompt file). `AgentConfig.safe_dict` returns a JSON-safe view (full policy via `dataclasses.asdict`, credentials redacted) for inspection endpoints.
+
+### 5.7 Exploration profiles (quick / heavy modes) — `exploration_profile.py`
+
+An **exploration profile** is a named preset that reshapes the pipeline for a workload without new config files. `resolve_exploration_profile` picks the mode from the request's `runtime_context.exploration_profile`, else the `DEFAULT_EXPLORATION_PROFILE` env var, else `quick`. `profile_policy_overrides` loads the preset (`agents/profiles/quick-read.yaml` or `heavy-explore.yaml`) and `apply_exploration_profile_to_overrides` deep-merges it into the request's runtime overrides. **Precedence is default config < mode profile < explicit caller overrides** — the profile is the mode baseline, but any key the caller set explicitly still wins. `validate_runtime_context_profile` rejects an invalid profile value. `quick` favors low latency (fast path on, no re-exploration, on-risk review); `heavy` favors depth (planner + always-review, higher explore/iteration/no-progress caps, larger truncation and output budgets). Because the merged config changes the signature, each mode caches its own graph/providers, isolated.
 
 A notable design detail: nested toggles like `planner.enabled` and `reviewer.max_cycles` default to `None` in the schema so that flat aliases (`enable_planner`, `max_review_cycles`) are honored with clear precedence — nested wins only when explicitly set.
 
@@ -177,7 +189,9 @@ When enabled (`cross_turn_artifact_persistence`), `CrossTurnArtifactStore` saves
 
 ### 5.12 The HTTP layer — `api/`
 
-`api/routes.py` exposes the endpoints under `/api/agent-workflow`. `api/runtime.py` resolves the right engine for a request (by config name/path/inline config/runtime bundle) and drives streaming. `api/sse_adapter.py` (`engine_event_to_sse`, `_ACTIVITY_FIELDS`, `sse_encode`) converts internal events into Server-Sent Events, keeping only whitelisted fields. `RunRequestModel` and the request schemas validate all input.
+`api/routes.py` exposes the endpoints under `/api/agent-workflow`. `api/runtime.py` resolves the right engine for a request (by config name/path/inline config/runtime bundle), applies the resolved exploration profile to the overrides, and drives streaming; the streamed `meta` event reports the resolved profile. `api/sse_adapter.py` (`engine_event_to_sse`, `_ACTIVITY_FIELDS`, `sse_encode`) converts internal events into Server-Sent Events, keeping only whitelisted fields. `RunRequestModel` and the request schemas validate all input.
+
+**Action controller — `api/action_controller.py`.** A `/api/agent-workflow/actions` endpoint for per-stage testing (Postman/manual). It runs one isolated stage per call — config load/signature, request validation, initial state, fast-path check, follow-up query/policy, exploration-profile resolve/apply, markdown parsing, truncation/scoring, graph routing, `should_compact`, tool search/call, or any single node (`node.planner` … `node.finalizer`) — against scripted mock providers (`_ActionLlm`, `_ActionTools`) unless `use_real_providers` is set. `actions.list` enumerates the supported actions. This is how you exercise a single node's behavior in isolation without running the whole graph.
 
 ---
 
@@ -235,7 +249,9 @@ The service is tuned for **cost and stability**, not just raw speed. The main le
 - **Native tool calling with prefetch.** Saves the separate search round-trip when the model supports it.
 - **Tool discovery cache + catalog TTL.** Repeated searches and tool listings are free within a turn / TTL window.
 - **Bounded loops everywhere.** Executor iterations, review cycles, revision cycles, explore (re-exploration) cycles, and summarizer cycles are all capped; the graph physically cannot spiral.
+- **Stagnation early stop.** Beyond the hard caps, `_update_no_progress` stops exploration once tool work stops yielding useful new evidence (`max_no_progress_turns` / `min_progress_score`) — turning safety caps into an efficiency stop, generically and with no app heuristics.
 - **Reviewer-driven re-exploration.** When review reports missing evidence, the run re-enters the executor to gather more (evidence-revise) instead of rewriting from the same facts — bounded by `max_explore_cycles`, so autonomous exploration cannot loop forever.
+- **Exploration profiles.** A per-request quick/heavy mode reshapes latency-vs-depth without new deployments (`exploration_profile.py`).
 - **In-loop memory compaction.** Trades one summarizer call for freed context so long investigations stay within budget instead of dropping evidence.
 - **Cross-turn artifact reuse.** Follow-ups can skip re-running tools by loading persisted evidence.
 

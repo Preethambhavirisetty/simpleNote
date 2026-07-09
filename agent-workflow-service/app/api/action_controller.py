@@ -9,6 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
 from app.agent_workflow.context import extract_source_ref, make_artifact_id, score_artifact, truncate_tool_result
+from app.agent_workflow.exploration_profile import (
+    apply_exploration_profile_to_overrides,
+    resolve_exploration_profile,
+)
 from app.agent_workflow.context.builder import ContextBuilder
 from app.agent_workflow.follow_up import build_search_query, resolve_follow_up_policy
 from app.agent_workflow.graph import (
@@ -57,6 +61,8 @@ _ACTIONS = {
     "engine.can_fast_path",
     "follow_up.build_search_query",
     "follow_up.resolve_policy",
+    "profile.resolve",
+    "profile.apply",
     "parse.plan",
     "parse.executor_action",
     "parse.review",
@@ -271,6 +277,21 @@ def _dispatch(payload: AgentWorkflowActionRequest) -> dict[str, Any]:
             require_tool_on_follow_up=bool(data.get("require_tool_on_follow_up", config.policy.require_tool_on_follow_up)),
         )
         return {"policy": policy.__dict__ | {"required_tools": sorted(policy.required_tools)}}
+
+    if action == "profile.resolve":
+        mode = resolve_exploration_profile(
+            dict(payload.runtime_context or {}),
+            env_default=str(data["env_default"]) if data.get("env_default") is not None else None,
+        )
+        return {"exploration_profile": mode}
+    if action == "profile.apply":
+        overrides = dict(data.get("overrides") if isinstance(data.get("overrides"), dict) else (payload.runtime_overrides or {}))
+        mode = apply_exploration_profile_to_overrides(
+            overrides,
+            dict(payload.runtime_context or {}),
+            env_default=str(data["env_default"]) if data.get("env_default") is not None else None,
+        )
+        return {"exploration_profile": mode, "overrides": overrides}
 
     if action == "parse.plan":
         return {"plan": dict(parse_plan_markdown(str(data.get("text") or "")))}
