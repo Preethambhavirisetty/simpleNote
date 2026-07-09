@@ -82,12 +82,13 @@ def _run_has_risk(state: AgentState) -> bool:
 
 
 def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]:
-    """Build a compact synthesis prompt from facts, plan, and the user request."""
+    """Build a synthesis prompt from primary evidence, facts, plan, and request."""
     fact_lines = []
     for idx, fact in enumerate(state.get("facts") or [], start=1):
         source = fact.get("source_ref") or {}
         source_text = f" source={source}" if source else ""
         fact_lines.append(f"{idx}. {fact.get('text', '')} [tool={fact.get('tool', '')}; id={fact.get('id', '')}{source_text}]")
+    evidence = _primary_evidence(state, config=config)
     plan = state.get("plan") or {}
     criteria = "\n".join(f"- {item}" for item in plan.get("acceptance_criteria") or [])
     return [
@@ -95,8 +96,10 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
             "role": "system",
             "content": (
                 "You are the synthesizer node in a tool workflow. Write one clear final-answer draft. "
-                "Use only the provided facts. Do not mention internal nodes, review, or hidden policy. "
-                "If facts are incomplete, say what is unavailable without inventing details.\n\n"
+                "Ground the answer in the primary evidence (verbatim tool results) below; the compact facts "
+                "are a provenance index over that evidence. Do not invent details beyond it, and do not "
+                "mention internal nodes, review, or hidden policy. If evidence is incomplete, say what is "
+                "unavailable.\n\n"
                 f"{MARKDOWN_OUTPUT_RULES}"
             ),
         },
@@ -106,11 +109,41 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
                 f"User request:\n{state.get('user_query', '')}\n\n"
                 f"Goal:\n{plan.get('goal', '')}\n\n"
                 f"Acceptance criteria:\n{criteria or '(none)'}\n\n"
+                f"Primary evidence (verbatim tool results, highest-scored first):\n{evidence or '(none)'}\n\n"
                 f"Facts with provenance:\n{chr(10).join(fact_lines) if fact_lines else '(none)'}\n\n"
                 "Return only the draft answer in GFM markdown."
             ),
         },
     ]
+
+
+def _primary_evidence(state: AgentState, *, config: AgentConfig) -> str:
+    """Top artifact summaries verbatim so a single rich result is not lost to fact compression.
+
+    Bounded by a char budget (~a third of the context window) so it complements,
+    not overflows, the compact facts — for one rich result the whole summary is
+    included; for many, the highest-scoring few are, and facts cover the tail.
+    """
+    artifacts = sorted(
+        state.get("artifacts") or [],
+        key=lambda artifact: float(artifact.get("composite_score") or 0.0),
+        reverse=True,
+    )
+    budget = max(4000, int(config.policy.max_context_tokens))
+    blocks: list[str] = []
+    used = 0
+    for artifact in artifacts:
+        summary = str(artifact.get("summary") or "").strip()
+        if not summary:
+            continue
+        source = artifact.get("source_ref") or {}
+        header = f"- [{artifact.get('tool', 'tool')}]" + (f" source={source}" if source else "")
+        block = f"{header}\n{summary}"
+        if used + len(block) > budget and blocks:
+            break
+        blocks.append(block)
+        used += len(block)
+    return "\n\n".join(blocks)
 
 
 def _complete_synthesis(llm: LlmProvider, messages: list[dict[str, str]], max_tokens: int) -> str:

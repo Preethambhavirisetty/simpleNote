@@ -161,14 +161,35 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
                 }
             )
         elif step == "fact_extractor.completed":
+            tools = entry.get("tools") or []
+            preview = entry.get("preview") or []
+            source_text = f" from {', '.join(tools)}" if tools else ""
+            example = f" — e.g. “{preview[0]}”" if preview else ""
             events.append(
                 {
                     "type": "agent_activity",
                     "phase": "fact_extraction",
-                    "label": f"Extracted {entry.get('fact_count', 0)} fact(s) from {entry.get('artifact_count', 0)} artifact(s)",
+                    "label": (
+                        f"Distilled {entry.get('fact_count', 0)} key fact(s) from "
+                        f"{entry.get('artifact_count', 0)} result(s){source_text}{example}"
+                    ),
                     "fact_count": entry.get("fact_count", 0),
                     "artifact_count": entry.get("artifact_count", 0),
                     "truncated_source_count": entry.get("truncated_source_count", 0),
+                    "tools": tools,
+                    "preview": preview,
+                }
+            )
+        elif step == "executor.no_progress_stop":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "completed",
+                    "label": (
+                        f"No new evidence in the last {entry.get('no_progress_turns', 0)} turn(s); "
+                        f"answering with {entry.get('useful_artifacts', 0)} useful result(s)"
+                    ),
+                    "handoff": entry.get("handoff"),
                 }
             )
         elif step == "summarizer.completed":

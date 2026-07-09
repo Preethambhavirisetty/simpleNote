@@ -186,6 +186,8 @@ class AgentPolicyModel(BaseModel):
     # 0 disables re-exploration (REVISE then only routes to text revision).
     max_explore_cycles: int = Field(1, ge=0, le=10)
     max_tool_calls_per_step: int = Field(4, ge=1, le=20)
+    max_no_progress_turns: int = Field(3, ge=0, le=20)
+    min_progress_score: float = Field(0.15, ge=0.0, le=1.0)
     max_context_tokens: int = Field(12000, ge=1000, le=200000)
     llm_timeout_seconds: float = Field(60.0, ge=1.0, le=600.0)
     tool_timeout_seconds: float = Field(120.0, ge=1.0, le=1800.0)

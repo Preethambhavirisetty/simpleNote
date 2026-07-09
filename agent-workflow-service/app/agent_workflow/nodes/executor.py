@@ -88,6 +88,37 @@ def _step_call_signatures_and_count(state: AgentState, step_index: int) -> tuple
     return signatures, count
 
 
+def _update_no_progress(state: AgentState, iteration: dict[str, Any], config: AgentConfig) -> tuple[bool, dict[str, Any]]:
+    """Track score-based progress and signal an early stop when exploration stalls.
+
+    Generic and app-agnostic: "progress" is a new artifact scoring at least
+    ``min_progress_score``. If ``max_no_progress_turns`` consecutive turns add
+    none, the executor should stop exploring and answer with what it already has.
+    Search turns do not create tool calls, so pre-call setup is not counted.
+    """
+    cap = int(config.policy.max_no_progress_turns)
+    if cap <= 0:
+        return False, iteration
+    threshold = float(config.policy.min_progress_score)
+    useful = sum(
+        1
+        for artifact in (state.get("artifacts") or [])
+        if float(artifact.get("composite_score") or 0.0) >= threshold
+    )
+    last_useful = int(iteration.get("useful_artifacts_seen") or 0)
+    iteration["useful_artifacts_seen"] = useful
+    # Only count stalls once the agent has actually attempted a tool call.
+    if not state.get("tool_calls"):
+        iteration["no_progress_turns"] = 0
+        return False, iteration
+    if useful > last_useful:
+        iteration["no_progress_turns"] = 0
+        return False, iteration
+    no_progress = int(iteration.get("no_progress_turns") or 0) + 1
+    iteration["no_progress_turns"] = no_progress
+    return no_progress >= cap, iteration
+
+
 def _cache_key(query: str) -> str:
     """Normalize a query into a short stable cache key."""
     return " ".join(query.lower().split())[:300]
@@ -587,6 +618,23 @@ def executor_node(
             "phase": "fact_extracting",
             "iteration": iteration,
             "events": [{"step": "executor.iteration_limit", "handoff": "fact_extractor"}],
+        }
+
+    # Generic early stop: once tool work stops producing useful new evidence,
+    # stop exploring and answer with what we have rather than burning the budget.
+    stalled, iteration = _update_no_progress(state, iteration, config)
+    if stalled:
+        return {
+            "phase": "fact_extracting",
+            "iteration": iteration,
+            "events": [
+                {
+                    "step": "executor.no_progress_stop",
+                    "handoff": "fact_extractor",
+                    "no_progress_turns": int(iteration.get("no_progress_turns") or 0),
+                    "useful_artifacts": int(iteration.get("useful_artifacts_seen") or 0),
+                }
+            ],
         }
 
     plan = state.get("plan") or {}

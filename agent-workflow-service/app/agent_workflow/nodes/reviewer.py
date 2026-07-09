@@ -17,15 +17,6 @@ _VERDICTS = {"APPROVE", "REVISE", "REJECT"}
 _REVIEW_LIST_KEYS = ("issues", "missing_evidence", "required_changes")
 
 
-def _successful_tools(state: AgentState) -> set[str]:
-    """Return tools that completed successfully in this workflow turn."""
-    return {
-        str(record.get("name") or "")
-        for record in (state.get("tool_calls") or [])
-        if str(record.get("status") or "") == "ok" and record.get("name")
-    }
-
-
 def _formatting_gaps(draft: str) -> list[str]:
     """Flag user-facing answers that lack basic markdown structure."""
     text = (draft or "").strip()
@@ -39,40 +30,61 @@ def _formatting_gaps(draft: str) -> list[str]:
     return ["Format the answer as GFM markdown with a ## heading and bullet lists or tables"]
 
 
+_EMPTY_CLAIM_PHRASES = (
+    "no results",
+    "no items",
+    "no records",
+    "no matches",
+    "no data",
+    "no entries",
+    "none found",
+    "nothing found",
+    "returned nothing",
+    "not find any",
+    "couldn't find any",
+    "could not find any",
+    "empty result",
+)
+
+
 def _completion_gaps(state: AgentState) -> list[str]:
-    """Run deterministic checks before accepting an APPROVE verdict."""
-    gaps: list[str] = []
-    query = str(state.get("user_query") or "").lower()
-    successful = _successful_tools(state)
-    artifacts = state.get("artifacts") or []
-    artifact_tools = {str(artifact.get("tool") or "") for artifact in artifacts if artifact.get("tool")}
-    draft = str(state.get("draft_answer") or "")
+    """Generic deterministic EVIDENCE gaps (missing tool data) before an APPROVE.
 
-    card_intent = any(token in query for token in ("card", "cards", "trello"))
-    if card_intent:
-        if "list_boards" in successful and "get_cards" not in successful:
-            gaps.append("list_boards succeeded but get_cards was never called with a board_id or board_name")
-        elif "get_cards" not in successful and ("board" in query or "trello" in query):
-            gaps.append("User asked about Trello cards but get_cards evidence is missing")
+    App-agnostic: it surfaces only follow-up recall gaps — evidence the turn
+    needs but has not gathered. These go to missing_evidence and can trigger a
+    bounded re-exploration. All app-specific tool heuristics were removed;
+    completeness is otherwise the reviewer LLM's judgment.
+    """
+    return list(follow_up_approval_gaps(state))
 
-    for artifact in artifacts:
-        if str(artifact.get("tool") or "") != "get_cards":
-            continue
+
+def _contradiction_gaps(state: AgentState) -> list[str]:
+    """Flag a draft that claims nothing was found while a tool actually returned data.
+
+    Generic: it does not name any tool. This is a synthesis error — the evidence
+    exists — so it is a text-revise (rewrite), not missing evidence.
+    """
+    draft = str(state.get("draft_answer") or "").lower()
+    if not any(phrase in draft for phrase in _EMPTY_CLAIM_PHRASES):
+        return []
+    for artifact in state.get("artifacts") or []:
         raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
         total = raw_ref.get("total")
-        if isinstance(total, int) and total > 0 and any(
-            phrase in draft.lower() for phrase in ("0 card", "no card", "zero card", "none found")
-        ):
-            gaps.append(f"get_cards returned {total} item(s) but the draft answer claims there are no cards")
+        has_data = (
+            (isinstance(total, int) and total > 0)
+            or bool(raw_ref.get("items"))
+            or bool(raw_ref.get("facts"))
+            or bool(raw_ref.get("rows"))
+        )
+        if has_data:
+            return [f"{artifact.get('tool', 'a tool')} returned results, but the draft says nothing was found — use that evidence"]
+    return []
 
-    dashboard_intent = any(token in query for token in ("dashboard", "dashboards", "splunk"))
-    if dashboard_intent and "list_dashboards" in successful and "list_dashboards" not in artifact_tools:
-        gaps.append("list_dashboards was called but no grounded dashboard artifact is available")
 
-    gaps.extend(follow_up_approval_gaps(state))
-    # NOTE: formatting gaps are handled separately in reviewer_node — they are a
-    # wording fix (text-revise), not missing evidence, so they must not land in
-    # missing_evidence or they would wrongly trigger re-exploration.
+def _synthesis_gaps(state: AgentState) -> list[str]:
+    """Deterministic REWRITE-fixable gaps: fixable from existing facts, not new tools."""
+    gaps = _contradiction_gaps(state)
+    gaps.extend(_formatting_gaps(str(state.get("draft_answer") or "")))
     return gaps
 
 
@@ -164,19 +176,21 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         verdict = "REVISE"
     review["verdict"] = verdict
 
+    # Evidence gaps (missing tool data) can trigger bounded re-exploration, so
+    # they land in missing_evidence. Synthesis gaps (contradiction, formatting)
+    # are fixable from existing facts, so they go only to required_changes and
+    # route to text-revision — never to re-exploration.
     completion_gaps = _completion_gaps(state) if verdict == "APPROVE" else []
-    # Formatting gaps are wording fixes, not missing evidence: they go only to
-    # required_changes so they route to text-revision, never to re-exploration.
-    formatting_gaps = _formatting_gaps(str(state.get("draft_answer") or "")) if verdict == "APPROVE" else []
+    synthesis_gaps = _synthesis_gaps(state) if verdict == "APPROVE" else []
     if completion_gaps:
         verdict = "REVISE"
         review["verdict"] = "REVISE"
         review["missing_evidence"] = list(dict.fromkeys((review.get("missing_evidence") or []) + completion_gaps))
         review["required_changes"] = list(dict.fromkeys((review.get("required_changes") or []) + completion_gaps))
-    if formatting_gaps:
+    if synthesis_gaps:
         verdict = "REVISE"
         review["verdict"] = "REVISE"
-        review["required_changes"] = list(dict.fromkeys((review.get("required_changes") or []) + formatting_gaps))
+        review["required_changes"] = list(dict.fromkeys((review.get("required_changes") or []) + synthesis_gaps))
 
     updates: dict[str, Any] = {"review": review, "iteration": iteration}
     re_explored = False

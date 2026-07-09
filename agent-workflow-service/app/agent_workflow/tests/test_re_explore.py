@@ -186,6 +186,56 @@ def test_same_tool_different_args_is_allowed():
     assert not any(e.get("step") == "executor.duplicate_tool_skipped" for e in updates["events"])
 
 
+class _FinishLlm:
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        return '{"action":"finish_step"}'
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_executor_stops_when_exploration_stalls():
+    # Generic no-progress early stop: a tool ran but produced no useful (above
+    # threshold) new artifact, so the executor hands off instead of looping.
+    config = _config(max_no_progress_turns=1, min_progress_score=0.5)
+    state = {
+        "user_query": "q",
+        "phase": "executing",
+        "iteration": {"executor_turns": 1, "useful_artifacts_seen": 0, "no_progress_turns": 0},
+        "current_step_index": 0,
+        "plan": {"goal": "g", "steps": [{"title": "s", "action": "a"}]},
+        "candidate_tools": [],
+        "tool_discovery_cache": {},
+        "tool_calls": [{"name": "t", "status": "ok", "step_index": 0, "replan_id": 0}],
+        "artifacts": [{"id": "a", "tool": "t", "composite_score": 0.2, "step_index": 0}],  # below 0.5 threshold
+        "events": [],
+    }
+    updates = executor_node(state, config=config, llm=_FinishLlm(), tools=_PanelTools())
+
+    assert updates["phase"] == "fact_extracting"
+    assert any(event.get("step") == "executor.no_progress_stop" for event in updates["events"])
+
+
+def test_executor_continues_when_useful_evidence_appears():
+    # A new useful artifact resets the stall counter, so the run keeps going.
+    config = _config(max_no_progress_turns=1, min_progress_score=0.2)
+    state = {
+        "user_query": "q",
+        "phase": "executing",
+        "iteration": {"executor_turns": 1, "useful_artifacts_seen": 0, "no_progress_turns": 0},
+        "current_step_index": 0,
+        "plan": {"goal": "g", "steps": [{"title": "s", "action": "a"}]},
+        "candidate_tools": [],
+        "tool_discovery_cache": {},
+        "tool_calls": [{"name": "t", "status": "ok", "step_index": 0, "replan_id": 0}],
+        "artifacts": [{"id": "a", "tool": "t", "composite_score": 0.8, "step_index": 0}],  # useful
+        "events": [],
+    }
+    updates = executor_node(state, config=config, llm=_FinishLlm(), tools=_PanelTools())
+
+    assert not any(event.get("step") == "executor.no_progress_stop" for event in updates["events"])
+
+
 def test_same_tool_same_args_is_skipped():
     config = _config()
     tools = _PanelTools()

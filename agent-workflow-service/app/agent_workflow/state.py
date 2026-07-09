@@ -82,6 +82,8 @@ class IterationCounters(TypedDict, total=False):
     replans: int
     summaries: int
     explore_cycles: int  # reviewer-driven re-entries to the executor to gather missing evidence
+    no_progress_turns: int  # consecutive executor turns that added no useful new artifact
+    useful_artifacts_seen: int  # last observed count of artifacts above min_progress_score
 
 
 class AgentState(TypedDict, total=False):

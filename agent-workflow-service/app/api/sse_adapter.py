@@ -28,6 +28,8 @@ _ACTIVITY_FIELDS = (
     "answer_chars",
     "revision_cycles",
     "truncated_source_count",
+    "preview",
+    "artifact_count",
 )
 
 

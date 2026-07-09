@@ -196,6 +196,12 @@ class AgentPolicy:
     # only ever routes a REVISE to the text-revision node.
     max_explore_cycles: int = 1
     max_tool_calls_per_step: int = 4
+    # Stagnation / no-progress early stop (generic, score-based). If this many
+    # consecutive tool-calling turns add no new artifact scoring at least
+    # min_progress_score, the executor stops exploring and answers with what it
+    # has. 0 disables the early stop (only the hard iteration cap applies).
+    max_no_progress_turns: int = 3
+    min_progress_score: float = 0.15
     max_context_tokens: int = 12000
     llm_timeout_seconds: float = 60.0
     tool_timeout_seconds: float = 120.0
@@ -372,6 +378,8 @@ class AgentConfig:
                 "max_review_cycles": policy.max_review_cycles,
                 "max_explore_cycles": policy.max_explore_cycles,
                 "max_tool_calls_per_step": policy.max_tool_calls_per_step,
+                "max_no_progress_turns": policy.max_no_progress_turns,
+                "min_progress_score": policy.min_progress_score,
                 "max_context_tokens": policy.max_context_tokens,
                 "llm_timeout_seconds": policy.llm_timeout_seconds,
                 "tool_timeout_seconds": policy.tool_timeout_seconds,
@@ -506,6 +514,8 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         max_review_cycles=review_max_cycles,
         max_explore_cycles=_as_int(policy_raw.max_explore_cycles, 1),
         max_tool_calls_per_step=_as_int(policy_raw.max_tool_calls_per_step, 4),
+        max_no_progress_turns=_as_int(policy_raw.max_no_progress_turns, 3),
+        min_progress_score=_as_float(policy_raw.min_progress_score, 0.15),
         max_context_tokens=_as_int(policy_raw.max_context_tokens, 12000),
         llm_timeout_seconds=_as_float(policy_raw.llm_timeout_seconds, 60.0),
         tool_timeout_seconds=_as_float(policy_raw.tool_timeout_seconds, 120.0),
@@ -755,6 +765,8 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "max_review_cycles": base.policy.max_review_cycles,
             "max_explore_cycles": base.policy.max_explore_cycles,
             "max_tool_calls_per_step": base.policy.max_tool_calls_per_step,
+            "max_no_progress_turns": base.policy.max_no_progress_turns,
+            "min_progress_score": base.policy.min_progress_score,
             "max_context_tokens": base.policy.max_context_tokens,
             "llm_timeout_seconds": base.policy.llm_timeout_seconds,
             "tool_timeout_seconds": base.policy.tool_timeout_seconds,

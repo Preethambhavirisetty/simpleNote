@@ -191,6 +191,39 @@ def test_single_oversized_structured_item_does_not_exceed_budget():
     assert len(_json.dumps(ref, default=str)) < _MAX_STRUCTURED_REF_CHARS
 
 
+def test_synthesizer_includes_primary_evidence_verbatim():
+    # Fix for the lossy fact round-trip: a single rich result reaches the
+    # synthesizer as a verbatim summary, not just a re-clipped fact.
+    from app.agent_workflow.nodes.synthesizer import _messages
+
+    config = _config()
+    rich = "x" * 1500
+    state = {
+        "user_query": "q",
+        "facts": [{"text": "short compact fact", "tool": "report", "id": "f1"}],
+        "artifacts": [{"tool": "report", "summary": rich, "composite_score": 0.9, "source_ref": {"doc_id": "d1"}}],
+        "plan": {"goal": "g"},
+    }
+    user = _messages(state, config=config)[1]["content"]
+    assert "Primary evidence" in user
+    assert rich in user  # full summary present, not truncated into a tiny fact
+    assert "doc_id" in user
+
+
+def test_fact_extractor_event_reports_tools_and_preview():
+    config = _config()
+    state = {
+        "artifacts": [
+            {"id": "a1", "tool": "get_dashboard", "summary": "- panel count = 16", "raw_ref": {"type": "object"}, "composite_score": 0.9}
+        ]
+    }
+    out = fact_extractor_node(state, config=config)
+    event = out["events"][0]
+    assert event["step"] == "fact_extractor.completed"
+    assert "get_dashboard" in event["tools"]
+    assert event["preview"] and "panel count" in event["preview"][0]
+
+
 def test_fact_extractor_respects_configured_max_fact_chars():
     # A long single-line summary must survive up to the configured per-fact cap
     # (document.yaml -> default 2000), not the old hardcoded 500-char clip.

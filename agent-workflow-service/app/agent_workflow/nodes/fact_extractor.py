@@ -33,10 +33,11 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
     artifacts = list(state.get("artifacts") or [])
     max_fact_chars = int(config.policy.truncation.max_fact_chars)
     # Total facts budget bounds the (otherwise un-budgeted) synthesizer prompt so
-    # generous per-fact limits cannot overflow the model's context window. Facts
-    # are held to roughly half the window (~2 chars/token here), leaving room for
-    # the rest of the prompt and the model's own output.
-    max_total_fact_chars = max(8000, int(config.policy.max_context_tokens) * 2)
+    # generous per-fact limits cannot overflow the model's context window. The
+    # synthesizer also includes verbatim primary-evidence summaries under its own
+    # budget, so facts get ~a third of the window here and the two together stay
+    # comfortably inside it.
+    max_total_fact_chars = max(4000, int(config.policy.max_context_tokens))
     facts = _extract_facts(
         artifacts,
         max_facts=config.policy.context.max_artifacts_in_prompt * 3,
@@ -58,6 +59,8 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
                 "truncated_source": False,
             }
         ]
+    tools = sorted({str(fact.get("tool") or "") for fact in facts if fact.get("tool")})
+    preview = [str(fact.get("text") or "").strip()[:140] for fact in facts[:3] if str(fact.get("text") or "").strip()]
     return {
         "facts": facts,
         "phase": "synthesizing",
@@ -67,6 +70,8 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
                 "fact_count": len(facts),
                 "artifact_count": len(artifacts),
                 "truncated_source_count": sum(1 for fact in facts if fact.get("truncated_source")),
+                "tools": tools,
+                "preview": preview,
             }
         ],
     }

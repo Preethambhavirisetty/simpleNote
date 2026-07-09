@@ -611,7 +611,10 @@ def test_executor_validates_discovered_tool_schema_before_calling():
     assert "missing required argument: query" in updates["tool_calls"][-1]["error"]
 
 
-def test_reviewer_blocks_approve_when_trello_cards_missing():
+def test_reviewer_blocks_approve_when_draft_contradicts_evidence():
+    # Generic (app-agnostic) completion check: a tool returned data but the draft
+    # claims nothing was found. The evidence already exists, so this is a
+    # text-revise (rewrite), not a re-exploration.
     from pathlib import Path
 
     from app.agent_workflow.config import load_agent_config
@@ -623,31 +626,27 @@ def test_reviewer_blocks_approve_when_trello_cards_missing():
         def complete(self, messages, *, max_tokens: int = 1024) -> str:
             return (
                 "### Verdict\nAPPROVE\n### Issues found\nNone\n### Missing evidence\nNone\n"
-                "### Required changes\nNone\n### Approved answer\nThere are 0 cards on the board."
+                "### Required changes\nNone\n### Approved answer\nNo results were found."
             )
 
         def stream(self, messages, *, max_tokens: int = 1024):
             yield self.complete(messages, max_tokens=max_tokens)
 
     state = {
-        "user_query": "How many cards are on my Trello board?",
+        "user_query": "list my open items",
         "phase": "reviewing",
         "iteration": {"review_cycles": 0},
-        "draft_answer": "There are 0 cards on the board.",
-        "artifacts": [],
-        "tool_calls": [{"name": "list_boards", "status": "ok"}],
+        "draft_answer": "No results were found.",
+        "artifacts": [{"id": "a1", "tool": "search", "raw_ref": {"type": "list", "total": 5}}],
+        "tool_calls": [{"name": "search", "status": "ok"}],
     }
 
     updates = reviewer_node(state, config=config, llm=ApproveReviewerLlm())
 
-    # The gap is missing tool evidence (get_cards was never called), so this is an
-    # evidence-revise: the reviewer re-enters the executor to gather it rather than
-    # rewriting the draft from the same facts.
     assert updates["review"]["verdict"] == "REVISE"
-    assert updates["phase"] == "executing"
-    assert updates["iteration"]["explore_cycles"] == 1
-    assert any("get_cards" in item for item in updates["review"].get("required_changes") or [])
-    assert updates["plan"]["steps"][-1]["title"] == "Gather missing evidence"
+    assert updates["phase"] == "revising"  # data exists -> text-revise, not re-explore
+    assert not updates["review"].get("missing_evidence")
+    assert any("returned results" in item for item in updates["review"].get("required_changes") or [])
 
 
 class DuplicateToolLlm(LlmProvider):
