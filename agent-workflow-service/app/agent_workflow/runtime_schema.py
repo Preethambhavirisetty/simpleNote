@@ -52,9 +52,12 @@ class TruncationPolicyModel(BaseModel):
     """Validation model for artifact truncation settings."""
     model_config = ConfigDict(extra="forbid")
 
-    max_artifact_chars: int = Field(2500, ge=200, le=20000)
-    max_string_field_chars: int = Field(400, ge=200, le=20000)
-    max_list_rows_visible: int = Field(100, ge=1, le=5000)
+    # Ceilings are generous so high-resource deployments can raise budgets
+    # (e.g. large report/table tools) without hitting validation limits.
+    max_artifact_chars: int = Field(2500, ge=200, le=200000)
+    max_string_field_chars: int = Field(400, ge=200, le=200000)
+    max_fact_chars: int = Field(2000, ge=200, le=200000)
+    max_list_rows_visible: int = Field(100, ge=1, le=50000)
     dict_list_budget_reserve: int = Field(96, ge=0, le=1000)
     dict_list_min_budget: int = Field(200, ge=50, le=10000)
     score_weights: dict[str, float] = Field(default_factory=dict)

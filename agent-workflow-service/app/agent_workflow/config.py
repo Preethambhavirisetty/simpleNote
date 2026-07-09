@@ -76,6 +76,11 @@ class TruncationPolicy:
     """Runtime settings for trimming and scoring artifacts."""
     max_artifact_chars: int = 2500
     max_string_field_chars: int = 400
+    # Per-fact character cap used by the deterministic fact extractor. Generous
+    # by default so a small/medium tool result is not re-truncated into tiny
+    # facts after it already fit the artifact budget; raise it for text/report
+    # tools whose single answer should survive whole into synthesis.
+    max_fact_chars: int = 2000
     max_list_rows_visible: int = 100
     dict_list_budget_reserve: int = 96
     dict_list_min_budget: int = 200
@@ -398,6 +403,7 @@ class AgentConfig:
                 "truncation": {
                     "max_artifact_chars": policy.truncation.max_artifact_chars,
                     "max_string_field_chars": policy.truncation.max_string_field_chars,
+                    "max_fact_chars": policy.truncation.max_fact_chars,
                     "max_list_rows_visible": policy.truncation.max_list_rows_visible,
                     "dict_list_budget_reserve": policy.truncation.dict_list_budget_reserve,
                     "dict_list_min_budget": policy.truncation.dict_list_min_budget,
@@ -522,6 +528,7 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         truncation=TruncationPolicy(
             max_artifact_chars=_as_int(trunc_raw.max_artifact_chars, 2500),
             max_string_field_chars=_as_int(trunc_raw.max_string_field_chars, 400),
+            max_fact_chars=_as_int(trunc_raw.max_fact_chars, 2000),
             max_list_rows_visible=_as_int(trunc_raw.max_list_rows_visible, 100),
             dict_list_budget_reserve=_as_int(trunc_raw.dict_list_budget_reserve, 96),
             dict_list_min_budget=_as_int(trunc_raw.dict_list_min_budget, 200),
@@ -779,6 +786,7 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "truncation": {
                 "max_artifact_chars": base.policy.truncation.max_artifact_chars,
                 "max_string_field_chars": base.policy.truncation.max_string_field_chars,
+                "max_fact_chars": base.policy.truncation.max_fact_chars,
                 "max_list_rows_visible": base.policy.truncation.max_list_rows_visible,
                 "dict_list_budget_reserve": base.policy.truncation.dict_list_budget_reserve,
                 "dict_list_min_budget": base.policy.truncation.dict_list_min_budget,

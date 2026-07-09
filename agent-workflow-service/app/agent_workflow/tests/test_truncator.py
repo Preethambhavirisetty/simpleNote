@@ -4,6 +4,28 @@ from app.agent_workflow.config import TruncationPolicy
 from app.agent_workflow.context.truncator import truncate_tool_result
 
 
+def test_small_dict_string_field_kept_verbatim_under_budget():
+    # A string field longer than max_string_field_chars but well within the
+    # artifact budget must NOT be pre-clipped — the classic "small result
+    # truncated" bug.
+    policy = TruncationPolicy(max_artifact_chars=6000, max_string_field_chars=1200)
+    summary, _raw, truncated = truncate_tool_result(
+        {"answer": "x" * 2000, "ok": True}, step_query="q", policy=policy
+    )
+    assert truncated is False
+    assert "x" * 2000 in summary
+
+
+def test_large_dict_string_field_clipped_to_fit_budget():
+    # Over budget, the field is clipped and the summary is bounded.
+    policy = TruncationPolicy(max_artifact_chars=3000, max_string_field_chars=1200)
+    summary, _raw, truncated = truncate_tool_result(
+        {"answer": "y" * 20000}, step_query="q", policy=policy
+    )
+    assert truncated is True
+    assert len(summary) <= 3000 + 50
+
+
 def test_truncator_marks_large_lists():
     rows = [{"id": i, "text": "x" * 400} for i in range(20)]
     summary, _raw, truncated = truncate_tool_result(

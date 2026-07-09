@@ -43,7 +43,9 @@ def test_apply_exploration_profile_to_overrides_merges_policy():
     overrides = {"policy": {"max_executor_iterations": 1}}
     mode = apply_exploration_profile_to_overrides(overrides, {"exploration_profile": "heavy"})
     assert mode == "heavy"
-    assert overrides["policy"]["max_executor_iterations"] == 20
+    # Precedence: profile is the mode baseline, but an explicit caller override wins.
+    assert overrides["policy"]["max_executor_iterations"] == 1
+    # Keys the caller did not set are filled from the profile.
     assert overrides["policy"]["max_explore_cycles"] == 3
 
 

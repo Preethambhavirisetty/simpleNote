@@ -180,24 +180,29 @@ def _truncate_text(text: str, max_chars: int) -> str:
 
 
 def _truncate_dict(data: dict[str, Any], step_query: str, policy: TruncationPolicy) -> tuple[dict[str, Any], bool]:
-    """Truncate dict to fit configured context limits."""
+    """Truncate dict to fit configured context limits.
+
+    String fields are kept verbatim and only clipped if the whole payload
+    actually exceeds ``max_artifact_chars`` — so a small result is never
+    truncated just because one field happens to be longer than
+    ``max_string_field_chars``. When over budget, the largest string fields are
+    trimmed first (down to ``max_string_field_chars``), then, if still too big,
+    the payload is narrowed to query-relevant keys.
+    """
     max_chars = policy.max_artifact_chars
     truncated = False
     output: dict[str, Any] = {}
     list_fields: list[tuple[str, list[dict[str, Any]]]] = []
+    string_keys: list[str] = []
     query_terms = set(step_query.lower().split())
 
     for key, value in data.items():
         if isinstance(value, list) and value and isinstance(value[0], dict):
             list_fields.append((key, value))
             continue
-
-        if isinstance(value, str) and len(value) > policy.max_string_field_chars:
-            output[key] = _truncate_text(value, policy.max_string_field_chars)
-            truncated = True
-            continue
-
         output[key] = value
+        if isinstance(value, str):
+            string_keys.append(key)
 
     base_text = json.dumps(output, ensure_ascii=False, indent=2)
     remaining = max(
@@ -214,6 +219,17 @@ def _truncate_dict(data: dict[str, Any], step_query: str, policy: TruncationPoli
             truncated = True
         chunk = json.dumps({key: visible}, ensure_ascii=False, indent=2)
         remaining = max(policy.dict_list_min_budget, remaining - len(chunk))
+
+    # Only now, if the payload is genuinely over budget, clip string fields —
+    # largest first — rather than pre-clipping every field regardless of size.
+    if len(json.dumps(output, ensure_ascii=False, indent=2)) > max_chars:
+        for key in sorted(string_keys, key=lambda k: len(str(output.get(k) or "")), reverse=True):
+            if len(json.dumps(output, ensure_ascii=False, indent=2)) <= max_chars:
+                break
+            value = str(output.get(key) or "")
+            if len(value) > policy.max_string_field_chars:
+                output[key] = _truncate_text(value, policy.max_string_field_chars)
+                truncated = True
 
     text = json.dumps(output, ensure_ascii=False, indent=2)
     if len(text) > max_chars:

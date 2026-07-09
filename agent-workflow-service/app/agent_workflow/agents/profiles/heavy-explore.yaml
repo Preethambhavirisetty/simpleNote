@@ -17,8 +17,17 @@ policy:
     compact_after_artifacts: 12
     keep_after_summary: 8
     max_cycles: 4
+  # Generous output budgets so rich, multi-section answers are not cut off at
+  # the token cap (the finalizer reuses the synthesized prose, so this cap is
+  # effectively the answer-length limit).
+  executor:
+    synthesize_max_tokens: 8000
+  finalizer:
+    max_tokens: 6000
   context:
     max_artifacts_in_prompt: 50
   truncation:
     max_artifact_chars: 15000
+    max_string_field_chars: 8000
+    max_fact_chars: 6000
     max_list_rows_visible: 300

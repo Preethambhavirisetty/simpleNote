@@ -70,7 +70,9 @@ def _completion_gaps(state: AgentState) -> list[str]:
         gaps.append("list_dashboards was called but no grounded dashboard artifact is available")
 
     gaps.extend(follow_up_approval_gaps(state))
-    gaps.extend(_formatting_gaps(draft))
+    # NOTE: formatting gaps are handled separately in reviewer_node — they are a
+    # wording fix (text-revise), not missing evidence, so they must not land in
+    # missing_evidence or they would wrongly trigger re-exploration.
     return gaps
 
 
@@ -163,11 +165,18 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
     review["verdict"] = verdict
 
     completion_gaps = _completion_gaps(state) if verdict == "APPROVE" else []
+    # Formatting gaps are wording fixes, not missing evidence: they go only to
+    # required_changes so they route to text-revision, never to re-exploration.
+    formatting_gaps = _formatting_gaps(str(state.get("draft_answer") or "")) if verdict == "APPROVE" else []
     if completion_gaps:
         verdict = "REVISE"
         review["verdict"] = "REVISE"
         review["missing_evidence"] = list(dict.fromkeys((review.get("missing_evidence") or []) + completion_gaps))
         review["required_changes"] = list(dict.fromkeys((review.get("required_changes") or []) + completion_gaps))
+    if formatting_gaps:
+        verdict = "REVISE"
+        review["verdict"] = "REVISE"
+        review["required_changes"] = list(dict.fromkeys((review.get("required_changes") or []) + formatting_gaps))
 
     updates: dict[str, Any] = {"review": review, "iteration": iteration}
     re_explored = False

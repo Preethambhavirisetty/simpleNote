@@ -68,11 +68,17 @@ def apply_exploration_profile_to_overrides(
     *,
     env_default: str | None = None,
 ) -> ProfileMode:
-    """Deep-merge the resolved exploration preset into runtime overrides."""
+    """Merge the resolved exploration preset UNDER the caller's runtime overrides.
+
+    Precedence is default config < mode profile < explicit caller overrides:
+    the profile sets the baseline for the chosen mode, but any key the caller
+    set explicitly (in a request or runtime bundle) wins, so an explicit tweak
+    is never silently clobbered by the mode preset.
+    """
     mode = resolve_exploration_profile(runtime_context, env_default=env_default)
     preset = profile_policy_overrides(mode)
     if preset:
-        merged = _deep_merge(overrides, preset)
+        merged = _deep_merge(preset, overrides)
         overrides.clear()
         overrides.update(merged)
     return mode

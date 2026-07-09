@@ -10,6 +10,7 @@ from app.agent_workflow.engine import AgentEngine
 from app.agent_workflow.exploration_profile import (
     apply_exploration_profile_to_overrides,
     resolve_exploration_profile,
+    validate_runtime_context_profile,
 )
 from app.api.checkpointer import get_runtime_checkpointer
 from app.agent_workflow.streaming import RunRequest
@@ -119,6 +120,14 @@ def _iter_upstream_hosts(config: dict[str, Any]) -> Iterator[str]:
             yield host
 
 
+def _validate_exploration_profile(runtime_context: dict[str, Any]) -> None:
+    """Reject an invalid exploration_profile with a clear 400 instead of silently defaulting."""
+    try:
+        validate_runtime_context_profile(runtime_context)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def build_run_request(payload: AgentWorkflowRunRequest | AgentWorkflowRuntimeBundleRequest) -> RunRequest:
     return RunRequest(
         query=payload.query,
@@ -144,6 +153,7 @@ def resolve_engine(payload: AgentWorkflowRunRequest) -> AgentEngine:
     }
     """
     runtime_context = dict(payload.runtime_context or {})
+    _validate_exploration_profile(runtime_context)
     if payload.config is not None:
         _validate_outbound_hosts(payload.config)
         if payload.runtime_overrides:
@@ -186,6 +196,9 @@ def resolve_engine(payload: AgentWorkflowRunRequest) -> AgentEngine:
 
 def resolve_engine_from_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest) -> AgentEngine:
     runtime_context = dict(payload.runtime_context or {})
+    _validate_exploration_profile(runtime_context)
+    # build_runtime_overrides already applies the resolved exploration profile,
+    # so the bundle path honors quick/heavy mode without a second application.
     overrides = build_runtime_overrides(payload.runtime_bundle, runtime_context=runtime_context)
     _validate_outbound_hosts(overrides)
     return AgentEngine.from_runtime_config(_DEFAULT_CONFIG_PATH, overrides, checkpointer=get_runtime_checkpointer())

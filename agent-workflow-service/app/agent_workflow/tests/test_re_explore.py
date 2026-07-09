@@ -88,6 +88,25 @@ def test_re_explore_disabled_when_cap_zero():
     assert updates["phase"] == "revising"  # re-exploration turned off
 
 
+def test_formatting_gap_routes_to_text_revision_not_re_explore():
+    # An APPROVE whose only problem is missing markdown structure must become a
+    # text-revise (wording), never an evidence-revise that re-runs tools.
+    config = _config(max_explore_cycles=2)
+    llm = _ReviewerLlm('{"verdict":"APPROVE","issues":[],"missing_evidence":[],"required_changes":[]}')
+    plain = "This is a long plain answer with no markdown structure at all. " * 6
+    state = _review_state(
+        user_query="give me a summary",
+        draft_answer=plain,
+        tool_calls=[{"name": "search", "status": "ok", "step_index": 0, "replan_id": 0}],
+    )
+    updates = reviewer_node(state, config=config, llm=llm)
+
+    assert updates["phase"] == "revising"  # text-revise, not "executing"
+    assert updates["iteration"].get("explore_cycles", 0) == 0
+    assert any("markdown" in item.lower() for item in updates["review"].get("required_changes") or [])
+    assert not updates["review"].get("missing_evidence")
+
+
 def test_re_explore_skipped_when_no_tools_available():
     config = _config(max_explore_cycles=1)
     llm = _ReviewerLlm('{"verdict":"REVISE","missing_evidence":["need more data"],"required_changes":[]}')

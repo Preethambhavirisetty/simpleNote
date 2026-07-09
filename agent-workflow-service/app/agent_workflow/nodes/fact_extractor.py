@@ -31,10 +31,21 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
     # This node is deterministic on purpose. Downstream nodes should reason over
     # small facts with provenance, not full tool payloads that can explode context.
     artifacts = list(state.get("artifacts") or [])
-    facts = _extract_facts(artifacts, max_facts=config.policy.context.max_artifacts_in_prompt * 3)
+    max_fact_chars = int(config.policy.truncation.max_fact_chars)
+    # Total facts budget bounds the (otherwise un-budgeted) synthesizer prompt so
+    # generous per-fact limits cannot overflow the model's context window. Facts
+    # are held to roughly half the window (~2 chars/token here), leaving room for
+    # the rest of the prompt and the model's own output.
+    max_total_fact_chars = max(8000, int(config.policy.max_context_tokens) * 2)
+    facts = _extract_facts(
+        artifacts,
+        max_facts=config.policy.context.max_artifacts_in_prompt * 3,
+        max_fact_chars=max_fact_chars,
+        max_total_chars=max_total_fact_chars,
+    )
     # Evidence compressed into running memory mid-loop must still reach
     # synthesis/review; seed it as facts ahead of the per-artifact facts.
-    facts = _memory_facts(str(state.get("running_summary") or "")) + facts
+    facts = _memory_facts(str(state.get("running_summary") or ""), max_fact_chars) + facts
     if not facts and state.get("draft_answer"):
         facts = [
             {
@@ -61,10 +72,10 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
     }
 
 
-def _memory_facts(running_summary: str) -> list[Fact]:
+def _memory_facts(running_summary: str, max_fact_chars: int) -> list[Fact]:
     """Turn the running-summary memo into compact facts for downstream nodes."""
     facts: list[Fact] = []
-    for line in _summary_lines(running_summary):
+    for line in _summary_lines(running_summary, max_fact_chars):
         # Skip the memo's section headers ("Confirmed facts:", etc.).
         if line.endswith(":") and len(line) <= 40:
             continue
@@ -82,7 +93,13 @@ def _memory_facts(running_summary: str) -> list[Fact]:
     return facts
 
 
-def _extract_facts(artifacts: list[dict[str, Any]], *, max_facts: int) -> list[Fact]:
+def _extract_facts(
+    artifacts: list[dict[str, Any]],
+    *,
+    max_facts: int,
+    max_fact_chars: int,
+    max_total_chars: int = 0,
+) -> list[Fact]:
     """Pull concise, source-linked fact lines from scored artifacts."""
     facts: list[Fact] = []
     ranked = sorted(
@@ -92,6 +109,10 @@ def _extract_facts(artifacts: list[dict[str, Any]], *, max_facts: int) -> list[F
     )
     for artifact in ranked:
         if len(facts) >= max_facts:
+            break
+        # Stop once the aggregate facts payload reaches the total budget; the
+        # highest-scoring artifacts are processed first, so the least useful drop.
+        if max_total_chars and sum(len(str(fact.get("text") or "")) for fact in facts) >= max_total_chars:
             break
         raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
         if raw_ref.get("type") == "list" and isinstance(raw_ref.get("total"), int):
@@ -105,7 +126,7 @@ def _extract_facts(artifacts: list[dict[str, Any]], *, max_facts: int) -> list[F
         structured = _structured_entries(raw_ref, _FACT_PATHS)
         if structured is not None:
             for entry in structured[:remaining]:
-                fact = _make_structured_fact(artifact, entry)
+                fact = _make_structured_fact(artifact, entry, max_fact_chars)
                 if fact["text"]:
                     facts.append(fact)
             continue
@@ -115,10 +136,10 @@ def _extract_facts(artifacts: list[dict[str, Any]], *, max_facts: int) -> list[F
             for entry in rows[:remaining]:
                 text = _entry_text(entry)
                 if text:
-                    facts.append(_make_fact(artifact, _clip(text)))
+                    facts.append(_make_fact(artifact, _clip(text, max_fact_chars)))
             continue
 
-        for line in _summary_lines(str(artifact.get("summary") or "")):
+        for line in _summary_lines(str(artifact.get("summary") or ""), max_fact_chars):
             if len(facts) >= max_facts:
                 break
             facts.append(_make_fact(artifact, line))
@@ -160,23 +181,24 @@ def _entry_text(entry: Any) -> str:
     return ""
 
 
-def _summary_lines(summary: str) -> list[str]:
+def _summary_lines(summary: str, max_fact_chars: int) -> list[str]:
     """Normalize artifact summary text into short factual lines."""
     lines: list[str] = []
     for raw in summary.splitlines():
         line = raw.strip().lstrip("-*").strip()
         if not line or line.lower().startswith("[truncated]"):
             continue
-        lines.append(_clip(line))
+        lines.append(_clip(line, max_fact_chars))
     if not lines and summary.strip():
-        lines.append(_clip(summary.strip()))
+        lines.append(_clip(summary.strip(), max_fact_chars))
     return lines
 
 
-def _clip(text: str) -> str:
-    """Trim a fact line to the maximum fact length."""
-    if len(text) > _MAX_FACT_CHARS:
-        return text[: _MAX_FACT_CHARS - 3].rstrip() + "..."
+def _clip(text: str, max_fact_chars: int) -> str:
+    """Trim a fact line to the configured maximum fact length."""
+    limit = max_fact_chars if max_fact_chars and max_fact_chars > 0 else _MAX_FACT_CHARS
+    if len(text) > limit:
+        return text[: limit - 3].rstrip() + "..."
     return text
 
 
@@ -193,7 +215,7 @@ def _make_fact(artifact: dict[str, Any], text: str) -> Fact:
     }
 
 
-def _make_structured_fact(artifact: dict[str, Any], entry: Any) -> Fact:
+def _make_structured_fact(artifact: dict[str, Any], entry: Any, max_fact_chars: int) -> Fact:
     """Create a fact from a tool-supplied structured fact entry."""
     if isinstance(entry, dict):
         text = str(
@@ -203,7 +225,7 @@ def _make_structured_fact(artifact: dict[str, Any], entry: Any) -> Fact:
             or _entry_text(entry)
             or ""
         ).strip()
-        fact = _make_fact(artifact, _clip(text))
+        fact = _make_fact(artifact, _clip(text, max_fact_chars))
         if "confidence" in entry:
             try:
                 fact["confidence"] = float(entry["confidence"])
@@ -213,7 +235,7 @@ def _make_structured_fact(artifact: dict[str, Any], entry: Any) -> Fact:
         if isinstance(source_ref, dict) and source_ref:
             fact["source_ref"] = source_ref
         return fact
-    return _make_fact(artifact, _clip(str(entry).strip()))
+    return _make_fact(artifact, _clip(str(entry).strip(), max_fact_chars))
 
 
 def _fact_id(seed: str, text: str) -> str:

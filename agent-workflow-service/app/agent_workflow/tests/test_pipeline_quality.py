@@ -191,6 +191,17 @@ def test_single_oversized_structured_item_does_not_exceed_budget():
     assert len(_json.dumps(ref, default=str)) < _MAX_STRUCTURED_REF_CHARS
 
 
+def test_fact_extractor_respects_configured_max_fact_chars():
+    # A long single-line summary must survive up to the configured per-fact cap
+    # (document.yaml -> default 2000), not the old hardcoded 500-char clip.
+    config = _config()
+    long_line = "SLA detail " * 300  # ~3300 chars, no newlines -> one line
+    artifact = {"id": "a1", "tool": "t", "summary": long_line, "raw_ref": {"type": "object"}, "composite_score": 0.9}
+    out = fact_extractor_node({"artifacts": [artifact]}, config=config)
+    text = out["facts"][0]["text"]
+    assert 500 < len(text) <= config.policy.truncation.max_fact_chars
+
+
 # --- Phase 3: reviewer parsing ---------------------------------------------
 
 

@@ -123,6 +123,9 @@ policy:
   truncation:
     max_artifact_chars: 6000
     max_string_field_chars: 1200
+    # Per-fact cap fed to synthesis. Kept generous so small/medium results are
+    # not re-truncated after they already fit max_artifact_chars.
+    max_fact_chars: 4000
     max_list_rows_visible: 150
     dict_list_budget_reserve: 96
     dict_list_min_budget: 400

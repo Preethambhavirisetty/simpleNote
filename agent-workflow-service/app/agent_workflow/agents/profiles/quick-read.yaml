@@ -13,8 +13,15 @@ policy:
     max_cycles: 1
   revision:
     max_cycles: 1
+  # Full-content answers even in quick mode: don't cut a complete reply short.
+  executor:
+    synthesize_max_tokens: 6000
+  finalizer:
+    max_tokens: 4000
   context:
     max_artifacts_in_prompt: 20
   truncation:
     max_artifact_chars: 30000
+    max_string_field_chars: 12000
+    max_fact_chars: 10000
     max_list_rows_visible: 300
