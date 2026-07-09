@@ -1,0 +1,20 @@
+# Quick read exploration preset — merged onto default.yaml per request.
+policy:
+  enable_fast_path: true
+  enable_planner: true
+  max_executor_iterations: 10
+  max_review_cycles: 1
+  max_explore_cycles: 0
+  max_tool_calls_per_step: 3
+  enable_running_summary: false
+  reviewer:
+    enabled: true
+    mode: on_risk
+    max_cycles: 1
+  revision:
+    max_cycles: 1
+  context:
+    max_artifacts_in_prompt: 20
+  truncation:
+    max_artifact_chars: 30000
+    max_list_rows_visible: 300

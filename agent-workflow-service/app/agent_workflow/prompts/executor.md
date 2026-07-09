@@ -43,3 +43,5 @@ Allowed actions:
 ```json
 {"action":"draft_answer","answer":"..."}
 ```
+
+If you use `draft_answer`, return user-facing GFM markdown in the `answer` field.

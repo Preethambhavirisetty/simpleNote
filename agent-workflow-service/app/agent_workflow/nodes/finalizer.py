@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from app.agent_workflow.config import AgentConfig
+from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
@@ -20,6 +21,8 @@ def _stream_writer() -> Callable[[Any], None] | None:
 
 
 _MECHANICAL_PREFIXES = (
+    "## Results from tools",
+    "## Results",
     "Here is what I found from tool results:",
     "Here is what I found:",
 )
@@ -143,7 +146,8 @@ def _terminal_answer_messages(state: AgentState, approved: str, *, config: Agent
                 "You are the final answer renderer for an agent workflow. "
                 "Write only the final user-facing answer. Preserve the approved meaning, "
                 "use only the supplied draft and tool artifacts, do not add unsupported claims, "
-                "and do not mention the review process."
+                "and do not mention the review process.\n\n"
+                f"{MARKDOWN_OUTPUT_RULES}"
             ),
         },
         {
@@ -152,7 +156,7 @@ def _terminal_answer_messages(state: AgentState, approved: str, *, config: Agent
                 f"User request:\n{state.get('user_query', '')}\n\n"
                 f"Approved answer or best available draft:\n{approved}\n\n"
                 f"Tool artifacts and source references:\n{chr(10).join(source_lines) if source_lines else '(none)'}\n\n"
-                "Return only the answer text."
+                "Return only the answer in GFM markdown."
             ),
         },
     ]

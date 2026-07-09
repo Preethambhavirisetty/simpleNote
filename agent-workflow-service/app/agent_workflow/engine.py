@@ -11,7 +11,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from app.agent_workflow.cache import get_or_create_graph, get_or_create_provider
+from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
 from app.agent_workflow.artifact_store import get_artifact_store, is_cross_turn_persistence_active
 from app.agent_workflow.checkpointing import delete_thread, get_shared_checkpointer
 from app.agent_workflow.follow_up import apply_follow_up_runtime_context, build_search_query, resolve_follow_up_policy
@@ -25,6 +25,7 @@ from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import begin_turn_trace, finish_turn_trace, llm_call, record_workflow_update
 from app.agent_workflow.streaming import HostCallbacks, RunRequest, RunResult, map_graph_update
 
+from app.agent_workflow.cache import get_or_create_provider, get_or_create_graph
 
 _TOOL_INTENT_RE = re.compile(
     r"\b(note|notes|document|documents|doc|docs|folder|folders|search|find|locate|summari[sz]e|"
@@ -256,7 +257,8 @@ class AgentEngine:
                 "role": "system",
                 "content": (
                     "Answer the user's simple request directly and concisely. "
-                    "Do not claim to have searched notes, documents, tools, or external systems."
+                    "Do not claim to have searched notes, documents, tools, or external systems.\n\n"
+                    f"{MARKDOWN_OUTPUT_RULES}"
                 ),
             }
         ]

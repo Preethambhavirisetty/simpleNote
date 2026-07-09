@@ -26,6 +26,19 @@ def _successful_tools(state: AgentState) -> set[str]:
     }
 
 
+def _formatting_gaps(draft: str) -> list[str]:
+    """Flag user-facing answers that lack basic markdown structure."""
+    text = (draft or "").strip()
+    if len(text) < 200:
+        return []
+    has_heading = "##" in text
+    has_list = "\n- " in text or "\n* " in text or text.lstrip().startswith(("- ", "* "))
+    has_table = "|" in text and "\n|" in text
+    if has_heading or has_list or has_table:
+        return []
+    return ["Format the answer as GFM markdown with a ## heading and bullet lists or tables"]
+
+
 def _completion_gaps(state: AgentState) -> list[str]:
     """Run deterministic checks before accepting an APPROVE verdict."""
     gaps: list[str] = []
@@ -57,6 +70,7 @@ def _completion_gaps(state: AgentState) -> list[str]:
         gaps.append("list_dashboards was called but no grounded dashboard artifact is available")
 
     gaps.extend(follow_up_approval_gaps(state))
+    gaps.extend(_formatting_gaps(draft))
     return gaps
 
 

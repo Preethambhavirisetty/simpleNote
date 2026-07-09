@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, TYPE_CHECKING
+
+from app.agent_workflow.exploration_profile import apply_exploration_profile_to_overrides
+from app.api.config import DEFAULT_EXPLORATION_PROFILE
 
 if TYPE_CHECKING:
     from app.agent_workflow.engine import AgentEngine
@@ -94,7 +99,11 @@ def _collect_allowlist(version: dict[str, Any]) -> list[str]:
     return _connector_active_tools(connectors)
 
 
-def build_runtime_overrides(runtime_bundle: dict[str, Any]) -> dict[str, Any]:
+def build_runtime_overrides(
+    runtime_bundle: dict[str, Any],
+    *,
+    runtime_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Map backend runtime bundle into agent_workflow runtime_overrides."""
     agent_info = runtime_bundle.get("agent") if isinstance(runtime_bundle.get("agent"), dict) else {}
     version = runtime_bundle.get("active_version") if isinstance(runtime_bundle.get("active_version"), dict) else {}
@@ -156,13 +165,22 @@ def build_runtime_overrides(runtime_bundle: dict[str, Any]) -> dict[str, Any]:
             else:
                 overrides[key] = deepcopy(value)
 
+    apply_exploration_profile_to_overrides(
+        overrides,
+        runtime_context,
+        env_default=DEFAULT_EXPLORATION_PROFILE,
+    )
     return overrides
 
 
-def build_engine_from_runtime_bundle(runtime_bundle: dict[str, Any]) -> AgentEngine:
+def build_engine_from_runtime_bundle(
+    runtime_bundle: dict[str, Any],
+    *,
+    runtime_context: dict[str, Any] | None = None,
+) -> AgentEngine:
     from app.agent_workflow.engine import AgentEngine
 
-    overrides = build_runtime_overrides(runtime_bundle)
+    overrides = build_runtime_overrides(runtime_bundle, runtime_context=runtime_context)
     return AgentEngine.from_runtime_config(_DEFAULT_CONFIG_PATH, overrides)
 
 

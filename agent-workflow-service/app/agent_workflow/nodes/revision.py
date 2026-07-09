@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
+from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import llm_call
@@ -64,7 +65,8 @@ def _messages(state: AgentState) -> list[dict[str, str]]:
             "content": (
                 "You are the revision node. Improve the draft using only the same facts. "
                 "Do not call tools, ask for hidden evidence, or add unsupported claims. "
-                "If evidence is missing, state the limitation plainly."
+                "If evidence is missing, state the limitation plainly.\n\n"
+                f"{MARKDOWN_OUTPUT_RULES}"
             ),
         },
         {
@@ -74,7 +76,7 @@ def _messages(state: AgentState) -> list[dict[str, str]]:
                 f"Current draft:\n{state.get('draft_answer', '')}\n\n"
                 f"Reviewer issues or required changes:\n{changes or '(none)'}\n\n"
                 f"Facts:\n{facts or '(none)'}\n\n"
-                "Return only the revised answer text."
+                "Return only the revised answer in GFM markdown."
             ),
         },
     ]

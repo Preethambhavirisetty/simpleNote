@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.agent_workflow.exploration_profile import validate_runtime_context_profile
+
 
 def _empty_to_none(value: Any) -> Any:
     """Helper for empty to none."""
@@ -358,4 +360,5 @@ class RunRequestModel(BaseModel):
             return {}
         if not isinstance(value, dict):
             raise ValueError("runtime_context must be an object")
-        return _validate_runtime_context_value(value)
+        cleaned = _validate_runtime_context_value(value)
+        return validate_runtime_context_profile(cleaned)

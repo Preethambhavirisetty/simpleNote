@@ -1,0 +1,24 @@
+# Heavy read exploration preset — merged onto default.yaml per request.
+policy:
+  enable_fast_path: false
+  enable_planner: true
+  max_executor_iterations: 20
+  max_review_cycles: 4
+  max_explore_cycles: 3
+  max_tool_calls_per_step: 8
+  enable_running_summary: true
+  reviewer:
+    enabled: true
+    mode: always
+    max_cycles: 4
+  revision:
+    max_cycles: 1
+  summary:
+    compact_after_artifacts: 12
+    keep_after_summary: 8
+    max_cycles: 4
+  context:
+    max_artifacts_in_prompt: 50
+  truncation:
+    max_artifact_chars: 15000
+    max_list_rows_visible: 300

@@ -7,11 +7,15 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from app.agent_workflow.engine import AgentEngine
+from app.agent_workflow.exploration_profile import (
+    apply_exploration_profile_to_overrides,
+    resolve_exploration_profile,
+)
 from app.api.checkpointer import get_runtime_checkpointer
 from app.agent_workflow.streaming import RunRequest
-from app.api.config import AGENT_CONFIG_DIR, ALLOWED_UPSTREAM_HOSTS
-from app.api.runtime_bundle_adapter import build_runtime_overrides
+from app.api.config import AGENT_CONFIG_DIR, ALLOWED_UPSTREAM_HOSTS, DEFAULT_EXPLORATION_PROFILE
 from app.api.schema import AgentWorkflowRunRequest, AgentWorkflowRuntimeBundleRequest
+from app.api.runtime_bundle_adapter import build_runtime_overrides
 from app.api.sse_adapter import engine_event_to_sse, sse_encode
 
 
@@ -139,35 +143,66 @@ def resolve_engine(payload: AgentWorkflowRunRequest) -> AgentEngine:
         }
     }
     """
+    runtime_context = dict(payload.runtime_context or {})
     if payload.config is not None:
         _validate_outbound_hosts(payload.config)
         if payload.runtime_overrides:
-            _validate_outbound_hosts(payload.runtime_overrides)
-            return AgentEngine.from_runtime_config(payload.config, payload.runtime_overrides, checkpointer=get_runtime_checkpointer())
-        return AgentEngine.from_dict(payload.config, checkpointer=get_runtime_checkpointer())
+            overrides = dict(payload.runtime_overrides)
+            _validate_outbound_hosts(overrides)
+            apply_exploration_profile_to_overrides(
+                overrides,
+                runtime_context,
+                env_default=DEFAULT_EXPLORATION_PROFILE,
+            )
+            return AgentEngine.from_runtime_config(payload.config, overrides, checkpointer=get_runtime_checkpointer())
+        merged = dict(payload.config)
+        apply_exploration_profile_to_overrides(
+            merged,
+            runtime_context,
+            env_default=DEFAULT_EXPLORATION_PROFILE,
+        )
+        return AgentEngine.from_dict(merged, checkpointer=get_runtime_checkpointer())
 
     config_path = _resolve_config_path(payload.config_name, payload.config_path)
     if payload.runtime_overrides:
-        _validate_outbound_hosts(payload.runtime_overrides)
-        return AgentEngine.from_runtime_config(config_path, payload.runtime_overrides, checkpointer=get_runtime_checkpointer())
+        overrides = dict(payload.runtime_overrides)
+        _validate_outbound_hosts(overrides)
+        apply_exploration_profile_to_overrides(
+            overrides,
+            runtime_context,
+            env_default=DEFAULT_EXPLORATION_PROFILE,
+        )
+        return AgentEngine.from_runtime_config(config_path, overrides, checkpointer=get_runtime_checkpointer())
+    overrides: dict[str, Any] = {}
+    apply_exploration_profile_to_overrides(
+        overrides,
+        runtime_context,
+        env_default=DEFAULT_EXPLORATION_PROFILE,
+    )
+    if overrides:
+        return AgentEngine.from_runtime_config(config_path, overrides, checkpointer=get_runtime_checkpointer())
     return AgentEngine.from_config(config_path, checkpointer=get_runtime_checkpointer())
 
 
 def resolve_engine_from_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest) -> AgentEngine:
-    overrides = build_runtime_overrides(payload.runtime_bundle)
+    runtime_context = dict(payload.runtime_context or {})
+    overrides = build_runtime_overrides(payload.runtime_bundle, runtime_context=runtime_context)
     _validate_outbound_hosts(overrides)
     return AgentEngine.from_runtime_config(_DEFAULT_CONFIG_PATH, overrides, checkpointer=get_runtime_checkpointer())
 
 
 def stream_sse(payload: AgentWorkflowRunRequest) -> Iterator[str]:
+    runtime_context = dict(payload.runtime_context or {})
     engine = resolve_engine(payload)
     request = build_run_request(payload)
+    profile = resolve_exploration_profile(runtime_context, env_default=DEFAULT_EXPLORATION_PROFILE)
     yield sse_encode(
         "meta",
         {
             "session_id": request.session_id,
             "config_name": engine.config.name,
             "engine": "agent_workflow",
+            "exploration_profile": profile,
         },
     )
     for event in engine.stream(request):
@@ -179,8 +214,10 @@ def stream_sse(payload: AgentWorkflowRunRequest) -> Iterator[str]:
 
 
 def stream_sse_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest) -> Iterator[str]:
+    runtime_context = dict(payload.runtime_context or {})
     engine = resolve_engine_from_runtime_bundle(payload)
     request = build_run_request(payload)
+    profile = resolve_exploration_profile(runtime_context, env_default=DEFAULT_EXPLORATION_PROFILE)
     yield sse_encode(
         "meta",
         {
@@ -188,6 +225,7 @@ def stream_sse_runtime_bundle(payload: AgentWorkflowRuntimeBundleRequest) -> Ite
             "config_name": engine.config.name,
             "engine": "agent_workflow",
             "source": "runtime_bundle",
+            "exploration_profile": profile,
         },
     )
     for event in engine.stream(request):

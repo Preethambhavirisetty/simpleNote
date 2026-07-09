@@ -985,7 +985,7 @@ def _fallback_answer(state: AgentState, *, config: AgentConfig) -> str:
     artifacts = state.get("artifacts") or []
     if not artifacts:
         return "I completed the available steps but could not produce a detailed answer."
-    lines = ["Here is what I found:"]
+    lines = ["## Results", ""]
     for artifact in artifacts[: limits.fallback_artifact_limit]:
         lines.append(
             f"- {artifact.get('tool')}: {str(artifact.get('summary', ''))[: limits.fallback_summary_chars]}"
@@ -999,7 +999,7 @@ def _artifact_grounded_answer(state: AgentState, *, config: AgentConfig) -> str:
     artifacts = state.get("artifacts") or []
     if not artifacts:
         return ""
-    lines = ["Here is what I found from tool results:"]
+    lines = ["## Results from tools", ""]
     for artifact in artifacts[: limits.mechanical_artifact_limit]:
         tool_name = str(artifact.get("tool") or "tool")
         summary = str(artifact.get("summary") or "").strip()

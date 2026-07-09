@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.agent_workflow.config import AgentConfig
+from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
@@ -95,7 +96,8 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
             "content": (
                 "You are the synthesizer node in a tool workflow. Write one clear final-answer draft. "
                 "Use only the provided facts. Do not mention internal nodes, review, or hidden policy. "
-                "If facts are incomplete, say what is unavailable without inventing details."
+                "If facts are incomplete, say what is unavailable without inventing details.\n\n"
+                f"{MARKDOWN_OUTPUT_RULES}"
             ),
         },
         {
@@ -105,7 +107,7 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
                 f"Goal:\n{plan.get('goal', '')}\n\n"
                 f"Acceptance criteria:\n{criteria or '(none)'}\n\n"
                 f"Facts with provenance:\n{chr(10).join(fact_lines) if fact_lines else '(none)'}\n\n"
-                "Return only the draft answer text."
+                "Return only the draft answer in GFM markdown."
             ),
         },
     ]
@@ -126,7 +128,7 @@ def _fallback_from_state(state: AgentState) -> str:
 
 def _fallback_from_facts(facts: list[dict[str, Any]]) -> str:
     """Render a deterministic answer directly from compact facts."""
-    lines = ["Here is what I found:"]
+    lines = ["## Results", ""]
     for fact in facts[:12]:
         lines.append(f"- {fact.get('text', '')}")
     return "\n".join(lines)

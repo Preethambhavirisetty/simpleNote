@@ -29,4 +29,7 @@ ALLOWED_UPSTREAM_HOSTS = {
     if item.strip()
 }
 
-AGENT_WORKFLOW_CHECKPOINTER = (os.getenv("AGENT_WORKFLOW_CHECKPOINTER") or os.getenv("CHECKPOINTER") or "memory").strip()
+DEFAULT_EXPLORATION_PROFILE = (os.getenv("DEFAULT_EXPLORATION_PROFILE") or "quick").strip().lower()
+if DEFAULT_EXPLORATION_PROFILE not in {"quick", "heavy"}:
+    DEFAULT_EXPLORATION_PROFILE = "quick"
+
