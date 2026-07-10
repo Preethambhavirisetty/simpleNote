@@ -457,6 +457,7 @@ class AgentEngine:
             facts=[],
             draft_answer="",
             draft_kind="",
+            executor_guidance=[],
             review={},
             review_feedback="",
             iteration={"executor_turns": 0, "review_cycles": 0, "revision_cycles": 0, "tool_calls": 0},

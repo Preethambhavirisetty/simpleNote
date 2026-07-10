@@ -47,11 +47,16 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
     # Evidence compressed into running memory mid-loop must still reach
     # synthesis/review; seed it as facts ahead of the per-artifact facts.
     facts = _memory_facts(str(state.get("running_summary") or ""), max_fact_chars) + facts
-    if not facts and state.get("draft_answer"):
+    used_draft_fallback = False
+    draft = str(state.get("draft_answer") or "").strip()
+    if not facts and draft and not _looks_like_action_json(draft):
+        # Last resort only, and never for unparsed action JSON — distilling that
+        # as a "fact" feeds the model's own control tokens back as evidence.
+        used_draft_fallback = True
         facts = [
             {
-                "id": _fact_id("draft", str(state.get("draft_answer") or "")),
-                "text": str(state.get("draft_answer") or "").strip(),
+                "id": _fact_id("draft", draft),
+                "text": draft,
                 "source_artifact_id": "",
                 "tool": "executor_draft",
                 "source_ref": {},
@@ -59,7 +64,11 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
                 "truncated_source": False,
             }
         ]
-    tools = sorted({str(fact.get("tool") or "") for fact in facts if fact.get("tool")})
+    tool_counts: dict[str, int] = {}
+    for fact in facts:
+        tool = str(fact.get("tool") or "")
+        if tool:
+            tool_counts[tool] = tool_counts.get(tool, 0) + 1
     preview = [str(fact.get("text") or "").strip()[:140] for fact in facts[:3] if str(fact.get("text") or "").strip()]
     return {
         "facts": facts,
@@ -70,11 +79,19 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
                 "fact_count": len(facts),
                 "artifact_count": len(artifacts),
                 "truncated_source_count": sum(1 for fact in facts if fact.get("truncated_source")),
-                "tools": tools,
+                "tools": sorted(tool_counts),
+                "tool_fact_counts": tool_counts,
+                "used_draft_fallback": used_draft_fallback,
                 "preview": preview,
             }
         ],
     }
+
+
+def _looks_like_action_json(text: str) -> bool:
+    """Return whether a draft is really unparsed executor action JSON."""
+    stripped = text.lstrip("` \n")
+    return stripped.startswith("{") and '"action"' in stripped[:200]
 
 
 def _memory_facts(running_summary: str, max_fact_chars: int) -> list[Fact]:

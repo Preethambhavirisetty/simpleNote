@@ -113,6 +113,7 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
             "executor.search_loop_breaker",
             "executor.required_tools_missing",
             "executor.tool_policy_blocked",
+            "executor.finish_deadlock_break",
         }:
             events.append({"type": "debug", "message": entry.get("message", "")})
         elif step == "executor.tool_args_invalid":
@@ -181,18 +182,25 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
         elif step == "fact_extractor.completed":
             tools = entry.get("tools") or []
             preview = entry.get("preview") or []
-            source_text = f" from {', '.join(tools)}" if tools else ""
-            example = f" — e.g. “{preview[0]}”" if preview else ""
+            tool_counts = entry.get("tool_fact_counts") or {}
+            fact_count = entry.get("fact_count", 0)
+            artifact_count = entry.get("artifact_count", 0)
+            if entry.get("used_draft_fallback"):
+                label = "Extractor: no tool evidence collected — using the executor draft as a low-confidence fact"
+            elif not fact_count:
+                label = f"Extractor: no facts could be distilled from {artifact_count} tool result(s)"
+            else:
+                per_tool = ", ".join(f"{name} ({count})" for name, count in sorted(tool_counts.items())) or ", ".join(tools)
+                label = f"Extractor: distilled {fact_count} fact(s) from {artifact_count} tool result(s) — {per_tool}"
+                if preview:
+                    label += f" | e.g. “{preview[0]}”"
             events.append(
                 {
                     "type": "agent_activity",
                     "phase": "fact_extraction",
-                    "label": (
-                        f"Distilled {entry.get('fact_count', 0)} key fact(s) from "
-                        f"{entry.get('artifact_count', 0)} result(s){source_text}{example}"
-                    ),
-                    "fact_count": entry.get("fact_count", 0),
-                    "artifact_count": entry.get("artifact_count", 0),
+                    "label": label,
+                    "fact_count": fact_count,
+                    "artifact_count": artifact_count,
                     "truncated_source_count": entry.get("truncated_source_count", 0),
                     "tools": tools,
                     "preview": preview,

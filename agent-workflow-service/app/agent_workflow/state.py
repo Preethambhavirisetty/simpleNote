@@ -102,6 +102,7 @@ class AgentState(TypedDict, total=False):
     facts: list[Fact]
     draft_answer: str
     draft_kind: str  # "mechanical" (deterministic artifact dump) | "llm" (prose) | "executor_draft" (raw executor answer)
+    executor_guidance: list[str]  # last turn's guard/validation messages, fed back into the next executor prompt
     conversation_memory: dict[str, Any]  # per-session slot map of established entities (see conversation_memory.py)
     running_summary: str  # compressed memo of summarized-away artifacts (see summarizer node)
     summary_sources: list[dict[str, Any]]  # structured provenance for folded artifacts (id/tool/source_ref)

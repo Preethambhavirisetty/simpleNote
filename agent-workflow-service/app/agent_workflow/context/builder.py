@@ -69,6 +69,12 @@ class ContextBuilder:
         if state.get("review_feedback") and role in ("executor", "planner"):
             sections.append((90, f"Reviewer feedback:\n{state['review_feedback']}"))
 
+        guidance = [str(item).strip() for item in (state.get("executor_guidance") or []) if str(item).strip()]
+        if guidance and role == "executor":
+            # Last turn's guard vetoes / argument errors. Highest priority after
+            # the user request: without this the model repeats the rejected action.
+            sections.append((98, "Corrections from your last action (fix these first):\n" + "\n".join(f"- {item}" for item in guidance)))
+
         running_summary = str(state.get("running_summary") or "").strip()
         if running_summary and role == "executor":
             # Compressed earlier findings kept above raw artifacts so the loop
@@ -183,10 +189,19 @@ class ContextBuilder:
         return "\n".join(lines)
 
     def _format_tool_calls(self, records: list[dict[str, Any]]) -> str:
-        """Format tool calls for inclusion in LLM context."""
-        return "\n".join(
-            f"- {r.get('name')} ({r.get('status')}): {r.get('args_preview', '')}" for r in records
-        )
+        """Format tool calls for inclusion in LLM context.
+
+        Failed calls include their error so the model can correct the arguments
+        instead of repeating the same rejected call.
+        """
+        lines = []
+        for r in records:
+            line = f"- {r.get('name')} ({r.get('status')}): {r.get('args_preview', '')}"
+            error = str(r.get("error") or "").strip()
+            if error:
+                line += f" — error: {error[:200]}"
+            lines.append(line)
+        return "\n".join(lines)
 
     def _truncate_message_preview(self, content: str) -> str:
         limits = self.config.policy.context

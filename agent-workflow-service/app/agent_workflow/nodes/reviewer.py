@@ -278,7 +278,10 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         updates["phase"] = "done"
         updates["final_answer"] = str(state.get("draft_answer") or "").strip()
         updates["error"] = None
-    elif verdict == "REVISE" and _needs_re_explore(state, review, config):
+    elif verdict in {"REVISE", "REJECT"} and _needs_re_explore(state, review, config):
+        # REJECT with missing evidence gets the same bounded re-exploration as
+        # REVISE: returning the rejected draft when tools were never exercised
+        # (e.g. the whole run produced no successful call) just ships a bad answer.
         # Evidence-revise: the gap is missing tool evidence, not wording. Rewriting
         # from the same facts cannot fix that, so re-enter the executor to gather
         # more. Bounded by explore_cycles; the guidance is passed as feedback and a

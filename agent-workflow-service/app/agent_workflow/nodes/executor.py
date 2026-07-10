@@ -153,6 +153,28 @@ def _update_no_progress(state: AgentState, iteration: dict[str, Any], config: Ag
     return no_progress >= cap, iteration
 
 
+def _add_guidance(updates: dict[str, Any], message: str, *, limit: int = 4) -> None:
+    """Queue a correction for the next executor prompt.
+
+    Guard vetoes and argument errors used to live only in telemetry events, so
+    the model repeated the same rejected action blindly. Anything appended here
+    is rendered as a high-priority "fix this first" section on the next turn.
+    """
+    message = str(message or "").strip()
+    if not message:
+        return
+    guidance = list(updates.get("executor_guidance") or [])
+    if message not in guidance:
+        guidance.append(message)
+    updates["executor_guidance"] = guidance[-limit:]
+
+
+def _schema_required_fields(schema: dict[str, Any]) -> list[str]:
+    """Return the required argument names declared by a tool's input schema."""
+    required = schema.get("required") if isinstance(schema, dict) else None
+    return [str(item) for item in required] if isinstance(required, list) else []
+
+
 def _finish_is_deadlocked(iteration: dict[str, Any], config: AgentConfig) -> bool:
     """Return whether finish_step guards have blocked progress for too long.
 
@@ -375,6 +397,11 @@ def _record_invalid_tool_arguments(
     iteration["tool_calls"] = int(iteration.get("tool_calls") or 0) + 1
     updates["tool_calls"] = tool_calls
     updates["iteration"] = iteration
+    _add_guidance(
+        updates,
+        f"Your last call to {tool_name} was rejected: {record['error']}. "
+        f"Call it again with every required argument filled from prior tool results or the user request — do not retry unchanged.",
+    )
     updates["events"].append(
         {
             "step": "executor.tool_args_invalid",
@@ -832,7 +859,9 @@ def executor_node(
 
     candidate_tools = _filter_candidates_by_policy(list(state.get("candidate_tools") or []), config=config)
     called_this_step = _called_tools_for_step(state, step_index)
-    updates: dict[str, Any] = {"iteration": iteration, "phase": "executing"}
+    # Guidance is rebuilt every turn: a clean turn clears last turn's corrections,
+    # and any veto/error below re-adds what the model must fix next turn.
+    updates: dict[str, Any] = {"iteration": iteration, "phase": "executing", "executor_guidance": []}
     if prefetch_candidates:
         updates["candidate_tools"] = prefetch_candidates
     if prefetch_cache_update is not None:
@@ -851,6 +880,11 @@ def executor_node(
         repeat_count = _search_repeat_counter(iteration, step_index=step_index)
         updates["iteration"] = iteration
         if repeat_count == 1:
+            _add_guidance(
+                updates,
+                "Do not call search_tools again: candidate tools are already listed in your context. "
+                "Choose call_tool with schema-valid arguments (fill every required argument from prior results or the user request).",
+            )
             updates["events"].append(
                 {
                     "step": "executor.tool_candidates_available",
@@ -860,16 +894,42 @@ def executor_node(
             )
             return updates
 
+        # Only force a call the schema allows: a tool with unmet required
+        # arguments would just fail validation and burn the turn (e.g. forcing
+        # get_panel_data with {} when panel_id is required).
+        forced = None
         if repeat_count == 2 and not called_this_step:
-            picked = candidate_tools[0]
+            forced = next(
+                (c for c in candidate_tools if not _schema_required_fields(_schema_for_tool(str(c.get("name") or ""), candidate_tools))),
+                None,
+            )
+        if forced is not None:
             action_type = "call_tool"
-            action = {"action": "call_tool", "name": picked.get("name"), "arguments": {}}
+            action = {"action": "call_tool", "name": forced.get("name"), "arguments": {}}
             updates["events"].append(
                 {
                     "step": "executor.search_loop_breaker",
-                    "message": f"Repeated search_tools with candidates; forcing call_tool({picked.get('name')}).",
+                    "message": f"Repeated search_tools with candidates; forcing call_tool({forced.get('name')}).",
                 }
             )
+        elif repeat_count == 2 and not called_this_step:
+            top = candidate_tools[0]
+            required = _schema_required_fields(_schema_for_tool(str(top.get("name") or ""), candidate_tools))
+            _add_guidance(
+                updates,
+                f"Stop searching. Call {top.get('name')} with its required argument(s) "
+                f"{', '.join(required)} filled in (use values from prior tool results or the user request).",
+            )
+            updates["events"].append(
+                {
+                    "step": "executor.search_loop_breaker",
+                    "message": (
+                        f"Repeated search_tools; every candidate needs required arguments "
+                        f"(e.g. {top.get('name')}: {', '.join(required)}) — asking the model to fill them."
+                    ),
+                }
+            )
+            return updates
         else:
             action_type = "finish_step"
             updates["events"].append(
@@ -903,6 +963,11 @@ def executor_node(
         max_per_step = config.policy.max_tool_calls_per_step
         if call_signature in called_signatures:
             action_type = "finish_step"
+            _add_guidance(
+                updates,
+                f"You already called {tool_name} with those exact arguments this step; its result is in your context. "
+                "Use a different tool/arguments or finish the step — do not repeat the call.",
+            )
             updates["events"].append(
                 {
                     "step": "executor.duplicate_tool_skipped",
@@ -912,6 +977,7 @@ def executor_node(
             )
         elif step_call_count >= max_per_step:
             action_type = "finish_step"
+            _add_guidance(updates, "Tool budget for this step is spent; finish the step or draft from the evidence you have.")
             updates["events"].append(
                 {
                     "step": "executor.tool_limit_reached",
@@ -1053,6 +1119,10 @@ def executor_node(
         if not deadlocked:
             missing_follow_up = follow_up_tool_recall_missing(state)
             if missing_follow_up:
+                _add_guidance(
+                    updates,
+                    f"{missing_follow_up[0]}. Pick a tool from the candidate list and call it with schema-valid arguments now.",
+                )
                 updates["events"].append(
                     {
                         "step": "executor.follow_up_evidence_missing",
@@ -1064,6 +1134,10 @@ def executor_node(
                 return updates
             stop_condition = str(current_step.get("stop_condition") or "").strip()
             if stop_condition and not _step_has_evidence(state, step_index):
+                _add_guidance(
+                    updates,
+                    f"Do not finish this step yet — its stop condition is unmet: {stop_condition}. Call a tool to gather that evidence.",
+                )
                 updates["events"].append(
                     {
                         "step": "executor.stop_condition_unmet",
@@ -1080,6 +1154,10 @@ def executor_node(
             called = _called_tools_for_step(state, step_index) | _called_tools_for_run(state)
             missing_required = sorted(required_tools - called)
             if missing_required:
+                _add_guidance(
+                    updates,
+                    f"Call {', '.join(missing_required)} (with schema-valid arguments) before finishing this step.",
+                )
                 updates["events"].append(
                     {
                         "step": "executor.required_tools_missing",
@@ -1113,7 +1191,14 @@ def executor_node(
 
     answer = str(action.get("answer") or raw).strip()
     missing_follow_up = follow_up_tool_recall_missing(state)
-    if missing_follow_up:
+    # Same arbitration as finish_step: the veto may block a premature draft, but
+    # once the step is deadlocked (no new evidence for max_no_progress_turns)
+    # repeating the veto only burns the remaining budget, so the draft proceeds.
+    if missing_follow_up and not _finish_is_deadlocked(iteration, config):
+        _add_guidance(
+            updates,
+            f"{missing_follow_up[0]}. Do not draft an answer yet — pick a tool from the candidate list and call it with schema-valid arguments.",
+        )
         updates["events"].append(
             {
                 "step": "executor.follow_up_evidence_missing",
@@ -1123,6 +1208,15 @@ def executor_node(
             }
         )
         return updates
+    if missing_follow_up:
+        updates["events"].append(
+            {
+                "step": "executor.finish_deadlock_break",
+                "step_index": step_index,
+                "no_progress_turns": int(iteration.get("no_progress_turns") or 0),
+                "message": "Follow-up evidence guard kept blocking with no new evidence; accepting the draft to avoid a loop.",
+            }
+        )
     updates["draft_answer"] = answer
     updates["draft_kind"] = "executor_draft"
     updates["phase"] = "fact_extracting"

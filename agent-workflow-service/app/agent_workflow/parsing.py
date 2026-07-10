@@ -48,7 +48,13 @@ def parse_review_markdown(text: str) -> ReviewResult:
 
 
 def parse_executor_action(text: str) -> dict[str, Any]:
-    """Parse the executor JSON action and fall back to a draft answer when needed."""
+    """Parse the executor JSON action and fall back to a draft answer when needed.
+
+    Models sometimes emit several JSON actions in one turn or wrap the object in
+    prose. Objects are decoded one at a time (raw_decode from each ``{``), and the
+    first one carrying an ``action`` key wins — a greedy ``{.*}`` regex would span
+    multiple objects, fail to parse, and turn the raw JSON into a bogus draft.
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
@@ -60,14 +66,22 @@ def parse_executor_action(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
+    decoder = json.JSONDecoder()
+    first_dict: dict[str, Any] | None = None
+    pos = cleaned.find("{")
+    while pos != -1:
         try:
-            data = json.loads(match.group(0))
-            if isinstance(data, dict):
-                return data
+            data, end = decoder.raw_decode(cleaned, pos)
         except json.JSONDecodeError:
-            pass
+            pos = cleaned.find("{", pos + 1)
+            continue
+        if isinstance(data, dict):
+            if data.get("action"):
+                return data
+            first_dict = first_dict or data
+        pos = cleaned.find("{", end)
+    if first_dict is not None:
+        return first_dict
     return {"action": "draft_answer", "answer": cleaned}
 
 
