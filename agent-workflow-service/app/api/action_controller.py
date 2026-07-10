@@ -7,11 +7,14 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.api.config import DEFAULT_EXPLORATION_PROFILE
+
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
 from app.agent_workflow.context import extract_source_ref, make_artifact_id, score_artifact, truncate_tool_result
 from app.agent_workflow.exploration_profile import (
     apply_exploration_profile_to_overrides,
     resolve_exploration_profile,
+    validate_runtime_context_profile,
 )
 from app.agent_workflow.context.builder import ContextBuilder
 from app.agent_workflow.follow_up import build_search_query, resolve_follow_up_policy
@@ -185,28 +188,49 @@ def _load_config(payload: AgentWorkflowActionRequest) -> AgentConfig:
 
 
 def _engine(payload: AgentWorkflowActionRequest) -> AgentEngine:
-    request_payload = {
-        "query": payload.query or "action test",
-        "session_id": payload.session_id,
-        "history": _history(payload),
-        "runtime_context": dict(payload.runtime_context or {}),
-        "config_name": payload.config_name,
-        "config_path": payload.config_path,
-        "config": payload.config,
-        "runtime_overrides": payload.runtime_overrides,
-    }
+    runtime_context = dict(payload.runtime_context or {})
+    try:
+        validate_runtime_context_profile(runtime_context)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     llm = None if payload.use_real_providers else _ActionLlm.from_payload(payload.llm)
     tools = None if payload.use_real_providers else _ActionTools.from_payload(payload.tools)
     if payload.config is not None:
         _validate_outbound_hosts(payload.config)
         if payload.runtime_overrides:
-            _validate_outbound_hosts(payload.runtime_overrides)
-            return AgentEngine.from_runtime_config(payload.config, payload.runtime_overrides, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
-        return AgentEngine.from_dict(payload.config, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
+            overrides = dict(payload.runtime_overrides)
+            _validate_outbound_hosts(overrides)
+            apply_exploration_profile_to_overrides(
+                overrides,
+                runtime_context,
+                env_default=DEFAULT_EXPLORATION_PROFILE,
+            )
+            return AgentEngine.from_runtime_config(payload.config, overrides, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
+        merged = dict(payload.config)
+        apply_exploration_profile_to_overrides(
+            merged,
+            runtime_context,
+            env_default=DEFAULT_EXPLORATION_PROFILE,
+        )
+        return AgentEngine.from_dict(merged, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
     config_path = _resolve_config_path(payload.config_name, payload.config_path)
     if payload.runtime_overrides:
-        _validate_outbound_hosts(payload.runtime_overrides)
-        return AgentEngine.from_runtime_config(config_path, payload.runtime_overrides, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
+        overrides = dict(payload.runtime_overrides)
+        _validate_outbound_hosts(overrides)
+        apply_exploration_profile_to_overrides(
+            overrides,
+            runtime_context,
+            env_default=DEFAULT_EXPLORATION_PROFILE,
+        )
+        return AgentEngine.from_runtime_config(config_path, overrides, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
+    overrides: dict[str, Any] = {}
+    apply_exploration_profile_to_overrides(
+        overrides,
+        runtime_context,
+        env_default=DEFAULT_EXPLORATION_PROFILE,
+    )
+    if overrides:
+        return AgentEngine.from_runtime_config(config_path, overrides, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
     return AgentEngine.from_config(config_path, checkpointer=get_runtime_checkpointer(), llm=llm, tools=tools)
 
 

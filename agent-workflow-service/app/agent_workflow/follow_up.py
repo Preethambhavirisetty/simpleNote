@@ -6,21 +6,27 @@ from typing import Any
 
 _FOLLOW_UP_RE = re.compile(
     r"\b("
-    r"them|those|these|it|same|above|previous|earlier|prior|"
+    r"them|those|these|this|it|same|above|previous|earlier|prior|"
     r"that list|serial|table|count|how many|reformat|format|show again"
     r")\b",
     re.IGNORECASE,
 )
-_DATA_FOLLOW_UP_RE = re.compile(
-    r"\b(table|serial|count|how many|list|show|format|reformat|filter|sort)\b",
+_REFINEMENT_RE = re.compile(
+    r"\b("
+    r"if there is no|if not|if no\b|otherwise|instead\b|what about|"
+    r"no explicit|give me all|all rows|from 0 to|same site|same dashboard|"
+    r"under\s+\d|less than\s+\d|more than\s+\d|at least\s+\d|"
+    r"then give|then show|then list|also show|also give|still on"
+    r")\b",
     re.IGNORECASE,
 )
-_EVIDENCE_TOOL_HINTS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bdashboard", re.IGNORECASE), "list_dashboards"),
-    (re.compile(r"\b(card|cards|trello)\b", re.IGNORECASE), "get_cards"),
-    (re.compile(r"\blist_boards\b", re.IGNORECASE), "list_boards"),
-    (re.compile(r"\bboard\b", re.IGNORECASE), "get_board"),
+_DATA_FOLLOW_UP_RE = re.compile(
+    r"\b(table|serial|count|how many|list|show|format|reformat|filter|sort|rows)\b",
+    re.IGNORECASE,
 )
+_SITE_RE = re.compile(r"\bsite\s*=\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
+_SNAKE_ID_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", re.IGNORECASE)
+_NUMBER_RE = re.compile(r"\b\d+\b")
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,38 @@ def _history_text(history: list[dict[str, Any]], *, limit: int = 4) -> str:
     return "\n".join(chunks)
 
 
+def _topic_anchors(text: str) -> set[str]:
+    """Distinctive tokens that tie a turn to a prior topic (numbers, ids, sites)."""
+    anchors: set[str] = set()
+    for match in _NUMBER_RE.finditer(text):
+        anchors.add(match.group())
+    for match in _SNAKE_ID_RE.finditer(text):
+        anchors.add(match.group().lower())
+    for match in _SITE_RE.finditer(text):
+        anchors.add(match.group(1).lower())
+    return anchors
+
+
+def _topic_continues(query: str, history: list[dict[str, Any]]) -> bool:
+    """Return whether the query shares topic anchors with recent history."""
+    prior = _history_text(history)
+    if not prior:
+        return False
+    query_anchors = _topic_anchors(query)
+    history_anchors = _topic_anchors(prior)
+    if not query_anchors or not history_anchors:
+        return False
+    overlap = query_anchors & history_anchors
+    if not overlap:
+        return False
+    # A shared number or a shared multi-part identifier (e.g. a dashboard/board
+    # name like "autopod_rows_availability") is distinctive enough on its own to
+    # signal continuation; generic single-token overlaps still need a second hit.
+    if any(token.isdigit() or "_" in token for token in overlap):
+        return True
+    return len(overlap) >= 2
+
+
 def is_follow_up_query(query: str, history: list[dict[str, Any]]) -> bool:
     """Return whether the query likely refers to prior-turn assistant output."""
     if not history:
@@ -53,7 +91,11 @@ def is_follow_up_query(query: str, history: list[dict[str, Any]]) -> bool:
         return False
     if _FOLLOW_UP_RE.search(cleaned):
         return True
-    if len(cleaned.split()) <= 14 and _DATA_FOLLOW_UP_RE.search(cleaned):
+    if _REFINEMENT_RE.search(cleaned):
+        return True
+    if _topic_continues(cleaned, history):
+        return True
+    if len(cleaned.split()) <= 20 and _DATA_FOLLOW_UP_RE.search(cleaned):
         return True
     return False
 
@@ -83,16 +125,6 @@ def build_search_query(query: str, history: list[dict[str, Any]]) -> str:
     if prev and prev.lower() not in cleaned.lower():
         return f"{prev} {cleaned}".strip()
     return cleaned
-
-
-def infer_evidence_tools(query: str, history: list[dict[str, Any]]) -> set[str]:
-    """Infer which tools should be re-run when fresh evidence is required."""
-    blob = f"{query}\n{_history_text(history)}"
-    tools: set[str] = set()
-    for pattern, tool_name in _EVIDENCE_TOOL_HINTS:
-        if pattern.search(blob):
-            tools.add(tool_name)
-    return tools
 
 
 def evidence_tools_from_artifacts(artifacts: list[dict[str, Any]]) -> set[str]:
@@ -132,11 +164,14 @@ def resolve_follow_up_policy(
     if not require_tool_on_follow_up:
         return FollowUpPolicy(is_follow_up=True, persisted_artifact_count=persisted_count)
 
-    required = infer_evidence_tools(query, history)
+    # A follow-up with no persisted evidence must recall tools before answering.
+    # Which tools is left generic: the executor selects them via semantic tool
+    # search, and follow_up_tool_recall_missing enforces that some fresh tool
+    # call happens (no app-specific tool-name heuristics).
     return FollowUpPolicy(
         is_follow_up=True,
         require_tool_recall=True,
-        required_tools=frozenset(required),
+        required_tools=frozenset(),
         persisted_artifact_count=persisted_count,
     )
 

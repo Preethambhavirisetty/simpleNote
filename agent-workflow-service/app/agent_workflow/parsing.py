@@ -7,6 +7,11 @@ from typing import Any
 from app.agent_workflow.state import Plan, PlanStep, ReviewResult
 
 
+def normalize_tool_name(name: Any) -> str:
+    """Strip wrapping quotes/backticks so planner-required tools match tool_calls."""
+    return str(name or "").strip().strip("`\"'")
+
+
 def parse_plan_markdown(text: str) -> Plan:
     """Parse planner markdown into the structured plan used by the graph."""
     sections = _split_sections(text)
@@ -153,4 +158,9 @@ def _csv_items(value: str) -> list[str]:
     """Helper for csv items."""
     if not value:
         return []
-    return [item.strip() for item in value.split(",") if item.strip()]
+    items = []
+    for item in value.split(","):
+        name = normalize_tool_name(item)
+        if name and name.lower() not in {"none", "n/a"}:
+            items.append(name)
+    return items

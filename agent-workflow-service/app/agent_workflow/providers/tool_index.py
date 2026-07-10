@@ -83,7 +83,6 @@ class HttpToolIndexProvider:
             "query": query,
             "limit": max(1, min(limit, 50)),
         }
-        log.info(f"tool index cleaned allowlist: providers/tool_index.py: {cleaned_allowlist}")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["X-Internal-Key"] = self.api_key

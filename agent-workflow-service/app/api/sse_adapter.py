@@ -30,6 +30,12 @@ _ACTIVITY_FIELDS = (
     "truncated_source_count",
     "preview",
     "artifact_count",
+    "explore_cycles",
+    "stop_condition",
+    "missing",
+    "slot_count",
+    "updated_slots",
+    "cleared_slots",
 )
 
 

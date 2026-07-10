@@ -12,30 +12,6 @@ _ORCHESTRATOR_ROOT = _PACKAGE_DIR.parent.parent
 _DEFAULT_CONFIG = _PACKAGE_DIR / "agents" / "default.yaml"
 
 
-def _print_review(event: dict) -> None:
-    """Helper for print review."""
-    verdict = event.get("verdict", "?")
-    print(f"\n[review] verdict={verdict}", flush=True)
-    print(
-        f"         artifacts={event.get('artifact_count', 0)} "
-        f"tool_calls={event.get('tool_call_count', 0)}",
-        flush=True,
-    )
-    preview = (event.get("draft_answer_preview") or "").strip()
-    if preview:
-        print(f"         draft: {preview[:200]}", flush=True)
-    for label, key in (
-        ("issues", "issues"),
-        ("missing evidence", "missing_evidence"),
-        ("required changes", "required_changes"),
-    ):
-        items = [i for i in (event.get(key) or []) if i and str(i).lower() != "none"]
-        if items:
-            print(f"         {label}:", flush=True)
-            for item in items:
-                print(f"           - {item}", flush=True)
-
-
 def main() -> None:
     """Run the command-line workflow entrypoint."""
     if str(_ORCHESTRATOR_ROOT) not in sys.path:
@@ -70,48 +46,20 @@ def main() -> None:
         args.config,
         callbacks=HostCallbacks(on_destructive_action=approve_destructive),
     )
-    print(f"Running agent: {engine.config.name}\n", flush=True)
 
+    # Per-step run visibility is streamed asynchronously to Splunk HEC by the
+    # engine; the CLI only surfaces the final answer (and any error) here.
+    answer = ""
+    error = None
     for event in engine.stream(RunRequest(query=query, session_id="cli")):
-        event_type = event.get("type")
-        if event_type == "status":
-            print(f"[status] {event.get('message')}", flush=True)
-        elif event_type == "plan":
-            print(f"[plan] goal: {event.get('goal', '')}", flush=True)
-            for idx, title in enumerate(event.get("steps") or [], start=1):
-                print(f"       {idx}. {title}", flush=True)
-        elif event_type == "debug":
-            print(f"[debug] {event.get('message')}", flush=True)
-        elif event_type == "agent_activity":
-            print(f"[activity] {event.get('label')}", flush=True)
-            tool_count = event.get("tool_count")
-            tools = event.get("tools") or []
-            if tool_count is not None:
-                print(f"           matched {tool_count} tool(s)", flush=True)
-            if tools:
-                print(f"           top: {', '.join(tools)}", flush=True)
-            if event.get("arguments"):
-                print(f"           args: {json.dumps(event['arguments'])[:200]}", flush=True)
-            if event.get("error"):
-                print(f"           error: {event['error']}", flush=True)
-        elif event_type == "pending_approval":
-            # Unreachable with the interactive approver above, but printed for
-            # hosts embedding this loop without a synchronous callback.
-            print(
-                f"[approval] paused: {event.get('tool')} requires approval "
-                f"(thread {event.get('thread_id')})",
-                flush=True,
-            )
-        elif event_type == "review":
-            _print_review(event)
-        elif event_type == "delta":
-            print(f"\n[draft]\n{event.get('content', '')}", flush=True)
-        elif event_type == "done":
-            print("\n--- done ---")
-            print(event.get("answer") or "")
-            if event.get("error"):
-                print(f"error: {event.get('error')}", file=sys.stderr)
-                raise SystemExit(1)
+        if event.get("type") == "done":
+            answer = event.get("answer") or ""
+            error = event.get("error")
+
+    print(answer)
+    if error:
+        print(f"error: {error}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

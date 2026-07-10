@@ -55,9 +55,42 @@ def test_missing_evidence_routes_to_executor_not_revision():
     assert updates["phase"] == "executing"  # re-enter executor
     assert updates["iteration"]["explore_cycles"] == 1
     assert updates["plan"]["steps"][-1]["title"] == "Gather missing evidence"
+    assert updates["plan"]["steps"][-1]["required_tools"] == ["get_panel_data"]
     assert "get_panel_data" in updates["review_feedback"]
     assert updates["current_step_index"] == len(updates["plan"]["steps"]) - 1
     assert any(event.get("step") == "reviewer.re_explore" for event in updates["events"])
+
+
+def test_re_explore_reuses_single_step_across_cycles():
+    # Regression: each re-explore cycle used to append a fresh "Gather missing
+    # evidence" step, growing the plan unboundedly. It must reuse one step.
+    config = _config(max_explore_cycles=3)
+    llm = _ReviewerLlm('{"verdict":"REVISE","issues":[],"missing_evidence":["call get_panel_data for the dashboard"],"required_changes":[]}')
+
+    first = reviewer_node(_review_state(), config=config, llm=llm)
+    steps_after_first = first["plan"]["steps"]
+    assert steps_after_first[-1].get("origin") == "re_explore"
+
+    # Feed the first cycle's plan/iteration back in (as the graph would) and
+    # re-explore again — the plan length must not grow.
+    second_state = _review_state(
+        plan=first["plan"],
+        iteration=dict(first["iteration"], review_cycles=1),
+    )
+    second = reviewer_node(second_state, config=config, llm=llm)
+    assert len(second["plan"]["steps"]) == len(steps_after_first)
+    assert second["plan"]["steps"][-1]["title"] == "Gather missing evidence"
+
+
+def test_live_data_gate_ignores_bare_descriptive_words():
+    from app.agent_workflow.nodes.reviewer import _question_needs_live_data
+
+    # Over-broad words alone must NOT trigger the quantitative-evidence gate.
+    assert not _question_needs_live_data("let use this dashboard to see if power is available")
+    assert not _question_needs_live_data("what is the current capacity story")
+    # Genuine quantitative questions still do.
+    assert _question_needs_live_data("is there at least 30kv available in rtp")
+    assert _question_needs_live_data("how many panels are there")
 
 
 def test_wording_only_revise_stays_text_revision():
@@ -68,6 +101,16 @@ def test_wording_only_revise_stays_text_revision():
 
     assert updates["phase"] == "revising"
     assert "explore_cycles" not in updates["iteration"] or updates["iteration"].get("explore_cycles", 0) == 0
+
+
+def test_re_explore_resets_no_progress_counter():
+    config = _config(max_explore_cycles=2)
+    llm = _ReviewerLlm('{"verdict":"REVISE","missing_evidence":["call get_panel_data for the dashboard"],"required_changes":[]}')
+    state = _review_state(iteration={"review_cycles": 0, "revision_cycles": 0, "no_progress_turns": 3})
+    updates = reviewer_node(state, config=config, llm=llm)
+
+    assert updates["phase"] == "executing"
+    assert updates["iteration"]["no_progress_turns"] == 0
 
 
 def test_re_explore_respects_cycle_cap():
@@ -86,6 +129,27 @@ def test_re_explore_disabled_when_cap_zero():
     updates = reviewer_node(_review_state(), config=config, llm=llm)
 
     assert updates["phase"] == "revising"  # re-exploration turned off
+
+
+def test_sse_adapter_passes_through_re_explore_and_stop_fields():
+    # The reviewer.re_explore / stop_condition activity fields must survive the
+    # SSE whitelist, not be silently dropped.
+    from app.api.sse_adapter import engine_event_to_sse
+
+    name, data = engine_event_to_sse(
+        {
+            "type": "agent_activity",
+            "label": "Reviewer requested more exploration",
+            "explore_cycles": 2,
+            "missing_evidence": ["need get_panel_data"],
+            "stop_condition": "have panel data",
+            "missing": ["get_cards"],
+        }
+    )
+    assert name == "agent_activity"
+    assert data["explore_cycles"] == 2
+    assert data["stop_condition"] == "have panel data"
+    assert data["missing"] == ["get_cards"]
 
 
 def test_formatting_gap_routes_to_text_revision_not_re_explore():
@@ -192,6 +256,75 @@ class _FinishLlm:
 
     def stream(self, messages, *, max_tokens: int = 1024):
         yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_executor_does_not_stop_while_plan_steps_remain():
+    config = _config(max_no_progress_turns=1, min_progress_score=0.5)
+    state = {
+        "user_query": "q",
+        "phase": "executing",
+        "iteration": {"executor_turns": 1, "useful_artifacts_seen": 0, "no_progress_turns": 0},
+        "current_step_index": 0,
+        "plan": {
+            "goal": "g",
+            "steps": [
+                {"title": "Discover", "action": "discover", "required_tools": ["list_dashboards"]},
+                {"title": "Fetch", "action": "fetch", "tool_hint": "get_panel_data"},
+            ],
+        },
+        "candidate_tools": [],
+        "tool_discovery_cache": {},
+        "tool_calls": [{"name": "list_dashboards", "status": "ok", "step_index": 0, "replan_id": 0}],
+        "artifacts": [{"id": "a", "tool": "list_dashboards", "composite_score": 0.2, "step_index": 0}],
+        "events": [],
+    }
+    updates = executor_node(state, config=config, llm=_FinishLlm(), tools=_PanelTools())
+
+    assert updates["phase"] == "executing"
+    assert not any(event.get("step") == "executor.no_progress_stop" for event in updates["events"])
+
+
+def test_finish_step_honors_required_tool_called_run_wide_with_backticks():
+    from app.agent_workflow.parsing import parse_plan_markdown
+
+    plan = parse_plan_markdown(
+        "### Goal\nFind power\n### Execution Plan\n"
+        "1. **Search** — Action: search — Tool hint: auto — "
+        "Expected output: dashboards — Stop condition: found — Required tools: `list_dashboards`"
+    )
+    config = _config()
+    state = {
+        "user_query": "q",
+        "phase": "executing",
+        "iteration": {"executor_turns": 2},
+        "current_step_index": 0,
+        "plan": plan,
+        "candidate_tools": [],
+        "tool_discovery_cache": {},
+        "tool_calls": [{"name": "list_dashboards", "status": "ok", "step_index": 0, "replan_id": 0}],
+        "artifacts": [{"id": "a", "tool": "list_dashboards", "composite_score": 0.8, "step_index": 0}],
+        "events": [],
+    }
+    updates = executor_node(state, config=config, llm=_FinishLlm(), tools=_PanelTools())
+
+    assert any(event.get("step") == "executor.finish_step" for event in updates["events"])
+    assert updates.get("current_step_index") == 1
+
+
+def test_approve_blocked_without_row_data_for_quantitative_question():
+    config = _config(max_explore_cycles=1)
+    llm = _ReviewerLlm('{"verdict":"APPROVE","issues":[],"missing_evidence":[],"required_changes":[]}')
+    state = _review_state(
+        user_query="Do we have at least 30 kW available in RTP?",
+        draft_answer="Yes, capacity looks fine.",
+        artifacts=[{"id": "a", "tool": "list_dashboards", "summary": "31 dashboards", "raw_ref": {"total": 31}}],
+        tool_calls=[{"name": "list_dashboards", "status": "ok", "step_index": 0, "replan_id": 0}],
+    )
+    updates = reviewer_node(state, config=config, llm=llm)
+
+    assert updates["phase"] == "executing"
+    assert updates["review"]["verdict"] == "REVISE"
+    assert any("row-level data" in item for item in updates["review"]["missing_evidence"])
 
 
 def test_executor_stops_when_exploration_stalls():
@@ -361,3 +494,25 @@ def test_reviewer_re_enters_executor_end_to_end():
     assert result.answer
     assert result.error is None
     assert any(e.get("step") == "reviewer.re_explore" for e in result.events)
+
+
+def test_streaming_maps_reviewer_re_explore_to_agent_activity():
+    from app.agent_workflow.streaming import map_graph_update
+
+    events = map_graph_update(
+        {
+            "events": [
+                {
+                    "step": "reviewer.re_explore",
+                    "explore_cycles": 1,
+                    "missing_evidence": ["list_dashboards"],
+                }
+            ]
+        },
+        {},
+        node_name="reviewer",
+    )
+    activity = [event for event in events if event.get("type") == "agent_activity"]
+    assert activity
+    assert activity[0]["phase"] == "running"
+    assert activity[0]["missing_evidence"] == ["list_dashboards"]

@@ -98,7 +98,10 @@ class ReviewerDefaultsModel(BaseModel):
     # so nested wins only when explicitly set (mirrors the enabled flag).
     max_cycles: int | None = Field(None, ge=1, le=20)
     # REJECT returns the best available draft and stops. Replan-on-reject is not wired.
-    reject_action: str = Field("abort", pattern="^abort$")
+    # Accept the legacy "replan" value so pre-existing configs still validate.
+    # Reject currently always aborts (replan-on-reject is not wired), so "replan"
+    # is preserved but behaves as "abort".
+    reject_action: str = Field("abort", pattern="^(replan|abort)$")
     # always: review every run; on_risk: review only runs with failed/denied
     # tool calls or errors — clean runs skip the reviewer LLM call.
     mode: str = Field("always", pattern="^(always|on_risk)$")
@@ -196,7 +199,10 @@ class AgentPolicyModel(BaseModel):
     max_retained_events: int = Field(80, ge=0, le=500)
     tool_discovery_cache_size: int = Field(16, ge=0, le=200)
     # REJECT returns the best available draft and stops. Replan-on-reject is not wired.
-    reject_action: str = Field("abort", pattern="^abort$")
+    # Accept the legacy "replan" value so pre-existing configs still validate.
+    # Reject currently always aborts (replan-on-reject is not wired), so "replan"
+    # is preserved but behaves as "abort".
+    reject_action: str = Field("abort", pattern="^(replan|abort)$")
     destructive_tools: list[str] = Field(default_factory=list, max_length=256)
     require_destructive_confirmation: bool = True
     enable_fast_path: bool = True
@@ -208,6 +214,8 @@ class AgentPolicyModel(BaseModel):
     cross_turn_artifact_persistence: bool = False
     artifact_store_ttl_seconds: int = Field(86400, ge=60, le=604800)
     require_tool_on_follow_up: bool = True
+    enable_conversation_memory: bool = True
+    conversation_memory_max_slots: int = Field(10, ge=0, le=64)
     truncation: TruncationPolicyModel = Field(default_factory=TruncationPolicyModel)
     model: str | None = Field(default=None, max_length=255)
     instructions: str = Field("", max_length=60_000)

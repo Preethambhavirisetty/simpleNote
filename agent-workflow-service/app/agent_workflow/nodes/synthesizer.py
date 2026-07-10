@@ -91,6 +91,17 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
     evidence = _primary_evidence(state, config=config)
     plan = state.get("plan") or {}
     criteria = "\n".join(f"- {item}" for item in plan.get("acceptance_criteria") or [])
+    history_block = _follow_up_history_block(state, config=config)
+    user_content = (
+        f"User request:\n{state.get('user_query', '')}\n\n"
+        f"Goal:\n{plan.get('goal', '')}\n\n"
+        f"Acceptance criteria:\n{criteria or '(none)'}\n\n"
+        f"Primary evidence (verbatim tool results, highest-scored first):\n{evidence or '(none)'}\n\n"
+        f"Facts with provenance:\n{chr(10).join(fact_lines) if fact_lines else '(none)'}\n\n"
+        "Return only the draft answer in GFM markdown."
+    )
+    if history_block:
+        user_content = f"{history_block}\n\n{user_content}"
     return [
         {
             "role": "system",
@@ -105,16 +116,34 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
         },
         {
             "role": "user",
-            "content": (
-                f"User request:\n{state.get('user_query', '')}\n\n"
-                f"Goal:\n{plan.get('goal', '')}\n\n"
-                f"Acceptance criteria:\n{criteria or '(none)'}\n\n"
-                f"Primary evidence (verbatim tool results, highest-scored first):\n{evidence or '(none)'}\n\n"
-                f"Facts with provenance:\n{chr(10).join(fact_lines) if fact_lines else '(none)'}\n\n"
-                "Return only the draft answer in GFM markdown."
-            ),
+            "content": user_content,
         },
     ]
+
+
+def _follow_up_history_block(state: AgentState, *, config: AgentConfig) -> str:
+    """Bounded prior-turn context for formatting/clarification follow-ups."""
+    runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
+    if not runtime.get("follow_up"):
+        return ""
+    messages = state.get("messages") or []
+    if not messages:
+        return ""
+    limit = min(4, int(config.policy.context.max_history_messages))
+    if limit <= 0:
+        # messages[-0:] would leak the entire history; 0 means "no history".
+        return ""
+    lines: list[str] = []
+    for message in messages[-limit:]:
+        role = str(message.get("role") or "user")
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        preview = content[:1200] + ("…" if len(content) > 1200 else "")
+        lines.append(f"{role}: {preview}")
+    if not lines:
+        return ""
+    return "Prior conversation (for follow-up formatting/context only):\n" + "\n".join(lines)
 
 
 def _primary_evidence(state: AgentState, *, config: AgentConfig) -> str:

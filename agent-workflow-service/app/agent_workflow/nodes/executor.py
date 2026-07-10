@@ -15,6 +15,7 @@ from app.agent_workflow.context import (
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.follow_up import follow_up_tool_recall_missing
 from app.agent_workflow.parsing import parse_executor_action
+from app.agent_workflow.parsing import normalize_tool_name
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.state import AgentState, Artifact, ToolCallRecord
@@ -60,15 +61,48 @@ def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
             and int(artifact.get("replan_id") or 0) == replan_id
             and artifact.get("tool")
         ):
-            called.add(str(artifact.get("tool")))
+            called.add(normalize_tool_name(artifact.get("tool")))
     for record in state.get("tool_calls") or []:
         if (
             int(record.get("step_index", -1)) == step_index
             and int(record.get("replan_id") or 0) == replan_id
             and record.get("name")
         ):
-            called.add(str(record.get("name")))
+            called.add(normalize_tool_name(record.get("name")))
     return called
+
+
+def _called_tools_for_run(state: AgentState) -> set[str]:
+    """Return successful tool names called anywhere in the current replan."""
+    replan_id = _current_replan_id(state)
+    called: set[str] = set()
+    for record in state.get("tool_calls") or []:
+        if (
+            int(record.get("replan_id") or 0) == replan_id
+            and str(record.get("status") or "") == "ok"
+            and record.get("name")
+        ):
+            called.add(normalize_tool_name(record.get("name")))
+    return called
+
+
+def _step_has_evidence(state: AgentState, step_index: int) -> bool:
+    """Return whether the current plan step produced at least one successful tool result."""
+    replan_id = _current_replan_id(state)
+    for record in state.get("tool_calls") or []:
+        if (
+            int(record.get("step_index", -1)) == step_index
+            and int(record.get("replan_id") or 0) == replan_id
+            and str(record.get("status") or "") == "ok"
+        ):
+            return True
+    for artifact in state.get("artifacts") or []:
+        if (
+            int(artifact.get("step_index", -1)) == step_index
+            and int(artifact.get("replan_id") or 0) == replan_id
+        ):
+            return True
+    return False
 
 
 def _step_call_signatures_and_count(state: AgentState, step_index: int) -> tuple[set[tuple[str, str]], int]:
@@ -117,6 +151,22 @@ def _update_no_progress(state: AgentState, iteration: dict[str, Any], config: Ag
     no_progress = int(iteration.get("no_progress_turns") or 0) + 1
     iteration["no_progress_turns"] = no_progress
     return no_progress >= cap, iteration
+
+
+def _finish_is_deadlocked(iteration: dict[str, Any], config: AgentConfig) -> bool:
+    """Return whether finish_step guards have blocked progress for too long.
+
+    The finish_step guards (follow-up recall, stop_condition, required tools)
+    each veto a premature finish by returning without advancing. That is correct
+    once, but if the executor keeps arriving at finish_step while producing no new
+    evidence, the guards and the model's repeated action deadlock (a repeated
+    duplicate call is coerced to finish, then vetoed, then repeated). The generic
+    no-progress counter is the arbitration signal: once it reaches the cap the
+    step cannot make progress, so the veto must yield and let the step advance
+    rather than burn the whole iteration budget.
+    """
+    cap = int(config.policy.max_no_progress_turns)
+    return cap > 0 and int(iteration.get("no_progress_turns") or 0) >= cap
 
 
 def _cache_key(query: str) -> str:
@@ -191,13 +241,35 @@ def _filter_candidates_by_policy(candidates: list[dict[str, Any]], *, config: Ag
 
 def _required_tools_for_step(config: AgentConfig, step: dict[str, Any]) -> set[str]:
     """Return tool names that must run before this step can finish."""
-    required = {tool for tool in (step.get("required_tools") or []) if tool}
+    required = {normalize_tool_name(tool) for tool in (step.get("required_tools") or []) if normalize_tool_name(tool)}
+    hint = normalize_tool_name(step.get("tool_hint"))
+    if hint and hint.lower() not in {"auto", "none", "any"}:
+        required.add(hint)
     title = str(step.get("title") or "")
     for key, tools in (config.policy.tools.required_tools or {}).items():
         if key == "*" or (title and key.lower() in title.lower()):
-            required.update(tool for tool in (tools or []) if tool)
-    denylist = {item for item in (config.policy.tools.denylist or []) if item}
-    return {tool for tool in required if tool not in denylist}
+            required.update(normalize_tool_name(tool) for tool in (tools or []) if normalize_tool_name(tool))
+    denylist = {normalize_tool_name(item) for item in (config.policy.tools.denylist or []) if normalize_tool_name(item)}
+    return {tool for tool in required if tool and tool not in denylist}
+
+
+def _plan_steps_incomplete(state: AgentState, config: AgentConfig) -> bool:
+    """Return whether the executor still has unfinished plan work."""
+    steps = (state.get("plan") or {}).get("steps") or []
+    if not steps:
+        return False
+    step_index = int(state.get("current_step_index") or 0)
+    if step_index >= len(steps):
+        return False
+    current_step = steps[step_index]
+    required = _required_tools_for_step(config, current_step)
+    called = _called_tools_for_step(state, step_index) | _called_tools_for_run(state)
+    if required - called:
+        return True
+    stop_condition = str(current_step.get("stop_condition") or "").strip()
+    if stop_condition and not _step_has_evidence(state, step_index):
+        return True
+    return step_index < len(steps) - 1
 
 
 def _apply_argument_injection(
@@ -623,7 +695,7 @@ def executor_node(
     # Generic early stop: once tool work stops producing useful new evidence,
     # stop exploring and answer with what we have rather than burning the budget.
     stalled, iteration = _update_no_progress(state, iteration, config)
-    if stalled:
+    if stalled and not _plan_steps_incomplete(state, config):
         return {
             "phase": "fact_extracting",
             "iteration": iteration,
@@ -973,30 +1045,64 @@ def executor_node(
         )
 
     if action_type == "finish_step":
-        missing_follow_up = follow_up_tool_recall_missing(state)
-        if missing_follow_up:
+        # A single arbitration point: the finish guards may veto a premature
+        # finish, but only until the step is deadlocked (no new evidence for
+        # max_no_progress_turns). Past that, vetoing again would just spin the
+        # same coerced-finish loop, so the step is force-advanced instead.
+        deadlocked = _finish_is_deadlocked(iteration, config)
+        if not deadlocked:
+            missing_follow_up = follow_up_tool_recall_missing(state)
+            if missing_follow_up:
+                updates["events"].append(
+                    {
+                        "step": "executor.follow_up_evidence_missing",
+                        "step_index": step_index,
+                        "missing": missing_follow_up,
+                        "message": missing_follow_up[0],
+                    }
+                )
+                return updates
+            stop_condition = str(current_step.get("stop_condition") or "").strip()
+            if stop_condition and not _step_has_evidence(state, step_index):
+                updates["events"].append(
+                    {
+                        "step": "executor.stop_condition_unmet",
+                        "step_index": step_index,
+                        "stop_condition": stop_condition,
+                        "message": (
+                            f"Stop condition not met yet: {stop_condition}. "
+                            "Call tools and gather evidence before finish_step."
+                        ),
+                    }
+                )
+                return updates
+            required_tools = _required_tools_for_step(config, current_step)
+            called = _called_tools_for_step(state, step_index) | _called_tools_for_run(state)
+            missing_required = sorted(required_tools - called)
+            if missing_required:
+                updates["events"].append(
+                    {
+                        "step": "executor.required_tools_missing",
+                        "step_index": step_index,
+                        "required_tools": missing_required,
+                        "message": f"Required tools not yet called: {', '.join(missing_required)}",
+                    }
+                )
+                return updates
+        else:
             updates["events"].append(
                 {
-                    "step": "executor.follow_up_evidence_missing",
+                    "step": "executor.finish_deadlock_break",
                     "step_index": step_index,
-                    "missing": missing_follow_up,
-                    "message": missing_follow_up[0],
+                    "no_progress_turns": int(iteration.get("no_progress_turns") or 0),
+                    "message": "Step guards blocked finish with no new evidence; advancing to avoid a loop.",
                 }
             )
-            return updates
-        required_tools = _required_tools_for_step(config, current_step)
-        missing_required = sorted(required_tools - called_this_step)
-        if missing_required:
-            updates["events"].append(
-                {
-                    "step": "executor.required_tools_missing",
-                    "step_index": step_index,
-                    "required_tools": missing_required,
-                    "message": f"Required tools not yet called: {', '.join(missing_required)}",
-                }
-            )
-            return updates
         next_index = step_index + 1
+        # Each step gets a fresh stall budget so a deadlock on one step does not
+        # immediately trip the no-progress stop on the next.
+        iteration["no_progress_turns"] = 0
+        updates["iteration"] = iteration
         updates["current_step_index"] = next_index
         updates["candidate_tools"] = []
         updates["events"].append({"step": "executor.finish_step", "step_index": step_index})

@@ -88,6 +88,24 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
                     "tools": tools,
                 }
             )
+        elif step == "executor.stop_condition_unmet":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "running",
+                    "label": entry.get("message") or "Stop condition not met; gathering more evidence",
+                    "stop_condition": entry.get("stop_condition"),
+                }
+            )
+        elif step == "executor.follow_up_evidence_missing":
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "blocked",
+                    "label": entry.get("message") or "Follow-up requires fresh tool evidence",
+                    "missing": entry.get("missing") or [],
+                }
+            )
         elif step in {
             "executor.tool_candidates_available",
             "executor.duplicate_tool_skipped",
@@ -236,6 +254,17 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
             events.append({"type": "debug", "message": f"Synthesis timed out: {entry.get('error')}"})
         elif step == "reviewer.parse_failed":
             events.append({"type": "debug", "message": "Reviewer output was not parseable; defaulting to REVISE"})
+        elif step == "reviewer.re_explore":
+            missing = entry.get("missing_evidence") or []
+            events.append(
+                {
+                    "type": "agent_activity",
+                    "phase": "running",
+                    "label": "Reviewer requested more exploration",
+                    "explore_cycles": entry.get("explore_cycles", 0),
+                    "missing_evidence": missing,
+                }
+            )
         elif step == "finalizer.unexpected_phase":
             events.append({"type": "debug", "message": f"Finalizer reached an unexpected phase ({entry.get('phase', '')}); returning best-effort answer"})
         elif step == "revision.completed":
@@ -271,15 +300,15 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
                     "draft_answer_preview": entry.get("draft_answer_preview", ""),
                 }
             )
+            # Summary-only activity ping: the full issue/missing/change lists ride
+            # on the `review` event above, so they are not repeated here (emitting
+            # both rendered every verdict twice in the activity feed).
             events.append(
                 {
                     "type": "agent_activity",
                     "phase": "review",
                     "label": " · ".join(summary_parts),
                     "verdict": verdict,
-                    "issues": issues,
-                    "missing_evidence": missing,
-                    "required_changes": required,
                 }
             )
 

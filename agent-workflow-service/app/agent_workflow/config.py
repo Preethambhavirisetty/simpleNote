@@ -222,6 +222,8 @@ class AgentPolicy:
     cross_turn_artifact_persistence: bool = False
     artifact_store_ttl_seconds: int = 86400
     require_tool_on_follow_up: bool = True
+    enable_conversation_memory: bool = True
+    conversation_memory_max_slots: int = 10
     truncation: TruncationPolicy = field(default_factory=TruncationPolicy)
     tools: ToolPolicy = field(default_factory=ToolPolicy)
     planner: PlannerDefaults = field(default_factory=PlannerDefaults)
@@ -455,6 +457,8 @@ class AgentConfig:
                 "cross_turn_artifact_persistence": policy.cross_turn_artifact_persistence,
                 "artifact_store_ttl_seconds": policy.artifact_store_ttl_seconds,
                 "require_tool_on_follow_up": policy.require_tool_on_follow_up,
+                "enable_conversation_memory": policy.enable_conversation_memory,
+                "conversation_memory_max_slots": policy.conversation_memory_max_slots,
                 "summary": {
                     "compact_after_artifacts": policy.summary.compact_after_artifacts,
                     "keep_after_summary": policy.summary.keep_after_summary,
@@ -591,6 +595,8 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         cross_turn_artifact_persistence=_as_bool(policy_raw.cross_turn_artifact_persistence, False),
         artifact_store_ttl_seconds=_as_int(policy_raw.artifact_store_ttl_seconds, 86400),
         require_tool_on_follow_up=_as_bool(policy_raw.require_tool_on_follow_up, True),
+        enable_conversation_memory=_as_bool(policy_raw.enable_conversation_memory, True),
+        conversation_memory_max_slots=_as_int(policy_raw.conversation_memory_max_slots, 10),
         truncation=TruncationPolicy(
             max_artifact_chars=_as_int(trunc_raw.max_artifact_chars, 2500),
             max_string_field_chars=_as_int(trunc_raw.max_string_field_chars, 400),
@@ -842,6 +848,8 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "cross_turn_artifact_persistence": base.policy.cross_turn_artifact_persistence,
             "artifact_store_ttl_seconds": base.policy.artifact_store_ttl_seconds,
             "require_tool_on_follow_up": base.policy.require_tool_on_follow_up,
+            "enable_conversation_memory": base.policy.enable_conversation_memory,
+            "conversation_memory_max_slots": base.policy.conversation_memory_max_slots,
             "summary": {
                 "compact_after_artifacts": base.policy.summary.compact_after_artifacts,
                 "keep_after_summary": base.policy.summary.keep_after_summary,

@@ -14,6 +14,55 @@ def test_follow_up_query_detects_table_request():
     assert is_follow_up_query("put them in a table with serial numbers", history)
 
 
+def test_follow_up_query_detects_refinement_without_pronouns():
+    history = [
+        {
+            "role": "user",
+            "content": "autopod_rows_availability, site=RTP, show rows with available power under 30 kW",
+        },
+        {"role": "assistant", "content": "No single bucket covers under 30 kW; here are the closest filters..."},
+    ]
+    follow_up = (
+        "if there is no explicit filter for less than 30, "
+        "give me all rows from all from 0 to under 30"
+    )
+    assert is_follow_up_query(follow_up, history)
+
+
+def test_follow_up_query_detects_topic_anchor_overlap():
+    history = [{"role": "user", "content": "autopod_rows_availability site=RTP under 30 kW"}]
+    assert is_follow_up_query("show rows under 30 with populated tokens", history)
+
+
+def test_follow_up_query_detects_single_identifier_and_this_pronoun():
+    # Regression: a follow-up naming exactly one distinctive identifier (plus the
+    # pronoun "this") was misclassified as a new topic, wrongly clearing memory.
+    history = [
+        {"role": "user", "content": "tell me about the autopod_rows_availability dashboard"},
+        {"role": "assistant", "content": "The autopod_rows_availability dashboard shows power."},
+    ]
+    assert is_follow_up_query(
+        "let use this autopod_rows_availability dashboard to see if power is available", history
+    )
+    assert is_follow_up_query("what about this one", history)  # bare "this" pronoun
+    assert not is_follow_up_query("what is the weather in paris", history)  # genuine new topic
+
+
+def test_resolve_policy_requires_recall_without_app_specific_tool_names():
+    # The app-specific keyword->tool map was removed; a follow-up needing fresh
+    # evidence requires *some* tool call, not a hardcoded named tool.
+    history = [{"role": "user", "content": "tell me about the fleet_power dashboard"}]
+    policy = resolve_follow_up_policy(
+        query="show this fleet_power dashboard again",
+        history=history,
+        persisted_artifacts=[],
+        persistence_active=False,
+        require_tool_on_follow_up=True,
+    )
+    assert policy.is_follow_up and policy.require_tool_recall
+    assert policy.required_tools == frozenset()
+
+
 def test_without_persistence_follow_up_requires_tool_recall():
     history = [{"role": "assistant", "content": "Here are dashboards..."}]
     policy = resolve_follow_up_policy(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 from collections.abc import Iterator
@@ -13,6 +14,7 @@ from langgraph.types import Command
 
 from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
 from app.agent_workflow.artifact_store import get_artifact_store, is_cross_turn_persistence_active
+from app.agent_workflow.conversation_memory import extract_memory_slots, get_memory_store
 from app.agent_workflow.checkpointing import delete_thread, get_shared_checkpointer
 from app.agent_workflow.follow_up import apply_follow_up_runtime_context, build_search_query, resolve_follow_up_policy
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
@@ -23,9 +25,12 @@ from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.runtime_schema import RunRequestModel
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import begin_turn_trace, finish_turn_trace, llm_call, record_workflow_update
+from app.agent_workflow.splunk_hec import log_workflow_event, log_workflow_step
 from app.agent_workflow.streaming import HostCallbacks, RunRequest, RunResult, map_graph_update
 
 from app.agent_workflow.cache import get_or_create_provider, get_or_create_graph
+
+log = logging.getLogger(__name__)
 
 _TOOL_INTENT_RE = re.compile(
     r"\b(note|notes|document|documents|doc|docs|folder|folders|search|find|locate|summari[sz]e|"
@@ -381,6 +386,40 @@ class AgentEngine:
         )
         return prepared, persisted_artifacts
 
+    def _clear_conversation_memory_if_new_topic(
+        self,
+        *,
+        session_id: str,
+        is_follow_up: bool,
+        thread_id: str,
+    ) -> dict[str, Any] | None:
+        """Drop session memory on a new topic and surface UI/HEC telemetry when slots existed."""
+        policy = self.config.policy
+        if is_follow_up or not policy.enable_conversation_memory:
+            return None
+        session_id = str(session_id or "").strip()
+        if not session_id:
+            return None
+        store = get_memory_store()
+        prior = store.load(session_id)
+        if not prior:
+            return None
+        store.delete(session_id)
+        cleared_slots = sorted(str(key) for key in prior.keys())
+        log_workflow_event(
+            thread_id=thread_id,
+            session_id=session_id,
+            kind="memory.cleared",
+            data={"slot_count": len(prior), "cleared_slots": cleared_slots},
+        )
+        return {
+            "type": "agent_activity",
+            "label": "memory.cleared",
+            "thread_id": thread_id,
+            "slot_count": len(prior),
+            "cleared_slots": cleared_slots,
+        }
+
     def _initial_state(self, request: RunRequest, *, persisted_artifacts: list[dict[str, Any]] | None = None) -> AgentState:
         """Helper for initial state."""
         plan = {}
@@ -413,6 +452,7 @@ class AgentEngine:
             candidate_tools=[],
             tool_discovery_cache={},
             artifacts=list(persisted_artifacts or []),
+            conversation_memory=self._load_conversation_memory(request.session_id),
             tool_calls=[],
             facts=[],
             draft_answer="",
@@ -449,10 +489,16 @@ class AgentEngine:
         # Reviewer-driven re-exploration re-enters the executor loop, so its
         # bounded cycles add to the recursion budget alongside review passes.
         review_passes = max(1, review_cycles + explore_cycles + 1)
-        executor_budget = self.config.policy.max_executor_iterations * review_passes
+        # Each pass also visits the non-executor pipeline (summarizer,
+        # fact_extractor, synthesizer, reviewer, revision, finalizer). LangGraph's
+        # recursion_limit counts every node visit, so budget that per-pass
+        # overhead too — otherwise a heavy config trips GraphRecursionError mid-run
+        # well before the executor iteration caps are actually reached.
+        per_pass_node_overhead = 12
+        executor_budget = review_passes * (self.config.policy.max_executor_iterations + per_pass_node_overhead)
         return {
             "configurable": {"thread_id": thread_id},
-            "recursion_limit": max(25, executor_budget + 12),
+            "recursion_limit": max(25, executor_budget + 24),
         }
 
     @staticmethod
@@ -550,6 +596,16 @@ class AgentEngine:
                     max_events=self.config.policy.max_retained_events,
                 )
 
+                # Stream a per-step log to Splunk HEC in the background (no-op
+                # when disabled; enqueue never blocks the agent loop).
+                log_workflow_step(
+                    thread_id=thread_id,
+                    session_id=str(holder["state"].get("session_id") or ""),
+                    node=node_name,
+                    update=update,
+                    state=holder["state"],
+                )
+
     @staticmethod
     def _pending_approval_event(state: AgentState, thread_id: str) -> dict[str, Any] | None:
         """Helper for pending approval event."""
@@ -597,14 +653,19 @@ class AgentEngine:
             "thread_id": thread_id,
         }
 
-    def _persist_session_artifacts(self, request: RunRequest, state: AgentState) -> None:
-        """Save pruned artifacts for cross-turn reuse when persistence is active."""
+    def _persist_session_artifacts(self, state: AgentState) -> None:
+        """Save pruned artifacts for cross-turn reuse when persistence is active.
+
+        Session is read from state so every terminal path (run, stream, and the
+        post-approval resume) persists uniformly.
+        """
         policy = self.config.policy
         if not is_cross_turn_persistence_active(enabled=policy.cross_turn_artifact_persistence):
             return
         if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
             return
-        if not request.session_id:
+        session_id = str(state.get("session_id") or "")
+        if not session_id:
             return
         store = get_artifact_store()
         if store is None:
@@ -618,10 +679,84 @@ class AgentEngine:
                 reverse=True,
             )[:max_items]
         store.save(
-            request.session_id,
+            session_id,
             artifacts,
             ttl_seconds=policy.artifact_store_ttl_seconds,
         )
+
+    def _load_conversation_memory(self, session_id: str) -> dict[str, Any]:
+        """Load this session's established-entity slots (empty when disabled)."""
+        if not self.config.policy.enable_conversation_memory or not session_id:
+            return {}
+        try:
+            return get_memory_store().load(session_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("conversation memory load skipped: %s", exc)
+            return {}
+
+    def _update_conversation_memory(
+        self, state: AgentState, thread_id: str
+    ) -> dict[str, Any] | None:
+        """Merge this turn's entities into session memory for later follow-ups.
+
+        Runs once per turn at engine level (outside the graph). Persists the slot
+        map and, when something new was learned, streams a ``memory.updated``
+        record to Splunk HEC and returns an ``agent_activity`` event for the UI.
+        Session and turn are read from state so it serves the run, stream, and
+        post-approval resume paths uniformly.
+        """
+        policy = self.config.policy
+        session_id = str(state.get("session_id") or "")
+        if not policy.enable_conversation_memory or not session_id:
+            return None
+        if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
+            return None
+        prior = state.get("conversation_memory") or {}
+        turn = len(state.get("messages") or []) + 1
+        updated = extract_memory_slots(
+            prior,
+            state,
+            turn=turn,
+            max_slots=policy.conversation_memory_max_slots,
+        )
+        if not updated:
+            return None
+        state["conversation_memory"] = updated
+        # Compute the delta before writing so an unchanged turn skips the store
+        # round-trip (and emits no event) entirely.
+        changed = [
+            f"{key}={slot.get('value')}"
+            for key, slot in updated.items()
+            if not isinstance(prior.get(key), dict) or prior[key].get("value") != slot.get("value")
+        ]
+        if not changed:
+            return None
+        try:
+            get_memory_store().save(
+                session_id,
+                updated,
+                ttl_seconds=policy.artifact_store_ttl_seconds,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("conversation memory save skipped: %s", exc)
+        log_workflow_event(
+            thread_id=thread_id,
+            session_id=session_id,
+            kind="memory.updated",
+            data={"slot_count": len(updated), "updated_slots": changed},
+        )
+        return {
+            "type": "agent_activity",
+            "label": "memory.updated",
+            "thread_id": thread_id,
+            "slot_count": len(updated),
+            "updated_slots": changed,
+        }
+
+    def _emit(self, event: dict[str, Any] | None) -> None:
+        """Deliver an out-of-graph event to the host callback when present."""
+        if event and self.callbacks.on_event:
+            self.callbacks.on_event(event)
 
     def _cleanup_thread_if_terminal(self, state: AgentState, thread_id: str) -> None:
         """Helper for cleanup thread if terminal."""
@@ -678,11 +813,20 @@ class AgentEngine:
         request = self._validate_request(request)
         thread_id = self._new_thread_id(request.session_id)
         begin_turn_trace(thread_id, request.query)
+        log_workflow_event(thread_id=thread_id, session_id=request.session_id, kind="run.started", data={"query": request.query[:500], "mode": "sync"})
         fast_path, reason = self._can_fast_path(request)
         if fast_path:
             usage_start = self._llm_usage_snapshot()
+            log_workflow_event(thread_id=thread_id, session_id=request.session_id, kind="run.fast_path", data={"reason": reason})
             return self._attach_usage_event(self._fast_path_result(request, thread_id, reason), usage_start)
         request, persisted_artifacts = self._prepare_session(request)
+        self._emit(
+            self._clear_conversation_memory_if_new_topic(
+                session_id=request.session_id,
+                is_follow_up=bool((request.runtime_context or {}).get("follow_up")),
+                thread_id=thread_id,
+            )
+        )
         holder = {"state": self._initial_state(request, persisted_artifacts=persisted_artifacts)}
         usage_start = self._llm_usage_snapshot()
         try:
@@ -694,26 +838,61 @@ class AgentEngine:
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             self._attach_usage_event(result, usage_start)
-            self._persist_session_artifacts(request, holder["state"])
+            self._persist_session_artifacts(holder["state"])
+            self._emit(self._update_conversation_memory(holder["state"], thread_id))
             self._cleanup_thread_if_terminal(holder["state"], thread_id)
+            self._log_run_completed(result, session_id=request.session_id)
             return result
         result = self._result_from_state(holder["state"], thread_id)
         self._attach_usage_event(result, usage_start)
-        self._persist_session_artifacts(request, holder["state"])
+        self._persist_session_artifacts(holder["state"])
+        self._emit(self._update_conversation_memory(holder["state"], thread_id))
         self._cleanup_thread_if_terminal(holder["state"], thread_id)
+        self._log_run_completed(result, session_id=request.session_id)
         return result
+
+    @staticmethod
+    def _log_run_completed(result: RunResult, *, session_id: str = "") -> None:
+        """Emit a run-boundary log to Splunk (no-op when disabled).
+
+        The single shape used by every terminal path (run, stream, resume) so the
+        run.completed record does not vary by exit route.
+        """
+        log_workflow_event(
+            thread_id=result.thread_id,
+            session_id=session_id,
+            kind="run.completed",
+            data={
+                "answer_chars": len(result.answer or ""),
+                "verdict": (result.review or {}).get("verdict"),
+                "artifact_count": len(result.artifacts),
+                "tool_call_count": len(result.tool_calls),
+                "pending_approval": bool(result.pending_approval),
+                "error": result.error,
+            },
+        )
 
     def stream(self, request: RunRequest) -> Iterator[dict[str, Any]]:
         """Run one streaming LLM completion request."""
         request = self._validate_request(request)
         thread_id = self._new_thread_id(request.session_id)
         begin_turn_trace(thread_id, request.query)
+        log_workflow_event(thread_id=thread_id, session_id=request.session_id, kind="run.started", data={"query": request.query[:500], "mode": "stream"})
         fast_path, reason = self._can_fast_path(request)
         if fast_path:
+            log_workflow_event(thread_id=thread_id, session_id=request.session_id, kind="run.fast_path", data={"reason": reason})
             yield from self._stream_fast_path(request, thread_id, reason)
             return
 
         request, persisted_artifacts = self._prepare_session(request)
+        cleared = self._clear_conversation_memory_if_new_topic(
+            session_id=request.session_id,
+            is_follow_up=bool((request.runtime_context or {}).get("follow_up")),
+            thread_id=thread_id,
+        )
+        if cleared is not None:
+            self._emit(cleared)
+            yield cleared
         holder = {"state": self._initial_state(request, persisted_artifacts=persisted_artifacts)}
         usage_start = self._llm_usage_snapshot()
         yielded_pending_approval = False
@@ -741,9 +920,14 @@ class AgentEngine:
             raise
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
+            mem_event = self._update_conversation_memory(holder["state"], thread_id)
+            if mem_event is not None:
+                self._emit(mem_event)
+                yield mem_event
             yield self._done_event_from_result(result)
-            self._persist_session_artifacts(request, holder["state"])
+            self._persist_session_artifacts(holder["state"])
             self._cleanup_thread_if_terminal(holder["state"], thread_id)
+            self._log_run_completed(result, session_id=request.session_id)
             return
 
         pending_event = self._pending_approval_event(holder["state"], thread_id)
@@ -760,6 +944,11 @@ class AgentEngine:
                     self.callbacks.on_event(event)
                 yield event
 
+        mem_event = self._update_conversation_memory(holder["state"], thread_id)
+        if mem_event is not None:
+            self._emit(mem_event)
+            yield mem_event
+
         final = self._final_event(holder["state"], thread_id)
         if final is not None:
             usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
@@ -769,8 +958,9 @@ class AgentEngine:
             if self.callbacks.on_event:
                 self.callbacks.on_event(final)
             yield final
-        self._persist_session_artifacts(request, holder["state"])
+        self._persist_session_artifacts(holder["state"])
         self._cleanup_thread_if_terminal(holder["state"], thread_id)
+        self._log_run_completed(self._result_from_state(holder["state"], thread_id), session_id=request.session_id)
 
     def resume(self, thread_id: str, *, approved: bool) -> RunResult:
         """Resume a paused destructive-approval workflow and return its result."""
@@ -821,8 +1011,10 @@ class AgentEngine:
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
+            self._persist_session_artifacts(holder["state"])
             if cleanup_terminal:
                 self._cleanup_thread_if_terminal(holder["state"], thread_id)
+            self._log_run_completed(result, session_id=str(holder["state"].get("session_id") or ""))
             return
 
         if not holder["state"].get("pending_destructive") and not streamed_answer:
@@ -833,6 +1025,11 @@ class AgentEngine:
                     self.callbacks.on_event(event)
                 yield event
 
+        mem_event = self._update_conversation_memory(holder["state"], thread_id)
+        if mem_event is not None:
+            self._emit(mem_event)
+            yield mem_event
+
         final = self._final_event(holder["state"], thread_id)
         if final is not None:
             usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
@@ -842,8 +1039,13 @@ class AgentEngine:
             if self.callbacks.on_event:
                 self.callbacks.on_event(final)
             yield final
+        self._persist_session_artifacts(holder["state"])
         if cleanup_terminal:
             self._cleanup_thread_if_terminal(holder["state"], thread_id)
+        self._log_run_completed(
+            self._result_from_state(holder["state"], thread_id),
+            session_id=str(holder["state"].get("session_id") or ""),
+        )
 
     @staticmethod
     def _done_event_from_result(result: RunResult) -> dict[str, Any]:

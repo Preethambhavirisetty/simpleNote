@@ -47,7 +47,7 @@ policy:
   # freeing context for more exploration. Bounded by summary.max_cycles.
   enable_running_summary: true
   cross_turn_artifact_persistence: true
-  artifact_store_ttl_seconds: 8640
+  artifact_store_ttl_seconds: 86400
   require_tool_on_follow_up: true
 
   summary:

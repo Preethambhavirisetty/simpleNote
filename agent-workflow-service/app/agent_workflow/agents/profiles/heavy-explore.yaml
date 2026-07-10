@@ -30,7 +30,7 @@ policy:
   context:
     max_artifacts_in_prompt: 50
   truncation:
-    max_artifact_chars: 15000
+    max_artifact_chars: 45000
     max_string_field_chars: 8000
     max_fact_chars: 6000
     max_list_rows_visible: 300

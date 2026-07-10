@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Literal
 
 from app.agent_workflow.config import AgentConfig
+from app.agent_workflow.conversation_memory import render_memory
 from app.agent_workflow.state import AgentState, Artifact
 from app.agent_workflow.util.tokens import count_tokens
 
 Role = Literal["planner", "executor", "reviewer"]
+
+
+@lru_cache(maxsize=64)
+def _load_contract_prompt(path_str: str) -> str:
+    """Read and cache the shared contract prompt (ContextBuilder is rebuilt per
+    node call, so this avoids a disk read on every prompt build)."""
+    path = Path(path_str)
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
 
 
 class ContextBuilder:
@@ -62,9 +75,16 @@ class ContextBuilder:
             # never loses evidence that was summarized away to free context.
             sections.append((88, f"Working memory (summarized earlier findings):\n{running_summary}"))
 
+        if role in ("planner", "executor") and self._include_history(state):
+            memory = render_memory(state.get("conversation_memory"))
+            if memory:
+                # Entities the conversation has already established, so terse
+                # follow-ups ("how many panels does it have?") resolve naturally.
+                sections.append((86, f"Conversation memory (entities established earlier):\n{memory}"))
+
         history = state.get("messages") or []
-        if history:
-            sections.append((50, f"Conversation history:\n{self._format_history(history)}"))
+        if history and self._include_history(state):
+            sections.append((50, f"Conversation history:\n{self._format_history(history, state)}"))
 
         if role == "reviewer":
             sections.append((85, f"Draft answer:\n{state.get('draft_answer', '')}"))
@@ -77,10 +97,7 @@ class ContextBuilder:
 
     def _contract_prompt(self) -> str:
         """Load the shared contract prompt appended to every role system message."""
-        path = self.config.base_dir / "prompts" / "contract.md"
-        if path.is_file():
-            return path.read_text(encoding="utf-8").strip()
-        return ""
+        return _load_contract_prompt(str(self.config.base_dir / "prompts" / "contract.md"))
 
     def _fit_budget(self, sections: list[tuple[int, str]], system: str) -> str:
         """Select the highest-priority context sections that fit the token budget."""
@@ -123,6 +140,11 @@ class ContextBuilder:
             lines.append(
                 f"{prefix} Step {idx + 1}: {step.get('title', '')} — {step.get('action', '')}{hint}"
             )
+            if role == "executor" and idx == step_index:
+                if step.get("expected_output"):
+                    lines.append(f"    Expected output: {step.get('expected_output')}")
+                if step.get("stop_condition"):
+                    lines.append(f"    Stop when: {step.get('stop_condition')}")
         criteria = plan.get("acceptance_criteria") or []
         if criteria:
             lines.append("Acceptance criteria:")
@@ -174,10 +196,24 @@ class ContextBuilder:
             return content
         return f"{content[:head]}\n...[middle omitted]...\n{content[-tail:]}"
 
-    def _format_history(self, messages: list[dict[str, Any]]) -> str:
+    def _include_history(self, state: AgentState) -> bool:
+        """Include chat history only on follow-up turns to avoid topic bleed."""
+        runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
+        return bool(runtime.get("follow_up"))
+
+    def _history_limit(self, state: AgentState) -> int:
+        runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
+        if runtime.get("follow_up"):
+            return self.config.policy.context.max_history_messages
+        return 0
+
+    def _format_history(self, messages: list[dict[str, Any]], state: AgentState) -> str:
         """Format history for inclusion in LLM context."""
+        limit = self._history_limit(state)
+        if limit <= 0:
+            return ""
         lines = []
-        for message in messages[-self.config.policy.context.max_history_messages :]:
+        for message in messages[-limit:]:
             content = str(message.get("content", ""))
             lines.append(f"{message.get('role', 'user')}: {self._truncate_message_preview(content)}")
         return "\n".join(lines)

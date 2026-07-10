@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.agent_workflow.checkpointing import close_shared_checkpointers
 from app.agent_workflow.deadlines import shutdown_deadline_executor
+from app.agent_workflow.splunk_hec import close_splunk_sink
 from app.api.api_response import ApiResponse
 from app.api.checkpointer import close_runtime_checkpointer
 from app.api.config import SERVICE_PORT
@@ -27,6 +28,7 @@ async def lifespan(_app: FastAPI):
         close_runtime_checkpointer()
         close_shared_checkpointers()
         shutdown_deadline_executor()
+        close_splunk_sink()
 
 
 app = FastAPI(

@@ -7,7 +7,7 @@ from typing import Any
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.follow_up import follow_up_approval_gaps
-from app.agent_workflow.parsing import parse_review_markdown
+from app.agent_workflow.parsing import normalize_tool_name, parse_review_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import llm_call
@@ -47,6 +47,69 @@ _EMPTY_CLAIM_PHRASES = (
 )
 
 
+# Only phrasings that genuinely demand live numeric/row data. Bare descriptive
+# words (available, capacity, current, count) matched far too broadly and forced
+# needless re-exploration, so quantitative triggers now require an actual number
+# or an explicit counting question.
+_LIVE_DATA_QUERY_RE = re.compile(
+    r"(\bhow many\b|\bhow much\b|\bnumber of\b|"
+    r"\b(?:at least|at most|no more than|under|over|below|above|less than|more than|"
+    r"greater than|fewer than|exactly)\s+\d|"
+    r"[<>]=?\s*\d|\d+\s*(?:kw|kv|mw|gw|gb|tb|mb|%))",
+    re.I,
+)
+_TOOL_NAME_RE = re.compile(r"\b(?:get|list|search|run)_[a-z][a-z0-9_]*\b", re.I)
+
+
+def _question_needs_live_data(query: str) -> bool:
+    return bool(_LIVE_DATA_QUERY_RE.search(query or ""))
+
+
+def _artifacts_have_tabular_data(state: AgentState) -> bool:
+    for artifact in state.get("artifacts") or []:
+        if not isinstance(artifact, dict):
+            continue
+        raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
+        rows = raw_ref.get("rows")
+        if isinstance(rows, list) and rows:
+            return True
+        row_count = raw_ref.get("row_count")
+        if isinstance(row_count, int) and row_count > 0:
+            return True
+        items = raw_ref.get("items")
+        if isinstance(items, list) and items:
+            return True
+    return False
+
+
+def _quantitative_evidence_gaps(state: AgentState) -> list[str]:
+    """Block APPROVE when the question needs live figures but no tool returned rows."""
+    if not _question_needs_live_data(str(state.get("user_query") or "")):
+        return []
+    if _artifacts_have_tabular_data(state):
+        return []
+    return ["Gather live tool results with row-level data before approving a quantitative answer"]
+
+
+def _tools_mentioned_in_feedback(items: list[str], state: AgentState) -> list[str]:
+    """Infer concrete tool names from reviewer missing-evidence notes."""
+    known = {
+        normalize_tool_name(record.get("name"))
+        for record in (state.get("tool_calls") or [])
+        if record.get("name")
+    }
+    for candidate in state.get("candidate_tools") or []:
+        if candidate.get("name"):
+            known.add(normalize_tool_name(candidate.get("name")))
+    found: list[str] = []
+    for item in items:
+        for match in _TOOL_NAME_RE.finditer(str(item or "")):
+            name = normalize_tool_name(match.group(0))
+            if name and (name in known or name.startswith(("get_", "list_", "search_", "run_"))):
+                found.append(name)
+    return list(dict.fromkeys(found))
+
+
 def _completion_gaps(state: AgentState) -> list[str]:
     """Generic deterministic EVIDENCE gaps (missing tool data) before an APPROVE.
 
@@ -55,7 +118,9 @@ def _completion_gaps(state: AgentState) -> list[str]:
     bounded re-exploration. All app-specific tool heuristics were removed;
     completeness is otherwise the reviewer LLM's judgment.
     """
-    return list(follow_up_approval_gaps(state))
+    gaps = list(follow_up_approval_gaps(state))
+    gaps.extend(_quantitative_evidence_gaps(state))
+    return list(dict.fromkeys(gaps))
 
 
 def _contradiction_gaps(state: AgentState) -> list[str]:
@@ -109,17 +174,32 @@ def _needs_re_explore(state: AgentState, review: dict[str, Any], config: AgentCo
     return bool(state.get("tool_calls") or state.get("candidate_tools"))
 
 
-def _plan_with_explore_step(state: AgentState, feedback: str) -> dict[str, Any]:
-    """Append a bounded 'gather missing evidence' step for the executor to work."""
+def _plan_with_explore_step(state: AgentState, feedback: str, feedback_items: list[str]) -> dict[str, Any]:
+    """Provide a bounded 'gather missing evidence' step for the executor to work.
+
+    Re-exploration reuses a single trailing step (refreshing its guidance) rather
+    than appending a new one each cycle, so the plan does not grow an unbounded
+    run of identical "Gather missing evidence" steps across review cycles.
+    """
     plan = dict(state.get("plan") or {})
     steps = list(plan.get("steps") or [])
-    steps.append(
-        {
-            "title": "Gather missing evidence",
-            "action": feedback or "Gather the missing evidence identified in review.",
-            "tool_hint": "auto",
-        }
-    )
+    tools_needed = _tools_mentioned_in_feedback(feedback_items, state)
+    explore_step = {
+        "title": "Gather missing evidence",
+        "action": feedback or "Gather the missing evidence identified in review.",
+        "tool_hint": tools_needed[0] if tools_needed else "auto",
+        "required_tools": tools_needed,
+        "stop_condition": (
+            "Each required tool returned successful results with data"
+            if tools_needed
+            else "Missing evidence identified in review has been gathered"
+        ),
+        "origin": "re_explore",
+    }
+    if steps and steps[-1].get("origin") == "re_explore":
+        steps[-1] = explore_step
+    else:
+        steps.append(explore_step)
     plan["steps"] = steps
     return plan
 
@@ -205,9 +285,14 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         # fresh "gather missing evidence" plan step gives the executor real work.
         re_explored = True
         iteration["explore_cycles"] = int(iteration.get("explore_cycles") or 0) + 1
+        iteration["no_progress_turns"] = 0
+        # Give the re-entered executor a fresh iteration budget; otherwise a
+        # re-explore triggered near max_executor_iterations bails immediately and
+        # gathers nothing. Total turns stay bounded by max_explore_cycles.
+        iteration["executor_turns"] = 0
         required = review.get("missing_evidence") or review.get("required_changes") or review.get("issues") or []
         feedback = "\n".join(f"- {item}" for item in required)
-        plan = _plan_with_explore_step(state, feedback)
+        plan = _plan_with_explore_step(state, feedback, [str(item) for item in required])
         updates["iteration"] = iteration
         updates["review_feedback"] = feedback
         updates["plan"] = plan

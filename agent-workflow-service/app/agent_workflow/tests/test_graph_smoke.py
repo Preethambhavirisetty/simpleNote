@@ -408,6 +408,31 @@ def test_executor_breaks_repeated_search_loop_with_existing_candidates():
     assert any(event.get("step") == "executor.finish_step" for event in third["events"])
 
 
+def test_executor_blocks_finish_step_when_stop_condition_unmet():
+    from pathlib import Path
+
+    from app.agent_workflow.config import load_agent_config
+    from app.agent_workflow.nodes.executor import executor_node
+
+    config = load_agent_config(Path(__file__).resolve().parents[1] / "agents" / "document.yaml")
+    state = _executor_state(
+        plan={
+            "goal": "Find SLA",
+            "steps": [
+                {
+                    "title": "Search",
+                    "action": "search",
+                    "tool_hint": "search_documents",
+                    "stop_condition": "at least one search result",
+                }
+            ],
+        },
+    )
+    updates = executor_node(state, config=config, llm=FinishStepLlm(), tools=MockTools())
+    assert any(event.get("step") == "executor.stop_condition_unmet" for event in updates["events"])
+    assert updates.get("current_step_index", 0) == 0
+
+
 def test_executor_finish_last_step_hands_off_to_fact_extractor():
     from pathlib import Path
 
