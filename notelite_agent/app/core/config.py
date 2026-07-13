@@ -50,6 +50,11 @@ _load_aws_secrets()
 SECRET_KEY = require_env("SECRET_KEY")
 BACKEND_INTERNAL_URL_BASE = require_env("BACKEND_INTERNAL_URL_BASE")
 AGENT_API_KEY = require_env("AGENT_API_KEY")
+
+# Note field decryption — must match the backend's key when notes.encryption is on.
+NOTES_ENCRYPTION_KEY = require_env("NOTES_ENCRYPTION_KEY", "")
+NOTES_ENCRYPTION_KEY_ID = require_env("NOTES_ENCRYPTION_KEY_ID", "1")
+NOTES_ENCRYPTION_KEYS_RETIRED = require_env("NOTES_ENCRYPTION_KEYS_RETIRED", "")
 AGENT_WORKFLOW_INTERNAL_URL = require_env("AGENT_WORKFLOW_INTERNAL_URL", "http://agent-workflow:5453")
 AGENT_WORKFLOW_API_KEY = require_env("AGENT_WORKFLOW_API_KEY", AGENT_API_KEY)
 AGENT_WORKFLOW_CONFIG_NAME = require_env("AGENT_WORKFLOW_CONFIG_NAME", "notelite")

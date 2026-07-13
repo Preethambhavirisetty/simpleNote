@@ -5,11 +5,14 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core import pii
+from app.core.feature_flags import is_enabled
 from app.core.tiptap import extract_text
 from app.db.postgres.repos.folder import FolderRepository
 from app.db.postgres.repos.note import NoteRepository
 from app.db.postgres.repos.tag import TagRepository
 from app.exceptions.base import AppException
+from app.logger import logger
 from app.schema.base import ErrorCode
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 from app.services.ingestion_dispatch import dispatch_delete, dispatch_upsert
@@ -42,6 +45,20 @@ class NoteService:
                 error_code=ErrorCode.NOT_FOUND,
             )
         return folder
+
+    def _egress_allowed(self, note) -> bool:
+        """False when PII egress control is on and the note contains PII.
+
+        Blocks note content (title/description/text) from being dispatched to the external
+        agent LLM/embedding pipeline. The note is still stored (encrypted) in Postgres.
+        """
+        if not is_enabled("notes.pii_egress_control"):
+            return True
+        blob = " ".join(part for part in (note.title, note.description, note.content_text) if part)
+        if pii.contains_pii(blob):
+            logger.warning("notes.pii_egress_blocked", note_id=str(note.id), user_id=str(note.user_id))
+            return False
+        return True
 
     def _ingestion_payload(self, db: Session, note, user_role: list[str]) -> dict:
         """Build the full payload sent to the ingestion queue.
@@ -78,7 +95,7 @@ class NoteService:
         db.commit()           # commit first — note must exist before workers run
         db.refresh(note)
 
-        if content_text:
+        if content_text and self._egress_allowed(note):
             dispatch_upsert(self._ingestion_payload(db, note, user_role))
         return note
 
@@ -92,6 +109,23 @@ class NoteService:
         skip: int = 0,
         limit: int = 50,
     ):
+        if search and is_enabled("notes.encryption"):
+            # Encrypted title/content_text can't be searched in SQL. Fetch the page and
+            # filter the (transparently decrypted) rows in memory. This is page-scoped;
+            # full-corpus search is served semantically via the agent/chat.
+            notes = self.repo.list(
+                db, user_id,
+                folder_id=folder_id,
+                pinned_only=pinned_only,
+                search=None,
+                skip=skip,
+                limit=limit,
+            )
+            term = search.lower()
+            return [
+                note for note in notes
+                if term in (note.title or "").lower() or term in (note.content_text or "").lower()
+            ]
         return self.repo.list(
             db, user_id,
             folder_id=folder_id,
@@ -123,7 +157,8 @@ class NoteService:
 
         if content_changed:
             if content_text.strip():
-                dispatch_upsert(self._ingestion_payload(db, note, user_role))
+                if self._egress_allowed(note):
+                    dispatch_upsert(self._ingestion_payload(db, note, user_role))
             else:
                 dispatch_delete({
                     "userid": str(note.user_id),
@@ -143,7 +178,7 @@ class NoteService:
         db.refresh(note)
 
         # Re-index so the vector store's folder metadata reflects the new folder.
-        if note.content_text and note.content_text.strip():
+        if note.content_text and note.content_text.strip() and self._egress_allowed(note):
             dispatch_upsert(self._ingestion_payload(db, note, user_role))
         return note
 

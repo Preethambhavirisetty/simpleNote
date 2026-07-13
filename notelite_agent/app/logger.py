@@ -81,6 +81,16 @@ def _start_loki_pusher(loki_url: str, service: str):
     t.start()
 
 
+def _redact_pii(logger, method_name, event_dict):
+    """Scrub PII from string log values so it never reaches stdout or Loki."""
+    from app.core import pii
+
+    for key, value in event_dict.items():
+        if isinstance(value, str):
+            event_dict[key] = pii.redact(value)
+    return event_dict
+
+
 def setup_logging(level: int = logging.INFO, service: str = "backend"):
     loki_url = os.getenv("LOKI_URL")
     if loki_url:
@@ -91,6 +101,7 @@ def setup_logging(level: int = logging.INFO, service: str = "backend"):
         structlog.processors.add_log_level,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.format_exc_info,
+        _redact_pii,
         _loki_enqueue,
     ]
 

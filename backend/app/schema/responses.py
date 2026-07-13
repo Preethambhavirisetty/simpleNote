@@ -77,6 +77,7 @@ class NoteData(BaseModel):
     content_text: str | None = None
     is_pinned: bool
     is_memory_included: bool
+    has_pii: bool = False
     tags: list[NoteTagData]
     created_at: datetime
     updated_at: datetime

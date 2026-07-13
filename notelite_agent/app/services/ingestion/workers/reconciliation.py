@@ -21,9 +21,25 @@ from typing import Any
 from sqlalchemy import text
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
+from app.core import crypto
 from app.core.config import RECONCILE_BATCH_LIMIT
 from app.db.postgres import DatabaseManager
 from app.logger import logger
+
+# Note columns encrypted at rest by the backend -> their AAD field labels for decryption.
+_ENCRYPTED_NOTE_FIELDS = {
+    "note_title": "note.title",
+    "description": "note.description",
+    "text": "note.content_text",
+}
+
+
+def _decrypt_note_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Decrypt note content read directly from Postgres (no-op for plaintext rows)."""
+    for column, field in _ENCRYPTED_NOTE_FIELDS.items():
+        if row.get(column) is not None:
+            row[column] = crypto.decrypt(row[column], field)
+    return row
 from app.services.ingestion.workers.celery_app import RECONCILE_TASK, celery_app
 from app.services.ingestion.workers.ingestion_tasks import ingest_in_background
 
@@ -65,7 +81,7 @@ _ORPHAN_DOCUMENTS_SQL = text("""
 
 def find_stale_notes(session, limit: int) -> list[dict[str, Any]]:
     rows = session.execute(_STALE_NOTES_SQL, {"limit": limit}).mappings().all()
-    return [dict(row) for row in rows]
+    return [_decrypt_note_row(dict(row)) for row in rows]
 
 
 def find_orphan_documents(session, limit: int) -> list[dict[str, Any]]:

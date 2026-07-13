@@ -37,7 +37,25 @@ and which credentials must be regenerated before production.
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | compose (Grafana) | root `.env` |
 | `LLM_API_KEY` | agent — `require_env("LLM_API_KEY")` | `notelite_agent/.env` |
 | `EMBEDDING_API_KEY` (optional) | agent | `notelite_agent/.env` |
+| `NOTES_ENCRYPTION_KEY` (note encryption at rest) | backend — `require_env("NOTES_ENCRYPTION_KEY")` | `backend/.env` |
 | TLS `privkey.pem` / `fullchain.pem` | frontend nginx (read-only mount) | `certs/` (outside git) |
+
+### Note field encryption (encryption at rest)
+
+Note `title`, `description`, `content`, and `content_text` are encrypted at rest with
+AES-256-GCM when the `notes.encryption` feature flag is on. Set:
+
+    NOTES_ENCRYPTION_KEY=<base64 of 32 random bytes>   # e.g. `openssl rand -base64 32`
+    NOTES_ENCRYPTION_KEY_ID=1                           # active key version
+
+The flag must not be enabled without a key (the API refuses to start). Existing plaintext
+rows keep working (reads auto-detect ciphertext), so the flag can be turned on without a
+data migration. Keyword search over encrypted notes falls back to semantic search via the
+agent; the derived vectors in Qdrant hold plaintext and are protected by network isolation.
+
+**Rotation:** move the current key into `NOTES_ENCRYPTION_KEYS_RETIRED` (JSON `{id: key}`,
+used for decryption only), set a new `NOTES_ENCRYPTION_KEY`, and bump `NOTES_ENCRYPTION_KEY_ID`.
+Old data stays readable via the retired key; new writes use the new key.
 
 ## Must be regenerated before production (assume compromised)
 

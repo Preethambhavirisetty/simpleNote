@@ -3,10 +3,11 @@ from typing import Any, List, Optional
 from uuid import UUID as PyUUID
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.crypto_types import EncryptedJSONB, EncryptedText
 from app.db.postgres.base import Base
 
 
@@ -44,12 +45,14 @@ class Note(Base):
         ForeignKey("folders.id", ondelete="CASCADE"),
         nullable=False,
     )
-    title: Mapped[str] = mapped_column(String(500), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # title/description/content/content_text are encrypted at rest when the
+    # notes.encryption flag is on (transparent via the Encrypted* column types).
+    title: Mapped[str] = mapped_column(EncryptedText("note.title"), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(EncryptedText("note.description"), nullable=True)
     # Raw TipTap JSON document
-    content: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict, nullable=False)
+    content: Mapped[dict[str, Any]] = mapped_column(EncryptedJSONB("note.content"), default=dict, nullable=False)
     # Plain text derived from content — used for full-text search and previews
-    content_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_text: Mapped[Optional[str]] = mapped_column(EncryptedText("note.content_text"), nullable=True)
     version: Mapped[int] = mapped_column(default=0)
     note_size: Mapped[int] = mapped_column(default=0)
     is_memory_included: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

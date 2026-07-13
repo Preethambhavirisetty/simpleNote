@@ -7,6 +7,7 @@ from redis import Redis, RedisError
 from sqlalchemy import text
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
+from app.core import crypto
 from app.core.config import INGESTION_TASK_STRING, MESSAGE_BROKER_URL
 from app.core.settings import init_llama_index_settings
 from app.db.postgres import DatabaseManager
@@ -79,6 +80,11 @@ def _latest_note_payload(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     latest = dict(row)
+    # Note content is encrypted at rest; decrypt what we read straight from Postgres
+    # (no-op for plaintext rows) before checking emptiness or embedding it.
+    for column, field in (("note_title", "note.title"), ("description", "note.description"), ("text", "note.content_text")):
+        if latest.get(column) is not None:
+            latest[column] = crypto.decrypt(latest[column], field)
     if not str(latest.get("text") or "").strip():
         return {
             "action": "delete",

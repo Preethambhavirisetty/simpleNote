@@ -52,6 +52,14 @@ HASH_ALGORITHM = _require_env("HASH_ALGORITHM", "HS256")
 # Send the auth cookie only over HTTPS. Enable in production (COOKIE_SECURE=true);
 # keep off for local/plain-HTTP development.
 COOKIE_SECURE = _require_env("COOKIE_SECURE", "false").lower() == "true"
+
+# Note field encryption at rest (opt-in via the notes.encryption feature flag).
+# NOTES_ENCRYPTION_KEY is base64 of 32 random bytes; required only when the flag is on.
+# Rotate by moving the current key into NOTES_ENCRYPTION_KEYS_RETIRED (a JSON {id: key}
+# map used for decryption) and setting a new key + bumped NOTES_ENCRYPTION_KEY_ID.
+NOTES_ENCRYPTION_KEY = _require_env("NOTES_ENCRYPTION_KEY", "")
+NOTES_ENCRYPTION_KEY_ID = _require_env("NOTES_ENCRYPTION_KEY_ID", "1")
+NOTES_ENCRYPTION_KEYS_RETIRED = _require_env("NOTES_ENCRYPTION_KEYS_RETIRED", "")
 POSTGRES_DB_URL = _require_env("POSTGRES_DB_URL")
 MESSAGE_BROKER_URL = _require_env("MESSAGE_BROKER_URL")
 CELERY_RESULT_BACKEND = _require_env("CELERY_RESULT_BACKEND")

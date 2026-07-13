@@ -7,7 +7,8 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 from fastapi import FastAPI, Request, Response
 
 from app.api.v1.api import api_router
-from app.core.config import AGENT_API_KEY, POSTGRES_DB_URL
+from app.core.config import AGENT_API_KEY, NOTES_ENCRYPTION_KEY, POSTGRES_DB_URL
+from app.core.feature_flags import is_enabled
 from app.db.postgres.session import dispose_postgres, init_postgres
 from app.deps.internal import internal_key_matches
 from app.exceptions.handlers import register_exceptions
@@ -19,6 +20,9 @@ from app.services.token import TokenService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail fast: encryption enabled without a key would break every note write/read.
+    if is_enabled("notes.encryption") and not NOTES_ENCRYPTION_KEY:
+        raise RuntimeError("notes.encryption is enabled but NOTES_ENCRYPTION_KEY is not set.")
     init_postgres(POSTGRES_DB_URL)
     yield
     dispose_postgres()

@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.schema.responses import ApiResponse, NoteData
 
+from app.core import pii
+from app.core.feature_flags import is_enabled
 from app.db.postgres.models.note import Note
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
@@ -31,6 +33,7 @@ def _note_dict(note: Note) -> dict:
         "content_text": note.content_text,
         "is_pinned": note.is_pinned,
         "is_memory_included": note.is_memory_included,
+        "has_pii": is_enabled("notes.pii_egress_control") and pii.contains_pii(note.content_text or ""),
         "tags": [{"id": str(t.id), "name": t.name} for t in note.tags],
         "created_at": note.created_at.isoformat(),
         "updated_at": note.updated_at.isoformat(),

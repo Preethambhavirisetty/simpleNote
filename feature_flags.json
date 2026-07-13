@@ -38,5 +38,16 @@
                 "enabled": true
             }
         }
+    },
+    "notes": {
+        "enabled": true,
+        "children": {
+            "encryption": {
+                "enabled": false
+            },
+            "pii_egress_control": {
+                "enabled": false
+            }
+        }
     }
 }
