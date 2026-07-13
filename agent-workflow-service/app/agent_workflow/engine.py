@@ -14,7 +14,7 @@ from langgraph.types import Command
 
 from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
 from app.agent_workflow.artifact_store import get_artifact_store, is_cross_turn_persistence_active
-from app.agent_workflow.conversation_memory import extract_memory_slots, get_memory_store
+from app.agent_workflow.conversation_memory import extract_memory_slots, get_memory_store, memory_entity_values
 from app.agent_workflow.checkpointing import delete_thread, get_shared_checkpointer
 from app.agent_workflow.follow_up import apply_follow_up_runtime_context, build_search_query, resolve_follow_up_policy
 from app.agent_workflow.config import AgentConfig, load_agent_config, merge_agent_config, parse_agent_config
@@ -355,8 +355,14 @@ class AgentEngine:
             }
         )
 
-    def _prepare_session(self, request: RunRequest) -> tuple[RunRequest, list[dict[str, Any]]]:
-        """Load persisted artifacts and apply follow-up runtime policy for this turn."""
+    def _prepare_session(self, request: RunRequest) -> tuple[RunRequest, list[dict[str, Any]], dict[str, Any]]:
+        """Load session state and apply the follow-up runtime policy for this turn.
+
+        Conversation memory is loaded once here and threaded through the turn:
+        its remembered entities feed follow-up detection (naming a known entity
+        is a follow-up even when no pronoun/anchor pattern matches), and the map
+        is reused for the initial state instead of re-reading the store.
+        """
         policy = self.config.policy
         persistence_active = is_cross_turn_persistence_active(enabled=policy.cross_turn_artifact_persistence)
         persisted_artifacts: list[dict[str, Any]] = []
@@ -364,6 +370,7 @@ class AgentEngine:
             store = get_artifact_store()
             if store is not None:
                 persisted_artifacts = store.load(request.session_id)
+        memory = self._load_conversation_memory(request.session_id)
 
         follow_up = resolve_follow_up_policy(
             query=request.query,
@@ -371,6 +378,7 @@ class AgentEngine:
             persisted_artifacts=persisted_artifacts,
             persistence_active=persistence_active,
             require_tool_on_follow_up=policy.require_tool_on_follow_up,
+            known_entities=memory_entity_values(memory),
         )
         # Only reuse a prior turn's artifacts when this turn actually refers back
         # to it. A genuinely new question must not inherit stale facts from the
@@ -384,7 +392,7 @@ class AgentEngine:
             history=list(request.history),
             runtime_context=runtime_context,
         )
-        return prepared, persisted_artifacts
+        return prepared, persisted_artifacts, memory
 
     def _clear_conversation_memory_if_new_topic(
         self,
@@ -392,19 +400,19 @@ class AgentEngine:
         session_id: str,
         is_follow_up: bool,
         thread_id: str,
+        prior: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Drop session memory on a new topic and surface UI/HEC telemetry when slots existed."""
+        """Drop session memory on a new topic and surface UI/HEC telemetry when slots existed.
+
+        ``prior`` is the map _prepare_session already loaded — no second read.
+        """
         policy = self.config.policy
         if is_follow_up or not policy.enable_conversation_memory:
             return None
         session_id = str(session_id or "").strip()
-        if not session_id:
+        if not session_id or not prior:
             return None
-        store = get_memory_store()
-        prior = store.load(session_id)
-        if not prior:
-            return None
-        store.delete(session_id)
+        get_memory_store().delete(session_id)
         cleared_slots = sorted(str(key) for key in prior.keys())
         log_workflow_event(
             thread_id=thread_id,
@@ -420,8 +428,56 @@ class AgentEngine:
             "cleared_slots": cleared_slots,
         }
 
-    def _initial_state(self, request: RunRequest, *, persisted_artifacts: list[dict[str, Any]] | None = None) -> AgentState:
-        """Helper for initial state."""
+    def _follow_up_reuse_event(self, request: RunRequest, persisted_artifacts: list[dict[str, Any]], thread_id: str) -> dict[str, Any] | None:
+        """Decide whether this follow-up can answer from persisted session evidence.
+
+        Returns the UI activity event when the shortcut applies (the caller then
+        starts the graph at fact extraction), else None. Applies only when the
+        turn is a follow-up that does NOT require fresh tool recall and evidence
+        from earlier turns is already loaded — e.g. re-asking about the same
+        dashboard should not replan and re-explore from scratch.
+        """
+        if not self.config.policy.enable_follow_up_reuse:
+            return None
+        runtime = request.runtime_context or {}
+        if not runtime.get("follow_up") or runtime.get("require_tools"):
+            return None
+        if not persisted_artifacts:
+            return None
+        tools = sorted({str(a.get("tool") or "") for a in persisted_artifacts if a.get("tool")})
+        log_workflow_event(
+            thread_id=thread_id,
+            session_id=request.session_id,
+            kind="run.follow_up_reuse",
+            data={"artifact_count": len(persisted_artifacts), "tools": tools},
+        )
+        return {
+            "type": "agent_activity",
+            "phase": "running",
+            "label": (
+                f"Follow-up: answering from {len(persisted_artifacts)} result(s) gathered earlier this session"
+                + (f" ({', '.join(tools[:4])})" if tools else "")
+            ),
+            "artifact_count": len(persisted_artifacts),
+            "tools": tools,
+            "thread_id": thread_id,
+        }
+
+    def _initial_state(
+        self,
+        request: RunRequest,
+        *,
+        persisted_artifacts: list[dict[str, Any]] | None = None,
+        conversation_memory: dict[str, Any] | None = None,
+        reuse_evidence: bool = False,
+    ) -> AgentState:
+        """Helper for initial state.
+
+        ``conversation_memory`` short-circuits the store load when the caller
+        already knows the slots (e.g. {} right after a new-topic clear).
+        ``reuse_evidence`` starts the run at fact extraction so a follow-up
+        answers from the persisted artifacts instead of replanning.
+        """
         plan = {}
         phase = "planning"
         planner_enabled = self.config.policy.enable_planner and self.config.policy.planner.enabled
@@ -437,6 +493,12 @@ class AgentEngine:
                 ],
             }
             phase = "executing"
+        if reuse_evidence:
+            # Enter the graph at fact extraction: the persisted artifacts are the
+            # evidence, so the run goes straight to synthesis + review. If the
+            # reviewer finds the evidence lacking, re-explore falls back into the
+            # executor with its usual bounds.
+            phase = "fact_extracting"
 
         return AgentState(
             messages=list(request.history),
@@ -452,7 +514,11 @@ class AgentEngine:
             candidate_tools=[],
             tool_discovery_cache={},
             artifacts=list(persisted_artifacts or []),
-            conversation_memory=self._load_conversation_memory(request.session_id),
+            conversation_memory=(
+                conversation_memory
+                if conversation_memory is not None
+                else self._load_conversation_memory(request.session_id)
+            ),
             tool_calls=[],
             facts=[],
             draft_answer="",
@@ -461,7 +527,11 @@ class AgentEngine:
             review={},
             review_feedback="",
             iteration={"executor_turns": 0, "review_cycles": 0, "revision_cycles": 0, "tool_calls": 0},
-            events=[],
+            events=(
+                [{"step": "router.follow_up_reuse", "artifact_count": len(persisted_artifacts or [])}]
+                if reuse_evidence
+                else []
+            ),
             phase=phase,
             final_answer="",
             error=None,
@@ -759,6 +829,45 @@ class AgentEngine:
         if event and self.callbacks.on_event:
             self.callbacks.on_event(event)
 
+    def _emit_and_yield(self, event: dict[str, Any] | None) -> Iterator[dict[str, Any]]:
+        """Emit an optional event to callbacks and yield it into the stream."""
+        if event is not None:
+            self._emit(event)
+            yield event
+
+    def _final_event_with_usage(
+        self, state: AgentState, thread_id: str, usage_start: dict[str, int]
+    ) -> dict[str, Any] | None:
+        """Build the terminal stream event with LLM usage and the debug trace."""
+        final = self._final_event(state, thread_id)
+        if final is None:
+            return None
+        usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
+        if usage:
+            final["usage"] = usage
+        final["debug_trace"] = finish_turn_trace()
+        return final
+
+    def _finalize_turn(
+        self,
+        state: AgentState,
+        thread_id: str,
+        *,
+        result: RunResult,
+        session_id: str,
+        cleanup_terminal: bool = True,
+    ) -> None:
+        """Run the shared end-of-turn side effects (persist, cleanup, run log).
+
+        One definition for every terminal path — run/stream/resume, normal and
+        recursion — so turn teardown cannot drift between them again. The
+        caller's result is logged as-is (recursion paths carry their own error).
+        """
+        self._persist_session_artifacts(state)
+        if cleanup_terminal:
+            self._cleanup_thread_if_terminal(state, thread_id)
+        self._log_run_completed(result, session_id=session_id)
+
     def _cleanup_thread_if_terminal(self, state: AgentState, thread_id: str) -> None:
         """Helper for cleanup thread if terminal."""
         if state.get("phase") == "awaiting_approval" or state.get("pending_destructive"):
@@ -820,15 +929,28 @@ class AgentEngine:
             usage_start = self._llm_usage_snapshot()
             log_workflow_event(thread_id=thread_id, session_id=request.session_id, kind="run.fast_path", data={"reason": reason})
             return self._attach_usage_event(self._fast_path_result(request, thread_id, reason), usage_start)
-        request, persisted_artifacts = self._prepare_session(request)
+        request, persisted_artifacts, memory = self._prepare_session(request)
+        is_follow_up = bool((request.runtime_context or {}).get("follow_up"))
         self._emit(
             self._clear_conversation_memory_if_new_topic(
                 session_id=request.session_id,
-                is_follow_up=bool((request.runtime_context or {}).get("follow_up")),
+                is_follow_up=is_follow_up,
                 thread_id=thread_id,
+                prior=memory,
             )
         )
-        holder = {"state": self._initial_state(request, persisted_artifacts=persisted_artifacts)}
+        reuse_event = self._follow_up_reuse_event(request, persisted_artifacts, thread_id)
+        self._emit(reuse_event)
+        holder = {
+            "state": self._initial_state(
+                request,
+                persisted_artifacts=persisted_artifacts,
+                # Memory was loaded once in _prepare_session; a new topic just
+                # cleared it, so the state starts empty in that case.
+                conversation_memory=memory if is_follow_up else {},
+                reuse_evidence=reuse_event is not None,
+            )
+        }
         usage_start = self._llm_usage_snapshot()
         try:
             stream = self.graph.stream(
@@ -839,17 +961,13 @@ class AgentEngine:
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             self._attach_usage_event(result, usage_start)
-            self._persist_session_artifacts(holder["state"])
             self._emit(self._update_conversation_memory(holder["state"], thread_id))
-            self._cleanup_thread_if_terminal(holder["state"], thread_id)
-            self._log_run_completed(result, session_id=request.session_id)
+            self._finalize_turn(holder["state"], thread_id, result=result, session_id=request.session_id)
             return result
         result = self._result_from_state(holder["state"], thread_id)
         self._attach_usage_event(result, usage_start)
-        self._persist_session_artifacts(holder["state"])
         self._emit(self._update_conversation_memory(holder["state"], thread_id))
-        self._cleanup_thread_if_terminal(holder["state"], thread_id)
-        self._log_run_completed(result, session_id=request.session_id)
+        self._finalize_turn(holder["state"], thread_id, result=result, session_id=request.session_id)
         return result
 
     @staticmethod
@@ -885,21 +1003,34 @@ class AgentEngine:
             yield from self._stream_fast_path(request, thread_id, reason)
             return
 
-        request, persisted_artifacts = self._prepare_session(request)
-        cleared = self._clear_conversation_memory_if_new_topic(
-            session_id=request.session_id,
-            is_follow_up=bool((request.runtime_context or {}).get("follow_up")),
-            thread_id=thread_id,
+        request, persisted_artifacts, memory = self._prepare_session(request)
+        is_follow_up = bool((request.runtime_context or {}).get("follow_up"))
+        yield from self._emit_and_yield(
+            self._clear_conversation_memory_if_new_topic(
+                session_id=request.session_id,
+                is_follow_up=is_follow_up,
+                thread_id=thread_id,
+                prior=memory,
+            )
         )
-        if cleared is not None:
-            self._emit(cleared)
-            yield cleared
-        holder = {"state": self._initial_state(request, persisted_artifacts=persisted_artifacts)}
+        reuse_event = self._follow_up_reuse_event(request, persisted_artifacts, thread_id)
+        yield from self._emit_and_yield(reuse_event)
+        holder = {
+            "state": self._initial_state(
+                request,
+                persisted_artifacts=persisted_artifacts,
+                # Memory was loaded once in _prepare_session; a new topic just
+                # cleared it, so the state starts empty in that case.
+                conversation_memory=memory if is_follow_up else {},
+                reuse_evidence=reuse_event is not None,
+            )
+        }
         usage_start = self._llm_usage_snapshot()
         yielded_pending_approval = False
         streamed_answer = False
 
-        yield {"type": "status", "message": "Planning...", "thread_id": thread_id}
+        status = "Answering from session evidence..." if reuse_event is not None else "Planning..."
+        yield {"type": "status", "message": status, "thread_id": thread_id}
 
         stream = None
         try:
@@ -921,14 +1052,9 @@ class AgentEngine:
             raise
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
-            mem_event = self._update_conversation_memory(holder["state"], thread_id)
-            if mem_event is not None:
-                self._emit(mem_event)
-                yield mem_event
+            yield from self._emit_and_yield(self._update_conversation_memory(holder["state"], thread_id))
             yield self._done_event_from_result(result)
-            self._persist_session_artifacts(holder["state"])
-            self._cleanup_thread_if_terminal(holder["state"], thread_id)
-            self._log_run_completed(result, session_id=request.session_id)
+            self._finalize_turn(holder["state"], thread_id, result=result, session_id=request.session_id)
             return
 
         pending_event = self._pending_approval_event(holder["state"], thread_id)
@@ -945,23 +1071,14 @@ class AgentEngine:
                     self.callbacks.on_event(event)
                 yield event
 
-        mem_event = self._update_conversation_memory(holder["state"], thread_id)
-        if mem_event is not None:
-            self._emit(mem_event)
-            yield mem_event
-
-        final = self._final_event(holder["state"], thread_id)
-        if final is not None:
-            usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
-            if usage:
-                final["usage"] = usage
-            final["debug_trace"] = finish_turn_trace()
-            if self.callbacks.on_event:
-                self.callbacks.on_event(final)
-            yield final
-        self._persist_session_artifacts(holder["state"])
-        self._cleanup_thread_if_terminal(holder["state"], thread_id)
-        self._log_run_completed(self._result_from_state(holder["state"], thread_id), session_id=request.session_id)
+        yield from self._emit_and_yield(self._update_conversation_memory(holder["state"], thread_id))
+        yield from self._emit_and_yield(self._final_event_with_usage(holder["state"], thread_id, usage_start))
+        self._finalize_turn(
+            holder["state"],
+            thread_id,
+            result=self._result_from_state(holder["state"], thread_id),
+            session_id=request.session_id,
+        )
 
     def resume(self, thread_id: str, *, approved: bool) -> RunResult:
         """Resume a paused destructive-approval workflow and return its result."""
@@ -1012,10 +1129,13 @@ class AgentEngine:
         except GraphRecursionError as exc:
             result = self._recursion_error_result(holder["state"], exc, thread_id)
             yield self._done_event_from_result(result)
-            self._persist_session_artifacts(holder["state"])
-            if cleanup_terminal:
-                self._cleanup_thread_if_terminal(holder["state"], thread_id)
-            self._log_run_completed(result, session_id=str(holder["state"].get("session_id") or ""))
+            self._finalize_turn(
+                holder["state"],
+                thread_id,
+                result=result,
+                session_id=str(holder["state"].get("session_id") or ""),
+                cleanup_terminal=cleanup_terminal,
+            )
             return
 
         if not holder["state"].get("pending_destructive") and not streamed_answer:
@@ -1026,26 +1146,14 @@ class AgentEngine:
                     self.callbacks.on_event(event)
                 yield event
 
-        mem_event = self._update_conversation_memory(holder["state"], thread_id)
-        if mem_event is not None:
-            self._emit(mem_event)
-            yield mem_event
-
-        final = self._final_event(holder["state"], thread_id)
-        if final is not None:
-            usage = self._llm_usage_delta(usage_start, self._llm_usage_snapshot())
-            if usage:
-                final["usage"] = usage
-            final["debug_trace"] = finish_turn_trace()
-            if self.callbacks.on_event:
-                self.callbacks.on_event(final)
-            yield final
-        self._persist_session_artifacts(holder["state"])
-        if cleanup_terminal:
-            self._cleanup_thread_if_terminal(holder["state"], thread_id)
-        self._log_run_completed(
-            self._result_from_state(holder["state"], thread_id),
+        yield from self._emit_and_yield(self._update_conversation_memory(holder["state"], thread_id))
+        yield from self._emit_and_yield(self._final_event_with_usage(holder["state"], thread_id, usage_start))
+        self._finalize_turn(
+            holder["state"],
+            thread_id,
+            result=self._result_from_state(holder["state"], thread_id),
             session_id=str(holder["state"].get("session_id") or ""),
+            cleanup_terminal=cleanup_terminal,
         )
 
     @staticmethod

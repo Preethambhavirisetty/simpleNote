@@ -215,6 +215,8 @@ class AgentPolicyModel(BaseModel):
     artifact_store_ttl_seconds: int = Field(86400, ge=60, le=604800)
     require_tool_on_follow_up: bool = True
     enable_conversation_memory: bool = True
+    enable_follow_up_reuse: bool = True
+    enable_playbooks: bool = True
     conversation_memory_max_slots: int = Field(10, ge=0, le=64)
     truncation: TruncationPolicyModel = Field(default_factory=TruncationPolicyModel)
     model: str | None = Field(default=None, max_length=255)
@@ -277,7 +279,11 @@ class LlmConfigModel(BaseModel):
     temperature: float = Field(0.2, ge=0.0, le=2.0)
     top_p: float = Field(0.9, ge=0.0, le=1.0)
     top_k: int = Field(40, ge=0, le=500)
-    seed: int = Field(0xFFFFFFFF)
+    # None (default) = do not send a seed; the backend samples with a fresh RNG
+    # per request. Set an integer only when reproducible output is explicitly
+    # wanted — a pinned seed makes every identical prompt produce the identical
+    # completion (including identical mistakes on retries).
+    seed: int | None = Field(None)
     # Use the OpenAI tools/tool_calls contract for executor tool selection when
     # the provider supports it; falls back to JSON-in-text on failure.
     native_tool_calling: bool = False

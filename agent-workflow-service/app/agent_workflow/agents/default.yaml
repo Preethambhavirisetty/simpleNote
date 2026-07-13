@@ -49,6 +49,7 @@ policy:
   cross_turn_artifact_persistence: true
   artifact_store_ttl_seconds: 86400
   require_tool_on_follow_up: true
+  enable_playbooks: true
 
   summary:
     compact_after_artifacts: 16

@@ -11,6 +11,7 @@ class PlanStep(TypedDict, total=False):
     expected_output: str
     stop_condition: str
     required_tools: list[str]
+    require_row_level: bool
 
 
 class Plan(TypedDict, total=False):
@@ -22,6 +23,9 @@ class Plan(TypedDict, total=False):
     acceptance_criteria: list[str]
     suggested_structure: str
     search_query: str  # standalone, pronoun-resolved query for semantic tool search
+    evidence_required: str  # catalog | row_level
+    playbook_id: str
+    dashboard: str  # default dashboard name for playbook-driven tool calls
     raw_markdown: str
 
 

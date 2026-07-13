@@ -1,0 +1,154 @@
+playbooks:
+  - id: notelite_answer_notes
+    match:
+      topics: [note, notes, wrote, remember, mentioned, meeting, task, idea, decision, project, todos, todo]
+    evidence_required: note_evidence
+    goal: Answer the user from their Notelite notes using retrieval-backed evidence.
+    search_query_template: "notelite notes evidence {query}"
+    steps:
+      - title: Search notes
+        action: Retrieve answer-ready evidence from the user's notes for the request.
+        tool_hint: search_notes
+        required_tools: [search_notes]
+        stop_condition: Relevant note evidence or an empty retrieval result has been returned.
+    acceptance_criteria:
+      - The answer is grounded in retrieved notes and cites note titles or note ids when available.
+      - If no relevant notes are found, the answer says that plainly.
+
+  - id: notelite_locate_notes
+    match:
+      topics: [where, locate, source, citation, reference, which note, folder, snippet]
+    evidence_required: note_locations
+    goal: Locate the notes, folders, and snippets that contain the requested information.
+    search_query_template: "notelite locate notes folders snippets {query}"
+    steps:
+      - title: Locate notes
+        action: Find relevant note locations and snippets for the user's request.
+        tool_hint: locate_notes
+        required_tools: [locate_notes]
+        stop_condition: Relevant note locations or an empty result has been returned.
+    acceptance_criteria:
+      - Matching notes, folders, snippets, and note ids are reported only from tool evidence.
+
+  - id: notelite_summarize_notes
+    match:
+      topics: [summarize, summary, digest, overview, recap, explain, brief]
+    evidence_required: note_summaries
+    goal: Summarize relevant Notelite notes or specific notes requested by the user.
+    search_query_template: "notelite summarize notes {query}"
+    steps:
+      - title: Summarize notes
+        action: Retrieve indexed summaries for relevant or specified notes.
+        tool_hint: summarize_notes
+        required_tools: [summarize_notes]
+        stop_condition: Note summaries or an empty result has been returned.
+    acceptance_criteria:
+      - The summary is based only on returned note summaries or evidence snippets.
+
+  - id: notelite_list_folders
+    match:
+      topics: [list folders, folders, workspace]
+    evidence_required: workspace_catalog
+    goal: List the user's Notelite folders.
+    search_query_template: "notelite list folders workspace {query}"
+    steps:
+      - title: List folders
+        action: List folders for the runtime user.
+        tool_hint: list_folders
+        required_tools: [list_folders]
+        stop_condition: Folder catalog or an empty result has been returned.
+    acceptance_criteria:
+      - Folder metadata is reported only from tool results.
+
+  - id: notelite_list_notes
+    match:
+      topics: [list notes, browse notes, pinned notes, notes in folder, recent notes]
+    evidence_required: note_catalog
+    goal: List or browse the user's Notelite notes.
+    search_query_template: "notelite list browse notes {query}"
+    steps:
+      - title: List notes
+        action: List notes for the runtime user using optional filters from the request.
+        tool_hint: list_notes
+        required_tools: [list_notes]
+        stop_condition: Note catalog or an empty result has been returned.
+    acceptance_criteria:
+      - Note metadata is reported only from tool results.
+
+  - id: notelite_get_note
+    match:
+      topics: [open note, read note, show note, note details, inspect note]
+    evidence_required: note_content
+    goal: Inspect one known Notelite note by id.
+    search_query_template: "notelite get note content {query}"
+    steps:
+      - title: Get note
+        action: Fetch the exact note requested by the user.
+        tool_hint: get_note
+        required_tools: [get_note]
+        stop_condition: The note content or a not-found response has been returned.
+    acceptance_criteria:
+      - Note content and metadata are reported only from the get_note result.
+
+  - id: notelite_create_content
+    match:
+      topics: [create note, add note, write note, save note, create folder, add folder, new folder]
+    evidence_required: mutation_result
+    goal: Create a Notelite note or folder only after the user's requested fields are known.
+    search_query_template: "notelite create note folder {query}"
+    steps:
+      - title: Resolve destination
+        action: List folders when a note destination is ambiguous.
+        tool_hint: list_folders
+        required_tools: []
+        stop_condition: The destination folder is known or the operation is folder creation.
+      - title: Create content
+        action: Create the requested note or folder through the backend.
+        tool_hint: create_note
+        required_tools: []
+        stop_condition: The backend returns the created note or folder.
+    acceptance_criteria:
+      - The agent does not create content unless the user explicitly requested creation.
+      - The final answer includes the created id and title/name from the tool result.
+
+  - id: notelite_modify_content
+    match:
+      topics: [update note, edit note, rename note, move note, delete note, rename folder, delete folder, pin note, unpin note, pin folder, unpin folder]
+    evidence_required: mutation_result
+    goal: Modify existing Notelite notes or folders only when the target and requested change are clear.
+    search_query_template: "notelite modify note folder {query}"
+    steps:
+      - title: Locate target
+        action: Use locate_notes, list_notes, or list_folders if the user did not provide an exact id.
+        tool_hint: locate_notes
+        required_tools: []
+        stop_condition: Exactly one intended target is identified or ambiguity is reported.
+      - title: Apply change
+        action: Use the specific backend mutation tool requested by the user.
+        tool_hint: update_note
+        required_tools: []
+        stop_condition: The backend returns success or a concrete error.
+    acceptance_criteria:
+      - Ambiguous targets are clarified instead of modifying multiple items.
+      - The final answer reports the backend mutation result, not inferred state.
+
+  - id: notelite_tags
+    match:
+      topics: [tags, tag note, label note, add tag, remove tag, rename tag, delete tag, list tags]
+    evidence_required: tag_result
+    goal: List, create, rename, delete, attach, or remove Notelite tags when requested.
+    search_query_template: "notelite tags labels {query}"
+    steps:
+      - title: Resolve tag and note
+        action: Use list_tags and locate_notes or list_notes when ids are not provided.
+        tool_hint: list_tags
+        required_tools: []
+        stop_condition: The intended tag and note targets are identified, or ambiguity is reported.
+      - title: Apply tag action
+        action: Use the specific tag tool requested by the user.
+        tool_hint: list_tags
+        required_tools: []
+        stop_condition: The backend returns tag data, success, or a concrete error.
+    acceptance_criteria:
+      - Ambiguous tag or note targets are clarified instead of modifying the wrong item.
+      - Tag results are reported only from tool output.

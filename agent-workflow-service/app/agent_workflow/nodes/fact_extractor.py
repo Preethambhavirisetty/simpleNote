@@ -46,7 +46,14 @@ def fact_extractor_node(state: AgentState, *, config: AgentConfig) -> dict[str, 
     )
     # Evidence compressed into running memory mid-loop must still reach
     # synthesis/review; seed it as facts ahead of the per-artifact facts.
-    facts = _memory_facts(str(state.get("running_summary") or ""), max_fact_chars) + facts
+    # Call provenance (which tools ran, with which arguments) rides along so the
+    # answer states applied filters truthfully — the draft cannot claim a filter
+    # was used when the recorded call shows it was not.
+    facts = (
+        _memory_facts(str(state.get("running_summary") or ""), max_fact_chars)
+        + _call_provenance_facts(list(state.get("tool_calls") or []), max_fact_chars)
+        + facts
+    )
     used_draft_fallback = False
     draft = str(state.get("draft_answer") or "").strip()
     if not facts and draft and not _looks_like_action_json(draft):
@@ -94,6 +101,36 @@ def _looks_like_action_json(text: str) -> bool:
     return stripped.startswith("{") and '"action"' in stripped[:200]
 
 
+_MAX_PROVENANCE_CALLS = 8
+
+
+def _call_provenance_facts(tool_calls: list[dict[str, Any]], max_fact_chars: int) -> list[Fact]:
+    """One fact per recent successful tool call recording the arguments used.
+
+    This is the ground truth for "which filters were actually applied" — the
+    synthesizer and reviewer see e.g. ``get_panel_data was called with
+    {"panel_id": 77, "panel_tokens": {"site": "RTP"}}`` and cannot honestly
+    describe a filter that never appears in any recorded call.
+    """
+    facts: list[Fact] = []
+    successful = [r for r in tool_calls if str(r.get("status") or "") == "ok" and r.get("name")]
+    for record in successful[-_MAX_PROVENANCE_CALLS:]:
+        name = str(record.get("name"))
+        args = str(record.get("args_preview") or "{}")
+        facts.append(
+            {
+                "id": _fact_id("tool_call", f"{name}:{args}"),
+                "text": _clip(f"{name} was called with arguments {args}", max_fact_chars),
+                "source_artifact_id": "",
+                "tool": name,
+                "source_ref": {},
+                "confidence": 1.0,
+                "truncated_source": False,
+            }
+        )
+    return facts
+
+
 def _memory_facts(running_summary: str, max_fact_chars: int) -> list[Fact]:
     """Turn the running-summary memo into compact facts for downstream nodes."""
     facts: list[Fact] = []
@@ -122,49 +159,76 @@ def _extract_facts(
     max_fact_chars: int,
     max_total_chars: int = 0,
 ) -> list[Fact]:
-    """Pull concise, source-linked fact lines from scored artifacts."""
-    facts: list[Fact] = []
+    """Pull concise, source-linked fact lines from scored artifacts.
+
+    Budget is allocated fairly: every artifact is guaranteed a floor share
+    before higher-ranked artifacts consume the remainder. A greedy walk let one
+    fat catalog result (e.g. a 30-item listing) exhaust the whole budget and
+    starve the newest evidence — the exact artifact the question depends on —
+    out of synthesis entirely.
+    """
     ranked = sorted(
         artifacts,
         key=lambda artifact: float(artifact.get("composite_score") or 0.0),
         reverse=True,
     )
-    for artifact in ranked:
-        if len(facts) >= max_facts:
-            break
-        # Stop once the aggregate facts payload reaches the total budget; the
-        # highest-scoring artifacts are processed first, so the least useful drop.
-        if max_total_chars and sum(len(str(fact.get("text") or "")) for fact in facts) >= max_total_chars:
-            break
-        raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
-        if raw_ref.get("type") == "list" and isinstance(raw_ref.get("total"), int):
-            facts.append(_make_fact(artifact, f"{artifact.get('tool', 'tool')} returned {raw_ref['total']} item(s)."))
-        remaining = max_facts - len(facts)
-        if remaining <= 0:
-            break
+    if not ranked or max_facts <= 0:
+        return []
+    per_source = [_artifact_facts(artifact, max_fact_chars, cap=max_facts) for artifact in ranked]
+    floor = max(1, max_facts // len(ranked))
 
-        # Prefer structured facts a tool supplies, then generic collections, and
-        # only fall back to summary line-splitting when nothing structured exists.
-        structured = _structured_entries(raw_ref, _FACT_PATHS)
-        if structured is not None:
-            for entry in structured[:remaining]:
-                fact = _make_structured_fact(artifact, entry, max_fact_chars)
-                if fact["text"]:
-                    facts.append(fact)
-            continue
+    facts: list[Fact] = []
+    used_chars = 0
 
-        rows = _structured_entries(raw_ref, _COLLECTION_PATHS)
-        if rows is not None:
-            for entry in rows[:remaining]:
-                text = _entry_text(entry)
-                if text:
-                    facts.append(_make_fact(artifact, _clip(text, max_fact_chars)))
-            continue
+    def budget_left() -> bool:
+        return len(facts) < max_facts and (not max_total_chars or used_chars < max_total_chars)
 
-        for line in _summary_lines(str(artifact.get("summary") or ""), max_fact_chars):
-            if len(facts) >= max_facts:
-                break
-            facts.append(_make_fact(artifact, line))
+    def take(source: list[Fact], count: int) -> None:
+        nonlocal used_chars
+        while source and count > 0 and budget_left():
+            fact = source.pop(0)
+            facts.append(fact)
+            used_chars += len(str(fact.get("text") or ""))
+            count -= 1
+
+    # Round 1: guaranteed floor per artifact, best-ranked first.
+    for source in per_source:
+        take(source, floor)
+    # Round 2: leftover budget flows to the best-ranked artifacts' remaining facts.
+    for source in per_source:
+        take(source, max_facts)
+    return facts
+
+
+def _artifact_facts(artifact: dict[str, Any], max_fact_chars: int, *, cap: int) -> list[Fact]:
+    """Produce this artifact's candidate facts (bounded), best material first."""
+    facts: list[Fact] = []
+    raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
+    if raw_ref.get("type") == "list" and isinstance(raw_ref.get("total"), int):
+        facts.append(_make_fact(artifact, f"{artifact.get('tool', 'tool')} returned {raw_ref['total']} item(s)."))
+
+    # Prefer structured facts a tool supplies, then generic collections, and
+    # only fall back to summary line-splitting when nothing structured exists.
+    structured = _structured_entries(raw_ref, _FACT_PATHS)
+    if structured is not None:
+        for entry in structured[: cap - len(facts)]:
+            fact = _make_structured_fact(artifact, entry, max_fact_chars)
+            if fact["text"]:
+                facts.append(fact)
+        return facts
+
+    rows = _structured_entries(raw_ref, _COLLECTION_PATHS)
+    if rows is not None:
+        for entry in rows[: cap - len(facts)]:
+            text = _entry_text(entry)
+            if text:
+                facts.append(_make_fact(artifact, _clip(text, max_fact_chars)))
+        return facts
+
+    for line in _summary_lines(str(artifact.get("summary") or ""), max_fact_chars):
+        if len(facts) >= cap:
+            break
+        facts.append(_make_fact(artifact, line))
     return facts
 
 

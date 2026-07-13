@@ -8,6 +8,34 @@ def test_normalize_inference_model_strips_provider_prefix():
     assert normalize_inference_model("reasoner") == "reasoner"
 
 
+def test_seed_omitted_from_request_when_unset():
+    # No seed configured -> the request must not carry one, so the backend
+    # samples with a fresh RNG per request (no identical answers across runs).
+    provider = OpenAiChatCompletionsProvider(base_url="http://llm.example/v1", api_key="", model="m")
+    body = provider._request_body([{"role": "user", "content": "hi"}], max_tokens=64, stream=False)
+    sent = {k: v for k, v in body.items() if v is not None}  # mirrors _post_json filter
+    assert "seed" not in sent
+
+    pinned = OpenAiChatCompletionsProvider(base_url="http://llm.example/v1", api_key="", model="m", seed=42)
+    body = pinned._request_body([{"role": "user", "content": "hi"}], max_tokens=64, stream=False)
+    assert body["seed"] == 42
+
+
+def test_legacy_seed_sentinel_normalizes_to_none():
+    from app.agent_workflow.config import parse_agent_config
+
+    base = {
+        "name": "s",
+        "prompts_inline": {"planner": "p", "executor": "e", "reviewer": "r"},
+        "llm": {"base_url": "http://llm.local/v1", "model": "m", "seed": 0xFFFFFFFF},
+    }
+    assert parse_agent_config(base).llm.seed is None
+    base["llm"].pop("seed")
+    assert parse_agent_config(base).llm.seed is None
+    base["llm"]["seed"] = 42
+    assert parse_agent_config(base).llm.seed == 42
+
+
 import httpx
 import pytest
 

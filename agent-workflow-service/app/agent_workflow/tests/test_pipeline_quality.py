@@ -26,6 +26,55 @@ class _StubLlm:
         yield self.text
 
 
+# --- fair budget allocation + call provenance --------------------------------
+
+
+def _rows(n: int, prefix: str) -> list[dict]:
+    return [{"lab": f"{prefix}{i}", "available_power": 10 + i} for i in range(n)]
+
+
+def test_fact_budget_is_shared_fairly_across_artifacts():
+    # Regression (a.txt): fat catalog artifacts consumed the entire fact budget
+    # and the panel rows — the only real evidence — contributed ZERO facts, so
+    # the answer was synthesized from metadata. Every artifact must get a floor.
+    state = {
+        "artifacts": [
+            {"tool": "list_dashboards", "composite_score": 0.9, "summary": "",
+             "raw_ref": {"type": "list", "total": 31, "items": _rows(31, "d")}},
+            {"tool": "get_dashboard_tokens", "composite_score": 0.8, "summary": "",
+             "raw_ref": {"items": _rows(26, "t")}},
+            {"tool": "get_panel_data", "composite_score": 0.6, "summary": "",
+             "raw_ref": {"rows": _rows(15, "RTP")}},
+        ],
+    }
+    result = fact_extractor_node(state, config=_config())
+    counts: dict[str, int] = {}
+    for fact in result["facts"]:
+        counts[fact["tool"]] = counts.get(fact["tool"], 0) + 1
+    assert counts.get("get_panel_data", 0) >= 10  # lowest-ranked source still contributes
+    assert counts.get("list_dashboards", 0) > 0
+
+
+def test_call_provenance_facts_record_applied_filters():
+    # The synthesizer/reviewer must see which arguments each call actually used,
+    # so the draft cannot claim a filter that was never applied.
+    state = {
+        "artifacts": [
+            {"tool": "get_panel_data", "composite_score": 0.6, "summary": "",
+             "raw_ref": {"rows": _rows(3, "RTP")}},
+        ],
+        "tool_calls": [
+            {"name": "get_panel_data", "status": "ok",
+             "args_preview": '{"panel_id": 77, "panel_tokens": {"site": "RTP"}}'},
+            {"name": "broken_tool", "status": "invalid_args", "args_preview": "{}"},
+        ],
+    }
+    result = fact_extractor_node(state, config=_config())
+    provenance = [f["text"] for f in result["facts"] if "was called with arguments" in f["text"]]
+    assert any("get_panel_data" in t and '"site": "RTP"' in t for t in provenance)
+    assert not any("broken_tool" in t for t in provenance)  # failed calls excluded
+
+
 # --- Phase 1: structured fact contract -------------------------------------
 
 
@@ -162,6 +211,20 @@ def test_dashboard_panels_survive_compaction_end_to_end():
     texts = [fact["text"] for fact in result["facts"]]
     assert any("title=Panel 0" in text for text in texts)
     assert any("title=Panel 15" in text for text in texts)
+
+
+def test_nested_panels_and_rows_survive_compaction_end_to_end():
+    panels = [{"panel_id": 77, "title": "ROWS AVAILABILITY"}]
+    rows = [{"lab": "RTP12-F241", "available_power_kw": 57.69}]
+    artifact = _truncate({"ok": True, "data": {"panels": panels, "rows": rows}})
+
+    assert artifact["raw_ref"].get("data", {}).get("panels") == panels
+    assert artifact["raw_ref"].get("data", {}).get("rows") == rows
+
+    result = fact_extractor_node({"artifacts": [artifact]}, config=_config())
+    texts = [fact["text"] for fact in result["facts"]]
+    assert any("panel_id=77" in text for text in texts)
+    assert any("RTP12-F241" in text for text in texts)
 
 
 def test_large_structured_field_is_bounded_in_raw_ref():

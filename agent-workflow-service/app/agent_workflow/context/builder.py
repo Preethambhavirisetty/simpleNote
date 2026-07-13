@@ -7,10 +7,21 @@ from typing import Any, Literal
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.conversation_memory import render_memory
+from app.agent_workflow.follow_up import is_follow_up_turn
 from app.agent_workflow.state import AgentState, Artifact
 from app.agent_workflow.util.tokens import count_tokens
 
 Role = Literal["planner", "executor", "reviewer"]
+
+
+@lru_cache(maxsize=32)
+def _cached_token_count(text: str) -> int:
+    """Token count for strings that repeat across builds (system prompts).
+
+    Bounded small on purpose: only stable, per-role strings should flow through
+    here — dynamic section text changes every turn and would just churn the cache.
+    """
+    return count_tokens(text)
 
 
 @lru_cache(maxsize=64)
@@ -109,7 +120,10 @@ class ContextBuilder:
         """Select the highest-priority context sections that fit the token budget."""
         limits = self.config.policy.context
         max_tokens = self.config.policy.max_context_tokens
-        used = count_tokens(system) + limits.system_budget_padding
+        # The system prompt is identical across every build for a given role, so
+        # its (relatively expensive) token count is cached rather than re-encoded
+        # once per node call per turn.
+        used = _cached_token_count(system) + limits.system_budget_padding
         ordered = sorted(sections, key=lambda item: item[0], reverse=True)
         chosen: list[str] = []
         for _priority, text in ordered:
@@ -213,18 +227,17 @@ class ContextBuilder:
 
     def _include_history(self, state: AgentState) -> bool:
         """Include chat history only on follow-up turns to avoid topic bleed."""
-        runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
-        return bool(runtime.get("follow_up"))
-
-    def _history_limit(self, state: AgentState) -> int:
-        runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
-        if runtime.get("follow_up"):
-            return self.config.policy.context.max_history_messages
-        return 0
+        return is_follow_up_turn(state)
 
     def _format_history(self, messages: list[dict[str, Any]], state: AgentState) -> str:
-        """Format history for inclusion in LLM context."""
-        limit = self._history_limit(state)
+        """Format history for inclusion in LLM context.
+
+        Callers gate on _include_history; the guard here covers the schema-legal
+        max_history_messages == 0 (messages[-0:] would leak the whole list).
+        """
+        if not self._include_history(state):
+            return ""
+        limit = self.config.policy.context.max_history_messages
         if limit <= 0:
             return ""
         lines = []

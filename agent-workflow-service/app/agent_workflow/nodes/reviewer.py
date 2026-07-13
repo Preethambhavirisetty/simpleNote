@@ -6,8 +6,18 @@ from typing import Any
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
+from app.agent_workflow.evidence_grade import (
+    artifacts_have_row_level_data,
+    artifacts_have_usable_row_data,
+    discovery_answer_gaps,
+    draft_claim_consistency_gaps,
+    filter_conflict_gaps,
+    question_needs_live_data as _question_needs_live_data,
+    question_requires_row_evidence,
+    row_evidence_gaps,
+)
 from app.agent_workflow.follow_up import follow_up_approval_gaps
-from app.agent_workflow.parsing import normalize_tool_name, parse_review_markdown
+from app.agent_workflow.parsing import extract_json_object, normalize_tool_name, parse_review_markdown
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import llm_call
@@ -46,49 +56,20 @@ _EMPTY_CLAIM_PHRASES = (
     "empty result",
 )
 
-
-# Only phrasings that genuinely demand live numeric/row data. Bare descriptive
-# words (available, capacity, current, count) matched far too broadly and forced
-# needless re-exploration, so quantitative triggers now require an actual number
-# or an explicit counting question.
-_LIVE_DATA_QUERY_RE = re.compile(
-    r"(\bhow many\b|\bhow much\b|\bnumber of\b|"
-    r"\b(?:at least|at most|no more than|under|over|below|above|less than|more than|"
-    r"greater than|fewer than|exactly)\s+\d|"
-    r"[<>]=?\s*\d|\d+\s*(?:kw|kv|mw|gw|gb|tb|mb|%))",
-    re.I,
-)
 _TOOL_NAME_RE = re.compile(r"\b(?:get|list|search|run)_[a-z][a-z0-9_]*\b", re.I)
 
 
-def _question_needs_live_data(query: str) -> bool:
-    return bool(_LIVE_DATA_QUERY_RE.search(query or ""))
-
-
 def _artifacts_have_tabular_data(state: AgentState) -> bool:
-    for artifact in state.get("artifacts") or []:
-        if not isinstance(artifact, dict):
-            continue
-        raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
-        rows = raw_ref.get("rows")
-        if isinstance(rows, list) and rows:
-            return True
-        row_count = raw_ref.get("row_count")
-        if isinstance(row_count, int) and row_count > 0:
-            return True
-        items = raw_ref.get("items")
-        if isinstance(items, list) and items:
-            return True
-    return False
+    return artifacts_have_row_level_data(state.get("artifacts") or [])
 
 
 def _quantitative_evidence_gaps(state: AgentState) -> list[str]:
-    """Block APPROVE when the question needs live figures but no tool returned rows."""
-    if not _question_needs_live_data(str(state.get("user_query") or "")):
-        return []
-    if _artifacts_have_tabular_data(state):
-        return []
-    return ["Gather live tool results with row-level data before approving a quantitative answer"]
+    """Block APPROVE when numeric questions lack row-level tool results."""
+    return row_evidence_gaps(
+        str(state.get("user_query") or ""),
+        state.get("artifacts") or [],
+        plan=state.get("plan") if isinstance(state.get("plan"), dict) else None,
+    )
 
 
 def _tools_mentioned_in_feedback(items: list[str], state: AgentState) -> list[str]:
@@ -150,7 +131,69 @@ def _synthesis_gaps(state: AgentState) -> list[str]:
     """Deterministic REWRITE-fixable gaps: fixable from existing facts, not new tools."""
     gaps = _contradiction_gaps(state)
     gaps.extend(_formatting_gaps(str(state.get("draft_answer") or "")))
+    gaps.extend(
+        draft_claim_consistency_gaps(
+            str(state.get("user_query") or ""),
+            str(state.get("draft_answer") or ""),
+            state.get("artifacts") or [],
+        )
+    )
+    gaps.extend(
+        discovery_answer_gaps(
+            str(state.get("user_query") or ""),
+            str(state.get("draft_answer") or ""),
+            state.get("artifacts") or [],
+        )
+    )
+    gaps.extend(
+        filter_conflict_gaps(
+            state.get("artifacts") or [],
+            user_query=str(state.get("user_query") or ""),
+        )
+    )
     return gaps
+
+
+def _missing_evidence_items(review: dict[str, Any]) -> list[str]:
+    """Return reviewer evidence gaps as normalized strings."""
+    return [str(item).strip() for item in (review.get("missing_evidence") or []) if str(item).strip()]
+
+
+def _unresolved_evidence_blocks_completion(state: AgentState, review: dict[str, Any]) -> bool:
+    """Whether reviewer missing_evidence should end the run as incomplete."""
+    missing = _missing_evidence_items(review)
+    if not missing:
+        return False
+    if artifacts_have_usable_row_data(state.get("artifacts") or []):
+        if not _completion_gaps(state):
+            return False
+    return True
+
+
+def _incomplete_evidence_updates(
+    state: AgentState,
+    *,
+    review: dict[str, Any],
+    iteration: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    """Return a terminal, honest result for unresolved evidence gaps."""
+    missing = _missing_evidence_items(review)
+    missing_text = "\n".join(f"- {item}" for item in missing) if missing else "- Required evidence was not gathered."
+    answer = (
+        "I could not complete this request with reliable evidence.\n\n"
+        f"Missing evidence:\n{missing_text}\n\n"
+        "I am not going to infer or fabricate the final answer from incomplete tool results."
+    )
+    return {
+        "phase": "done",
+        "draft_answer": answer,
+        "draft_kind": "mechanical",
+        "final_answer": answer,
+        "iteration": iteration,
+        "error": state.get("error") or f"Incomplete evidence: {reason}",
+        "review": review,
+    }
 
 
 def _needs_re_explore(state: AgentState, review: dict[str, Any], config: AgentConfig) -> bool:
@@ -164,17 +207,39 @@ def _needs_re_explore(state: AgentState, review: dict[str, Any], config: AgentCo
     """
     if int(config.policy.max_explore_cycles) <= 0:
         return False
+    plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
+    if str(plan.get("evidence_required") or "") == "catalog":
+        return False
     iteration = state.get("iteration") or {}
     if int(iteration.get("explore_cycles") or 0) >= int(config.policy.max_explore_cycles):
         return False
-    missing = [str(item).strip() for item in (review.get("missing_evidence") or []) if str(item).strip()]
+    missing = _missing_evidence_items(review)
     if not missing:
         return False
-    # Re-exploration is only useful if the agent actually has tools to call.
-    return bool(state.get("tool_calls") or state.get("candidate_tools"))
+    if artifacts_have_usable_row_data(state.get("artifacts") or []):
+        if not _completion_gaps(state):
+            return False
+    # Re-exploration is only useful when the run is tool-capable. Persisted
+    # artifacts count too: a follow-up that reused session evidence (and thus
+    # made no tool calls yet) must still be able to go gather what's missing.
+    return bool(state.get("tool_calls") or state.get("candidate_tools") or state.get("artifacts"))
 
 
-def _plan_with_explore_step(state: AgentState, feedback: str, feedback_items: list[str]) -> dict[str, Any]:
+def _needs_row_level_gather(state: AgentState, feedback_items: list[str]) -> bool:
+    """Whether re-exploration must return row-level tool results, not catalogs."""
+    if _artifacts_have_tabular_data(state):
+        return False
+    if _question_needs_live_data(str(state.get("user_query") or "")):
+        return True
+    if question_requires_row_evidence(
+        str(state.get("user_query") or ""),
+        state.get("plan") if isinstance(state.get("plan"), dict) else None,
+    ):
+        return True
+    return any("row-level" in str(item).lower() for item in feedback_items)
+
+
+def _plan_with_explore_step(state: AgentState, feedback_items: list[str]) -> dict[str, Any]:
     """Provide a bounded 'gather missing evidence' step for the executor to work.
 
     Re-exploration reuses a single trailing step (refreshing its guidance) rather
@@ -184,15 +249,24 @@ def _plan_with_explore_step(state: AgentState, feedback: str, feedback_items: li
     plan = dict(state.get("plan") or {})
     steps = list(plan.get("steps") or [])
     tools_needed = _tools_mentioned_in_feedback(feedback_items, state)
+    # The step action stays short: it is concatenated into the semantic
+    # tool-search query, and the full feedback bullets already reach the model
+    # through review_feedback (dumping them here polluted tool discovery).
+    require_row_level = _needs_row_level_gather(state, feedback_items)
     explore_step = {
         "title": "Gather missing evidence",
-        "action": feedback or "Gather the missing evidence identified in review.",
+        "action": "Gather the missing evidence identified in review (see reviewer feedback).",
         "tool_hint": tools_needed[0] if tools_needed else "auto",
         "required_tools": tools_needed,
+        "require_row_level": require_row_level,
         "stop_condition": (
-            "Each required tool returned successful results with data"
-            if tools_needed
-            else "Missing evidence identified in review has been gathered"
+            "Row-level tool results have been returned for this step"
+            if require_row_level
+            else (
+                "Each required tool returned successful results with data"
+                if tools_needed
+                else "Missing evidence identified in review has been gathered"
+            )
         ),
         "origin": "re_explore",
     }
@@ -293,18 +367,36 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
         # re-explore triggered near max_executor_iterations bails immediately and
         # gathers nothing. Total turns stay bounded by max_explore_cycles.
         iteration["executor_turns"] = 0
+        # Allow one more reviewer pass after gathering; otherwise max_review_cycles
+        # is consumed by the pre-gather draft and the bad answer ships unchecked.
+        iteration["review_cycles"] = 0
         required = review.get("missing_evidence") or review.get("required_changes") or review.get("issues") or []
         feedback = "\n".join(f"- {item}" for item in required)
-        plan = _plan_with_explore_step(state, feedback, [str(item) for item in required])
+        plan = _plan_with_explore_step(state, [str(item) for item in required])
         updates["iteration"] = iteration
         updates["review_feedback"] = feedback
         updates["plan"] = plan
         updates["current_step_index"] = max(0, len(plan.get("steps") or []) - 1)
         updates["candidate_tools"] = []
         updates["phase"] = "executing"
+    elif verdict in {"REVISE", "REJECT"} and _unresolved_evidence_blocks_completion(state, review):
+        updates.update(
+            _incomplete_evidence_updates(
+                state,
+                review=review,
+                iteration=iteration,
+                reason="reviewer evidence gaps remained unresolved",
+            )
+        )
+    elif verdict in {"REVISE", "REJECT"} and _missing_evidence_items(review) and artifacts_have_usable_row_data(
+        state.get("artifacts") or []
+    ):
+        updates["phase"] = "revising"
+        required = review.get("required_changes") or review.get("missing_evidence") or review.get("issues") or []
+        updates["review_feedback"] = "\n".join(f"- {item}" for item in required)
     elif verdict == "REVISE" and int(iteration.get("revision_cycles") or 0) < config.policy.revision.max_cycles:
         updates["phase"] = "revising"
-        required = review.get("required_changes") or review.get("issues") or review.get("missing_evidence") or []
+        required = review.get("required_changes") or review.get("issues") or []
         updates["review_feedback"] = "\n".join(f"- {item}" for item in required)
     else:
         updates["phase"] = "done"
@@ -321,6 +413,15 @@ def reviewer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
                 "step": "reviewer.re_explore",
                 "explore_cycles": int(iteration.get("explore_cycles") or 0),
                 "missing_evidence": review.get("missing_evidence") or [],
+            }
+        )
+    elif str(updates.get("error") or "").startswith("Incomplete evidence:"):
+        events.append(
+            {
+                "step": "reviewer.incomplete_evidence",
+                "explore_cycles": int(iteration.get("explore_cycles") or 0),
+                "missing_evidence": review.get("missing_evidence") or [],
+                "message": updates.get("error"),
             }
         )
     events.append(
@@ -372,7 +473,7 @@ def _parse_review(text: str) -> tuple[dict[str, Any], bool]:
     Returns the normalized review and whether parsing fell through to the safe
     REVISE default (so the caller can emit a ``reviewer.parse_failed`` event).
     """
-    data = _try_json_object(text)
+    data = extract_json_object(text, prefer_key="verdict")
     if isinstance(data, dict) and _has_review_signal(data):
         return _normalize_review_fields(data), False
 
@@ -388,29 +489,6 @@ def _parse_review(text: str) -> tuple[dict[str, Any], bool]:
         },
         True,
     )
-
-
-def _try_json_object(text: str) -> dict[str, Any] | None:
-    """Return a JSON object from the text, or None when it is not JSON."""
-    cleaned = (text or "").strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-    return None
 
 
 def _has_review_signal(data: dict[str, Any]) -> bool:

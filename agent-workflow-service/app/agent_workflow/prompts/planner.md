@@ -50,6 +50,11 @@ Use at most 5 steps unless the user explicitly asks for a long workflow.
 
 Bullets describing what must be true when the workflow is complete.
 
+### Evidence Required
+
+One line: `catalog` for discovery-only requests, or `row_level` when the answer
+needs live row/query results (counts, yes/no capacity, listings, per-row values).
+
 ### Suggested User-Facing Structure
 
 Short outline only. Do not write the final answer.

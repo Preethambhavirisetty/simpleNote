@@ -4,11 +4,11 @@ from typing import Any, Callable
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
-from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
+from app.agent_workflow.evidence_grade import filter_conflict_gaps
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import llm_call
-
+from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 
 def _stream_writer() -> Callable[[Any], None] | None:
     """Return LangGraph stream writer when finalizer streaming is active."""
@@ -27,10 +27,22 @@ _MECHANICAL_PREFIXES = (
     "Here is what I found:",
 )
 
-
 def _is_mechanical_text(text: str) -> bool:
     """Return whether text is a deterministic artifact dump."""
     return text.lstrip().startswith(_MECHANICAL_PREFIXES)
+
+def _append_filter_warnings(answer: str, state: AgentState) -> str:
+    """Append deterministic filter-conflict notes when not already in the answer."""
+    gaps = filter_conflict_gaps(
+        state.get("artifacts") or [],
+        user_query=str(state.get("user_query") or ""),
+    )
+    if not gaps:
+        return answer
+    if any(gap in answer for gap in gaps):
+        return answer
+    warnings = "\n".join(f"- {gap}" for gap in gaps)
+    return f"{answer.rstrip()}\n\n**Filter note:**\n{warnings}"
 
 
 def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
@@ -69,7 +81,7 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     # full LLM roundtrip for no quality gain. Render only mechanical drafts
     # (deterministic artifact dumps). Unknown provenance renders, conservatively.
     if state.get("draft_kind") == "llm" and not _is_mechanical_text(existing):
-        final_answer = existing
+        final_answer = _append_filter_warnings(existing, state)
         if config.policy.enforce_grounding:
             final_answer = _ensure_grounding(final_answer, _grounding_source_refs(state))
         return {
@@ -113,6 +125,7 @@ def finalizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) 
     final_answer = rendered or existing
     if config.policy.enforce_grounding:
         final_answer = _ensure_grounding(final_answer, _grounding_source_refs(state))
+    final_answer = _append_filter_warnings(final_answer, state)
     return {
         "final_answer": final_answer,
         "events": [

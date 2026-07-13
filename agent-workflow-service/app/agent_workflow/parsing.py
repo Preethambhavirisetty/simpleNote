@@ -24,8 +24,29 @@ def parse_plan_markdown(text: str) -> Plan:
         acceptance_criteria=_bullets(sections.get("acceptance criteria", "")),
         suggested_structure=sections.get("suggested user-facing structure", "").strip(),
         search_query=_first_line(sections.get("search query", "")),
+        evidence_required=_first_line(sections.get("evidence required", "")),
         raw_markdown=text,
     )
+
+
+def enrich_plan_with_evidence(plan: Plan) -> Plan:
+    """Tag plan steps that must return row-level evidence before the run can finish."""
+    enriched = dict(plan)
+    required = str(enriched.get("evidence_required") or "").strip().lower()
+    if required in {"row", "row_level", "rows"}:
+        steps = []
+        for step in enriched.get("steps") or []:
+            item = dict(step)
+            if any(
+                token in str(item.get("action") or "").lower()
+                for token in ("query", "panel data", "get_panel_data", "fetch", "pull live")
+            ) or item.get("require_row_level"):
+                item["require_row_level"] = True
+                if not str(item.get("stop_condition") or "").strip():
+                    item["stop_condition"] = "Row-level tool results have been returned for this step"
+            steps.append(item)
+        enriched["steps"] = steps
+    return enriched  # type: ignore[return-value]
 
 
 def parse_review_markdown(text: str) -> ReviewResult:
@@ -47,18 +68,25 @@ def parse_review_markdown(text: str) -> ReviewResult:
     )
 
 
-def parse_executor_action(text: str) -> dict[str, Any]:
-    """Parse the executor JSON action and fall back to a draft answer when needed.
-
-    Models sometimes emit several JSON actions in one turn or wrap the object in
-    prose. Objects are decoded one at a time (raw_decode from each ``{``), and the
-    first one carrying an ``action`` key wins — a greedy ``{.*}`` regex would span
-    multiple objects, fail to parse, and turn the raw JSON into a bogus draft.
-    """
-    cleaned = text.strip()
+def strip_code_fence(text: str) -> str:
+    """Remove a wrapping ```/```json code fence from LLM output."""
+    cleaned = (text or "").strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned
+
+
+def extract_json_object(text: str, *, prefer_key: str = "") -> dict[str, Any] | None:
+    """Return the first JSON object found in LLM output, or None.
+
+    Models sometimes emit several JSON objects in one turn or wrap the object in
+    prose. Objects are decoded one at a time (raw_decode from each ``{``) — a
+    greedy ``{.*}`` regex would span multiple objects and fail to parse. When
+    ``prefer_key`` is set, the first object carrying that key wins over earlier
+    objects without it.
+    """
+    cleaned = strip_code_fence(text)
     try:
         data = json.loads(cleaned)
         if isinstance(data, dict):
@@ -76,13 +104,19 @@ def parse_executor_action(text: str) -> dict[str, Any]:
             pos = cleaned.find("{", pos + 1)
             continue
         if isinstance(data, dict):
-            if data.get("action"):
+            if not prefer_key or data.get(prefer_key):
                 return data
             first_dict = first_dict or data
         pos = cleaned.find("{", end)
-    if first_dict is not None:
-        return first_dict
-    return {"action": "draft_answer", "answer": cleaned}
+    return first_dict
+
+
+def parse_executor_action(text: str) -> dict[str, Any]:
+    """Parse the executor JSON action and fall back to a draft answer when needed."""
+    data = extract_json_object(text, prefer_key="action")
+    if data is not None:
+        return data
+    return {"action": "draft_answer", "answer": strip_code_fence(text)}
 
 
 def _split_sections(text: str) -> dict[str, str]:

@@ -48,6 +48,30 @@ def test_follow_up_query_detects_single_identifier_and_this_pronoun():
     assert not is_follow_up_query("what is the weather in paris", history)  # genuine new topic
 
 
+def test_known_memory_entity_makes_query_a_follow_up():
+    # Naming an entity the session remembers is a follow-up even when no
+    # pronoun/anchor regex fires and the entity isn't in the recent history
+    # window (long conversations scroll old anchors out).
+    history = [{"role": "user", "content": "ok thanks"}, {"role": "assistant", "content": "welcome"}]
+    query = "check power in aiera-power now"  # hyphenated: no snake_case anchor match
+    assert not is_follow_up_query(query, history)
+    assert is_follow_up_query(query, history, known_entities=["aiera-power"])
+    # Short/generic values never count.
+    assert not is_follow_up_query("check rtp", history, known_entities=["rtp"])
+
+
+def test_memory_entity_values_extracts_slot_values():
+    from app.agent_workflow.conversation_memory import memory_entity_values
+
+    memory = {
+        "dashboard": {"value": "autopod_rows_availability", "turn": 2},
+        "bad": "not-a-slot",
+        "empty": {"value": "", "turn": 1},
+    }
+    assert memory_entity_values(memory) == ["autopod_rows_availability"]
+    assert memory_entity_values(None) == []
+
+
 def test_resolve_policy_requires_recall_without_app_specific_tool_names():
     # The app-specific keyword->tool map was removed; a follow-up needing fresh
     # evidence requires *some* tool call, not a hardcoded named tool.
@@ -95,7 +119,33 @@ def test_with_persisted_artifacts_follow_up_does_not_require_recall():
     assert "require_tools" not in runtime
 
 
-def test_follow_up_executor_blocks_finish_without_tool_evidence():
+def test_follow_up_fresh_recall_not_satisfied_by_persisted_artifacts_only():
+    state = {
+        "runtime_context": {
+            "follow_up": True,
+            "require_tools": True,
+            "require_fresh_tool_recall": True,
+            "persisted_artifact_count": 2,
+        },
+        "artifacts": [{"tool": "list_dashboards", "summary": "31 dashboards"}],
+        "tool_calls": [],
+    }
+    missing = follow_up_tool_recall_missing(state)
+    assert missing
+    assert "fresh tool call" in missing[0].lower()
+
+
+def test_follow_up_persisted_reuse_does_not_require_fresh_call():
+    state = {
+        "runtime_context": {
+            "follow_up": True,
+            "persisted_reuse": True,
+            "persisted_artifact_count": 2,
+        },
+        "artifacts": [{"tool": "get_dashboard", "summary": "16 panels"}],
+        "tool_calls": [],
+    }
+    assert not follow_up_tool_recall_missing(state)
     state = {
         "runtime_context": {
             "follow_up": True,

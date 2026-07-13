@@ -24,6 +24,17 @@ _DATA_FOLLOW_UP_RE = re.compile(
     r"\b(table|serial|count|how many|list|show|format|reformat|filter|sort|rows)\b",
     re.IGNORECASE,
 )
+_DATA_LISTING_FOLLOW_UP_RE = re.compile(
+    r"\b("
+    r"what rows?|which rows?|list them|list those|list these|show them|show rows|"
+    r"available power|their available power|with their|pull live panel data"
+    r")\b",
+    re.IGNORECASE,
+)
+_PRESENTATION_FOLLOW_UP_RE = re.compile(
+    r"\b(table|format|reformat|explain|summarize|show again|in markdown)\b",
+    re.IGNORECASE,
+)
 _SITE_RE = re.compile(r"\bsite\s*=\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 _SNAKE_ID_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", re.IGNORECASE)
 _NUMBER_RE = re.compile(r"\b\d+\b")
@@ -35,6 +46,7 @@ class FollowUpPolicy:
 
     is_follow_up: bool = False
     require_tool_recall: bool = False
+    require_fresh_row_recall: bool = False
     required_tools: frozenset[str] = field(default_factory=frozenset)
     persisted_artifact_count: int = 0
 
@@ -82,13 +94,33 @@ def _topic_continues(query: str, history: list[dict[str, Any]]) -> bool:
     return len(overlap) >= 2
 
 
-def is_follow_up_query(query: str, history: list[dict[str, Any]]) -> bool:
+def mentions_known_entity(query: str, known_entities: Any) -> bool:
+    """Return whether the query names an entity the session already established.
+
+    The strongest continuation signal there is: naming a remembered entity
+    (e.g. a dashboard the agent resolved two turns ago) means the user is
+    following up, even when no pronoun/anchor regex fires and the entity has
+    scrolled out of the recent-history window.
+    """
+    text = str(query or "")
+    for entity in known_entities or ():
+        entity = str(entity or "").strip()
+        if len(entity) < 4:
+            continue  # too short to be a distinctive reference
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(entity)}(?![A-Za-z0-9_])", text, re.IGNORECASE):
+            return True
+    return False
+
+
+def is_follow_up_query(query: str, history: list[dict[str, Any]], *, known_entities: Any = ()) -> bool:
     """Return whether the query likely refers to prior-turn assistant output."""
     if not history:
         return False
     cleaned = str(query or "").strip()
     if not cleaned:
         return False
+    if mentions_known_entity(cleaned, known_entities):
+        return True
     if _FOLLOW_UP_RE.search(cleaned):
         return True
     if _REFINEMENT_RE.search(cleaned):
@@ -97,6 +129,59 @@ def is_follow_up_query(query: str, history: list[dict[str, Any]]) -> bool:
         return True
     if len(cleaned.split()) <= 20 and _DATA_FOLLOW_UP_RE.search(cleaned):
         return True
+    return False
+
+
+def _constraint_anchors(text: str) -> set[str]:
+    return _topic_anchors(text)
+
+
+def _constraint_anchors_changed(current: str, prior: str) -> bool:
+    current_anchors = _constraint_anchors(current)
+    prior_anchors = _constraint_anchors(prior)
+    if not current_anchors:
+        return False
+    if not prior_anchors:
+        return True
+    return bool(current_anchors - prior_anchors)
+
+
+def _presentation_only_follow_up(query: str) -> bool:
+    return bool(_PRESENTATION_FOLLOW_UP_RE.search(query or ""))
+
+
+def _data_listing_follow_up(query: str) -> bool:
+    return bool(_DATA_LISTING_FOLLOW_UP_RE.search(query or ""))
+
+
+def _implies_data_claim(query: str) -> bool:
+    from app.agent_workflow.evidence_grade import question_requires_row_evidence
+
+    return question_requires_row_evidence(query)
+
+
+def _follow_up_needs_fresh_evidence(
+    query: str,
+    history: list[dict[str, Any]],
+    persisted_artifacts: list[dict[str, Any]],
+) -> bool:
+    """Return whether a follow-up must recall tools instead of reusing artifacts."""
+    from app.agent_workflow.evidence_grade import (
+        artifacts_have_usable_row_data,
+        persisted_evidence_is_metadata_only,
+    )
+
+    prior = _last_user_text(history)
+    if persisted_evidence_is_metadata_only(persisted_artifacts) and _implies_data_claim(query):
+        return True
+    if _constraint_anchors_changed(query, prior):
+        return True
+    if _data_listing_follow_up(query):
+        return True
+    if _implies_data_claim(query) and not artifacts_have_usable_row_data(persisted_artifacts):
+        return True
+    if _presentation_only_follow_up(query):
+        return False
     return False
 
 
@@ -146,14 +231,23 @@ def resolve_follow_up_policy(
     persisted_artifacts: list[dict[str, Any]],
     persistence_active: bool,
     require_tool_on_follow_up: bool,
+    known_entities: Any = (),
 ) -> FollowUpPolicy:
     """Decide whether this turn can reuse persisted artifacts or must recall tools."""
-    if not is_follow_up_query(query, history):
+    if not is_follow_up_query(query, history, known_entities=known_entities):
         return FollowUpPolicy()
 
     persisted_count = len(persisted_artifacts)
     has_persisted_evidence = persistence_active and persisted_count > 0
     if has_persisted_evidence:
+        if _follow_up_needs_fresh_evidence(query, history, persisted_artifacts):
+            return FollowUpPolicy(
+                is_follow_up=True,
+                require_tool_recall=True,
+                require_fresh_row_recall=_implies_data_claim(query),
+                required_tools=frozenset(),
+                persisted_artifact_count=persisted_count,
+            )
         return FollowUpPolicy(
             is_follow_up=True,
             require_tool_recall=False,
@@ -189,9 +283,25 @@ def apply_follow_up_runtime_context(
         merged["persisted_artifact_count"] = policy.persisted_artifact_count
     if policy.require_tool_recall:
         merged["require_tools"] = True
+        merged["require_fresh_tool_recall"] = True
+        if policy.require_fresh_row_recall:
+            merged["require_fresh_row_recall"] = True
         if policy.required_tools:
             merged["follow_up_required_tools"] = sorted(policy.required_tools)
+    elif policy.persisted_artifact_count:
+        merged["persisted_reuse"] = True
     return merged
+
+
+def runtime_context_of(state: dict[str, Any]) -> dict[str, Any]:
+    """Return the state's runtime_context dict (empty when missing/invalid)."""
+    runtime = state.get("runtime_context")
+    return runtime if isinstance(runtime, dict) else {}
+
+
+def is_follow_up_turn(state: dict[str, Any]) -> bool:
+    """Return whether this turn was resolved as a follow-up of prior turns."""
+    return bool(runtime_context_of(state).get("follow_up"))
 
 
 def _successful_tools(state: dict[str, Any]) -> set[str]:
@@ -202,11 +312,24 @@ def _successful_tools(state: dict[str, Any]) -> set[str]:
     }
 
 
+def _fresh_row_tool_called(state: dict[str, Any]) -> bool:
+    """Return whether this turn already made a successful get_panel_data call."""
+    for record in state.get("tool_calls") or []:
+        if str(record.get("name") or "") != "get_panel_data":
+            continue
+        if str(record.get("status") or "") == "ok":
+            return True
+    return False
+
+
 def follow_up_tool_recall_missing(state: dict[str, Any]) -> list[str]:
     """Return missing evidence tools blocking finish/draft on follow-up turns."""
-    runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
+    runtime = runtime_context_of(state)
     if not runtime.get("follow_up"):
         return []
+
+    if runtime.get("require_fresh_row_recall") and not _fresh_row_tool_called(state):
+        return ["Follow-up requires fresh row-level panel data (call get_panel_data) before answering"]
 
     artifacts = state.get("artifacts") or []
     artifact_tools = evidence_tools_from_artifacts(artifacts)
@@ -222,7 +345,7 @@ def follow_up_tool_recall_missing(state: dict[str, Any]) -> list[str]:
         return []
 
     if runtime.get("require_tools") and not successful:
-        if artifacts and int(runtime.get("persisted_artifact_count") or 0) > 0:
+        if runtime.get("persisted_reuse") and artifacts and int(runtime.get("persisted_artifact_count") or 0) > 0:
             return []
         return ["Follow-up requires a fresh tool call before answering"]
 
@@ -231,7 +354,7 @@ def follow_up_tool_recall_missing(state: dict[str, Any]) -> list[str]:
 
 def follow_up_approval_gaps(state: dict[str, Any]) -> list[str]:
     """Deterministic reviewer checks for follow-up grounding."""
-    runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
+    runtime = runtime_context_of(state)
     if not runtime.get("follow_up"):
         return []
 

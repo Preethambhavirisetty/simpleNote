@@ -147,7 +147,7 @@ _SCALAR_ARG_RE = re.compile(
 )
 
 
-def _parse_args(args_preview: Any) -> dict[str, Any]:
+def parse_args_preview(args_preview: Any) -> dict[str, Any]:
     """Best-effort parse of a tool call's argument preview into a dict.
 
     Tool-call records store ``args_preview`` as a length-capped JSON string, so a
@@ -215,7 +215,7 @@ def extract_memory_slots(
     for call in tool_calls:
         if str(call.get("status") or "").lower() != "ok":
             continue
-        args = _parse_args(call.get("args_preview"))
+        args = parse_args_preview(call.get("args_preview"))
         if not args:
             continue
         finding = _finding_for(call, artifacts)
@@ -247,6 +247,17 @@ def extract_memory_slots(
         ranked = sorted(memory.items(), key=lambda kv: int(kv[1].get("turn", 0)), reverse=True)
         memory = dict(ranked[:max_slots])
     return memory
+
+
+def memory_entity_values(memory: dict[str, Any] | None) -> list[str]:
+    """Return the remembered slot values (the session's established entities)."""
+    if not isinstance(memory, dict):
+        return []
+    return [
+        str(slot.get("value") or "").strip()
+        for slot in memory.values()
+        if isinstance(slot, dict) and str(slot.get("value") or "").strip()
+    ]
 
 
 def render_memory(memory: dict[str, Any] | None) -> str:

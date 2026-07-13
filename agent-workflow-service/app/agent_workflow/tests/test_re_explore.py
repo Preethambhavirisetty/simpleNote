@@ -54,8 +54,10 @@ def test_missing_evidence_routes_to_executor_not_revision():
 
     assert updates["phase"] == "executing"  # re-enter executor
     assert updates["iteration"]["explore_cycles"] == 1
+    assert updates["iteration"]["review_cycles"] == 0
     assert updates["plan"]["steps"][-1]["title"] == "Gather missing evidence"
     assert updates["plan"]["steps"][-1]["required_tools"] == ["get_panel_data"]
+    assert updates["plan"]["steps"][-1]["require_row_level"] is True
     assert "get_panel_data" in updates["review_feedback"]
     assert updates["current_step_index"] == len(updates["plan"]["steps"]) - 1
     assert any(event.get("step") == "reviewer.re_explore" for event in updates["events"])
@@ -83,14 +85,14 @@ def test_re_explore_reuses_single_step_across_cycles():
 
 
 def test_live_data_gate_ignores_bare_descriptive_words():
-    from app.agent_workflow.nodes.reviewer import _question_needs_live_data
+    from app.agent_workflow.evidence_grade import question_needs_live_data
 
     # Over-broad words alone must NOT trigger the quantitative-evidence gate.
-    assert not _question_needs_live_data("let use this dashboard to see if power is available")
-    assert not _question_needs_live_data("what is the current capacity story")
+    assert not question_needs_live_data("let use this dashboard to see if power is available")
+    assert not question_needs_live_data("what is the current capacity story")
     # Genuine quantitative questions still do.
-    assert _question_needs_live_data("is there at least 30kv available in rtp")
-    assert _question_needs_live_data("how many panels are there")
+    assert question_needs_live_data("is there at least 30kv available in rtp")
+    assert question_needs_live_data("how many panels are there")
 
 
 def test_wording_only_revise_stays_text_revision():
@@ -116,11 +118,13 @@ def test_re_explore_resets_no_progress_counter():
 def test_re_explore_respects_cycle_cap():
     config = _config(max_explore_cycles=1)
     llm = _ReviewerLlm('{"verdict":"REVISE","missing_evidence":["still need get_panel_data"],"required_changes":[]}')
-    # Budget already spent -> falls back to text revision instead of looping.
+    # Budget already spent -> terminal incomplete evidence, not text revision.
     state = _review_state(iteration={"review_cycles": 0, "revision_cycles": 0, "explore_cycles": 1})
     updates = reviewer_node(state, config=config, llm=llm)
 
-    assert updates["phase"] == "revising"
+    assert updates["phase"] == "done"
+    assert updates.get("error", "").startswith("Incomplete evidence:")
+    assert any(event.get("step") == "reviewer.incomplete_evidence" for event in updates["events"])
 
 
 def test_re_explore_disabled_when_cap_zero():
@@ -128,7 +132,8 @@ def test_re_explore_disabled_when_cap_zero():
     llm = _ReviewerLlm('{"verdict":"REVISE","missing_evidence":["need get_panel_data"],"required_changes":[]}')
     updates = reviewer_node(_review_state(), config=config, llm=llm)
 
-    assert updates["phase"] == "revising"  # re-exploration turned off
+    assert updates["phase"] == "done"
+    assert updates.get("error", "").startswith("Incomplete evidence:")
 
 
 def test_sse_adapter_passes_through_re_explore_and_stop_fields():
@@ -174,11 +179,12 @@ def test_formatting_gap_routes_to_text_revision_not_re_explore():
 def test_re_explore_skipped_when_no_tools_available():
     config = _config(max_explore_cycles=1)
     llm = _ReviewerLlm('{"verdict":"REVISE","missing_evidence":["need more data"],"required_changes":[]}')
-    # No tool_calls and no candidate_tools -> nothing to re-explore with.
+    # No tool_calls and no candidate_tools -> nothing to re-explore with, so fail honestly.
     state = _review_state(tool_calls=[], candidate_tools=[])
     updates = reviewer_node(state, config=config, llm=llm)
 
-    assert updates["phase"] == "revising"
+    assert updates["phase"] == "done"
+    assert updates.get("error", "").startswith("Incomplete evidence:")
 
 
 # --- Executor guard: same tool, different arguments -------------------------
@@ -324,7 +330,45 @@ def test_approve_blocked_without_row_data_for_quantitative_question():
 
     assert updates["phase"] == "executing"
     assert updates["review"]["verdict"] == "REVISE"
-    assert any("row-level data" in item for item in updates["review"]["missing_evidence"])
+    assert any("row-level tool results" in item.lower() for item in updates["review"]["missing_evidence"])
+    assert updates["plan"]["steps"][-1]["require_row_level"] is True
+
+
+class _DraftLlm:
+    def complete(self, messages, *, max_tokens: int = 1024) -> str:
+        return '{"action":"draft_answer","answer":"Yes, RTP has capacity."}'
+
+    def stream(self, messages, *, max_tokens: int = 1024):
+        yield self.complete(messages, max_tokens=max_tokens)
+
+
+def test_draft_answer_blocked_without_row_data_for_quantitative_question():
+    config = _config()
+    state = {
+        "user_query": "Do we have at least 30 kW available in RTP?",
+        "phase": "executing",
+        "iteration": {"executor_turns": 1, "no_progress_turns": 0},
+        "current_step_index": 5,
+        "plan": {
+            "goal": "power",
+            "steps": [
+                {"title": "Gather missing evidence", "action": "gather", "origin": "re_explore", "require_row_level": True},
+            ],
+        },
+        "candidate_tools": [_panel_tool()],
+        "tool_discovery_cache": {},
+        "tool_calls": [
+            {"name": "get_dashboard_tokens", "status": "ok", "step_index": 0, "replan_id": 0},
+        ],
+        "artifacts": [
+            {"id": "a", "tool": "get_dashboard_tokens", "raw_ref": {"facts": ["site=RTP"]}, "step_index": 0},
+        ],
+        "events": [],
+    }
+    updates = executor_node(state, config=config, llm=_DraftLlm(), tools=_PanelTools())
+
+    assert "draft_answer" not in updates
+    assert any(event.get("step") == "executor.row_level_evidence_missing" for event in updates["events"])
 
 
 def test_executor_stops_when_exploration_stalls():
@@ -417,13 +461,13 @@ def test_persisted_artifacts_reused_only_on_followups(monkeypatch):
     history = [{"role": "user", "content": "list dashboards"}, {"role": "assistant", "content": "12 dashboards"}]
 
     # A genuinely new topic must not inherit the prior turn's artifacts.
-    _req, new_topic = eng._prepare_session(
+    _req, new_topic, _mem = eng._prepare_session(
         RunRequest(query="what is the error rate for the payment service", session_id="s1", history=history)
     )
     assert new_topic == []
 
     # A follow-up that refers back reuses them.
-    _req2, follow = eng._prepare_session(
+    _req2, follow, _mem2 = eng._prepare_session(
         RunRequest(query="how many of those are there?", session_id="s1", history=history)
     )
     assert follow and follow[0]["id"] == "old"

@@ -71,7 +71,7 @@ def truncate_tool_result(
 # nodes/fact_extractor.py (_FACT_PATHS / _COLLECTION_PATHS).
 _STRUCTURED_LIST_KEYS = ("facts", "items", "results", "rows", "panels", "tables")
 _STRUCTURED_CONTAINER_KEYS = ("data", "display", "metadata")
-_STRUCTURED_SUBKEYS = ("facts", "tables")
+_STRUCTURED_SUBKEYS = ("facts", "items", "results", "rows", "panels", "tables")
 _MAX_STRUCTURED_ITEMS = 50
 _MAX_STRUCTURED_REF_CHARS = 8000
 

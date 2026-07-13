@@ -12,15 +12,21 @@ from app.agent_workflow.context import (
     score_artifact,
     truncate_tool_result,
 )
+from app.agent_workflow.conversation_memory import parse_args_preview
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.follow_up import follow_up_tool_recall_missing
+from app.agent_workflow.evidence_grade import quantitative_evidence_gaps, row_evidence_gaps, step_has_row_level_evidence
 from app.agent_workflow.parsing import parse_executor_action
 from app.agent_workflow.parsing import normalize_tool_name
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.providers.tools import ToolProvider
 from app.agent_workflow.state import AgentState, Artifact, ToolCallRecord
 from app.agent_workflow.telemetry import llm_call
-from app.agent_workflow.util.context_path import resolve_context_path
+from app.agent_workflow.tool_arguments import (
+    build_panel_data_retry_arguments,
+    classify_tool_result_failure,
+    normalize_tool_arguments,
+)
 
 
 def _complete_llm(llm: LlmProvider, messages: list[dict[str, str]], *, max_tokens: int, node: str, label: str) -> str:
@@ -47,15 +53,18 @@ def _current_replan_id(state: AgentState) -> int:
 
 
 def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
-    """Return tool names already called for the current plan step and replan.
+    """Return successful tool names already called for the current plan step.
 
     Reads both artifacts and tool_calls: the summarizer can compact artifacts
-    away mid-loop, but tool_calls persist, so duplicate-tool and required-tool
-    checks must not forget a call just because its artifact was folded.
+    away mid-loop, but tool_calls persist, so required-tool checks must not
+    forget a successful call just because its artifact was folded.
     """
     replan_id = _current_replan_id(state)
     called: set[str] = set()
     for artifact in state.get("artifacts") or []:
+        raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
+        if raw_ref.get("ok") is False:
+            continue
         if (
             int(artifact.get("step_index", -1)) == step_index
             and int(artifact.get("replan_id") or 0) == replan_id
@@ -66,6 +75,7 @@ def _called_tools_for_step(state: AgentState, step_index: int) -> set[str]:
         if (
             int(record.get("step_index", -1)) == step_index
             and int(record.get("replan_id") or 0) == replan_id
+            and str(record.get("status") or "") == "ok"
             and record.get("name")
         ):
             called.add(normalize_tool_name(record.get("name")))
@@ -103,6 +113,46 @@ def _step_has_evidence(state: AgentState, step_index: int) -> bool:
         ):
             return True
     return False
+
+
+def _step_stop_condition_met(state: AgentState, step_index: int, step: dict[str, Any]) -> bool:
+    """Return whether a plan step's stop_condition is satisfied."""
+    stop_condition = str(step.get("stop_condition") or "").strip()
+    if not stop_condition:
+        return True
+    if step.get("require_row_level"):
+        return step_has_row_level_evidence(
+            state.get("artifacts") or [],
+            step_index=step_index,
+            replan_id=_current_replan_id(state),
+        )
+    return _step_has_evidence(state, step_index)
+
+
+def _get_panel_data_attempted(state: AgentState) -> bool:
+    """Return whether get_panel_data was invoked at least once this run."""
+    for record in state.get("tool_calls") or []:
+        if str(record.get("name") or "") == "get_panel_data":
+            return True
+    return False
+
+
+def _panel_data_attempt_gap(current_step: dict[str, Any], state: AgentState) -> str | None:
+    """Return a gap message when a row-level step never attempted panel data."""
+    if not current_step.get("require_row_level"):
+        return None
+    if _get_panel_data_attempted(state):
+        return None
+    return "get_panel_data was not attempted for this row-level step"
+
+
+def _row_level_answer_gaps(state: AgentState) -> list[str]:
+    """Block premature drafts when the question needs live row data."""
+    return row_evidence_gaps(
+        str(state.get("user_query") or ""),
+        state.get("artifacts") or [],
+        plan=state.get("plan") if isinstance(state.get("plan"), dict) else None,
+    )
 
 
 def _step_call_signatures_and_count(state: AgentState, step_index: int) -> tuple[set[tuple[str, str]], int]:
@@ -169,10 +219,150 @@ def _add_guidance(updates: dict[str, Any], message: str, *, limit: int = 4) -> N
     updates["executor_guidance"] = guidance[-limit:]
 
 
+def _known_argument_values(state: AgentState) -> dict[str, Any]:
+    """Map argument name -> most recently used value across the session.
+
+    Sources, weakest to strongest (later wins): remembered conversation-memory
+    slots (keyed by argument name), then arguments of successful tool calls this
+    run. Purely name-matched and app-agnostic — an MCP suite that calls a
+    parameter ``name`` in one tool almost always means the same thing in its
+    siblings, and schema validation still runs after any fill.
+    """
+    known: dict[str, Any] = {}
+    memory = state.get("conversation_memory") or {}
+    if isinstance(memory, dict):
+        for key, slot in memory.items():
+            if isinstance(slot, dict) and slot.get("value") not in (None, ""):
+                known[str(key)] = slot["value"]
+    for record in state.get("tool_calls") or []:  # oldest -> newest; newest wins
+        if str(record.get("status") or "") != "ok":
+            continue
+        for key, value in normalize_tool_arguments(parse_args_preview(record.get("args_preview"))).items():
+            if value not in (None, "", [], {}):
+                known[str(key)] = value
+    plan = state.get("plan") if isinstance(state.get("plan"), dict) else {}
+    dashboard = str(plan.get("dashboard") or "").strip()
+    if dashboard and "name" not in known:
+        known["name"] = dashboard
+    return known
+
+
+_ARTIFACT_SCAN_MAX_NODES = 400
+_ARTIFACT_SCAN_MAX_DEPTH = 6
+
+
+def _unique_field_value_from_artifacts(state: AgentState, field: str) -> Any:
+    """Find one unambiguous value for ``field`` inside recent tool results.
+
+    Required values often live in a *result* rather than any prior call's
+    arguments (e.g. get_dashboard returns ``panels: [{"panel_id": 77, ...}]``
+    and the next call needs ``panel_id``). Scan artifact payloads newest-first
+    for scalar values under the exact key; an artifact yields a fill only when
+    every occurrence agrees (a unique value) — ambiguity is never guessed at.
+    """
+    for artifact in reversed(state.get("artifacts") or []):
+        values: list[Any] = []
+        budget = _ARTIFACT_SCAN_MAX_NODES
+        stack: list[tuple[Any, int]] = [
+            (artifact.get("raw_ref"), 0),
+            (artifact.get("source_ref"), 0),
+        ]
+        while stack and budget > 0:
+            node, depth = stack.pop()
+            budget -= 1
+            if depth > _ARTIFACT_SCAN_MAX_DEPTH:
+                continue
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if str(key) == field and isinstance(value, (str, int, float)) and value not in ("",):
+                        values.append(value)
+                    elif isinstance(value, (dict, list)):
+                        stack.append((value, depth + 1))
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, (dict, list)):
+                        stack.append((item, depth + 1))
+        distinct = {json.dumps(v, sort_keys=True, default=str) for v in values}
+        if len(distinct) == 1:
+            return values[0]
+    return None
+
+
+def _repair_missing_arguments(
+    state: AgentState,
+    *,
+    arguments: dict[str, Any],
+    schema: dict[str, Any],
+) -> dict[str, Any]:
+    """Fill missing required arguments from session-known values (by exact name).
+
+    Returns only the filled entries. Sources, strongest first: arguments of
+    prior successful calls / memory slots, then a unique same-named scalar found
+    in recent tool results. This turns "call get_dashboard_tokens (missing:
+    name)" or "call get_panel_data (missing: panel_id)" into an executed call
+    instead of burning LLM turns asking the model to restate a value the
+    session already holds. Schema validation still runs after every fill.
+    """
+    required = _schema_required_fields(schema)
+    missing = [field for field in required if arguments.get(field) is None]
+    if not missing:
+        return {}
+    known = _known_argument_values(state)
+    filled: dict[str, Any] = {}
+    for field in missing:
+        if field in known:
+            filled[field] = known[field]
+            continue
+        value = _unique_field_value_from_artifacts(state, field)
+        if value is not None:
+            filled[field] = value
+    return filled
+
+
+def _veto(updates: dict[str, Any], *, step: str, guidance: str, message: str, **fields: Any) -> dict[str, Any]:
+    """Block this turn's action: queue the correction and emit the veto event.
+
+    Every guard that rejects an action uses this one shape — the guidance string
+    is what the model reads next turn, the event is what the host/UI sees.
+    """
+    _add_guidance(updates, guidance)
+    updates["events"].append({"step": step, "message": message, **fields})
+    return updates
+
+
 def _schema_required_fields(schema: dict[str, Any]) -> list[str]:
     """Return the required argument names declared by a tool's input schema."""
     required = schema.get("required") if isinstance(schema, dict) else None
     return [str(item) for item in required] if isinstance(required, list) else []
+
+
+_KNOWN_ACTIONS = frozenset({"search_tools", "call_tool", "finish_step", "draft_answer"})
+
+
+def _normalize_tool_name_action(
+    action: dict[str, Any],
+    action_type: str,
+    candidate_tools: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str, bool]:
+    """Recover ``{"action": "<tool name>", ...}`` as a proper call_tool action.
+
+    Models regularly conflate the action field with the tool to call (e.g.
+    ``{"action":"search_panels","query":"x"}``). Left alone that falls through
+    to the draft path and the run produces zero tool calls. When the "action"
+    names a known candidate tool, rewrite it to call_tool with the remaining
+    keys as arguments. Returns (action, action_type, recovered?).
+    """
+    if action_type in _KNOWN_ACTIONS or not action_type:
+        return action, action_type, False
+    for candidate in candidate_tools:
+        name = str(candidate.get("name") or "")
+        if name.lower() == action_type:
+            provided = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+            # Loose keys ride along as arguments ({"action":"search_panels","query":"x"}
+            # means arguments={"query":"x"}); an explicit arguments dict wins on conflict.
+            extras = {k: v for k, v in action.items() if k not in {"action", "arguments", "name", "answer"}}
+            return {"action": "call_tool", "name": name, "arguments": {**extras, **provided}}, "call_tool", True
+    return action, action_type, False
 
 
 def _finish_is_deadlocked(iteration: dict[str, Any], config: AgentConfig) -> bool:
@@ -189,6 +379,42 @@ def _finish_is_deadlocked(iteration: dict[str, Any], config: AgentConfig) -> boo
     """
     cap = int(config.policy.max_no_progress_turns)
     return cap > 0 and int(iteration.get("no_progress_turns") or 0) >= cap
+
+
+def _incomplete_evidence_result(
+    *,
+    state: AgentState,
+    updates: dict[str, Any],
+    iteration: dict[str, Any],
+    reason: str,
+    missing: list[str],
+    step_index: int | None = None,
+) -> dict[str, Any]:
+    """End honestly when required evidence could not be gathered."""
+    missing = [str(item).strip() for item in missing if str(item).strip()]
+    missing_text = "\n".join(f"- {item}" for item in missing) if missing else "- Required evidence was not gathered."
+    answer = (
+        "I could not complete this request with reliable evidence.\n\n"
+        f"Missing evidence:\n{missing_text}\n\n"
+        "I am not going to infer or fabricate the final answer from metadata."
+    )
+    error = f"Incomplete evidence: {reason}"
+    updates["phase"] = "done"
+    updates["final_answer"] = answer
+    updates["draft_answer"] = answer
+    updates["draft_kind"] = "mechanical"
+    updates["error"] = state.get("error") or error
+    updates["iteration"] = iteration
+    updates["events"].append(
+        {
+            "step": "executor.incomplete_evidence",
+            "step_index": step_index,
+            "reason": reason,
+            "missing": missing,
+            "message": error,
+        }
+    )
+    return updates
 
 
 def _cache_key(query: str) -> str:
@@ -240,10 +466,16 @@ def _schema_for_tool(tool_name: str, candidate_tools: list[dict[str, Any]]) -> d
     return {}
 
 
-def _is_tool_allowed(tool_name: str, *, config: AgentConfig) -> bool:
-    """Return whether the configured tool policy allows this tool."""
+def _tool_policy_sets(config: AgentConfig) -> tuple[set[str], set[str]]:
+    """Return the (allowlist, denylist) name sets from the tool policy."""
     allowlist = {item for item in (config.policy.tools.allowlist or []) if item}
     denylist = {item for item in (config.policy.tools.denylist or []) if item}
+    return allowlist, denylist
+
+
+def _is_tool_allowed(tool_name: str, *, config: AgentConfig) -> bool:
+    """Return whether the configured tool policy allows this tool."""
+    allowlist, denylist = _tool_policy_sets(config)
     if tool_name in denylist:
         return False
     if not allowlist:
@@ -253,11 +485,16 @@ def _is_tool_allowed(tool_name: str, *, config: AgentConfig) -> bool:
 
 def _filter_candidates_by_policy(candidates: list[dict[str, Any]], *, config: AgentConfig) -> list[dict[str, Any]]:
     """Remove discovered tools blocked by allowlist or denylist policy."""
+    # Build the policy sets once per filter pass, not once per candidate.
+    allowlist, denylist = _tool_policy_sets(config)
     filtered = []
     for candidate in candidates:
         tool_name = str(candidate.get("name") or "")
-        if tool_name and _is_tool_allowed(tool_name, config=config):
-            filtered.append(candidate)
+        if not tool_name or tool_name in denylist:
+            continue
+        if allowlist and tool_name not in allowlist:
+            continue
+        filtered.append(candidate)
     return filtered
 
 
@@ -277,21 +514,132 @@ def _required_tools_for_step(config: AgentConfig, step: dict[str, Any]) -> set[s
 
 def _plan_steps_incomplete(state: AgentState, config: AgentConfig) -> bool:
     """Return whether the executor still has unfinished plan work."""
+    from app.agent_workflow.evidence_grade import row_evidence_gaps
+
     steps = (state.get("plan") or {}).get("steps") or []
     if not steps:
         return False
     step_index = int(state.get("current_step_index") or 0)
     if step_index >= len(steps):
-        return False
+        return bool(
+            row_evidence_gaps(
+                str(state.get("user_query") or ""),
+                state.get("artifacts") or [],
+                plan=state.get("plan") if isinstance(state.get("plan"), dict) else None,
+            )
+        )
     current_step = steps[step_index]
     required = _required_tools_for_step(config, current_step)
     called = _called_tools_for_step(state, step_index) | _called_tools_for_run(state)
     if required - called:
         return True
     stop_condition = str(current_step.get("stop_condition") or "").strip()
-    if stop_condition and not _step_has_evidence(state, step_index):
+    if stop_condition and not _step_stop_condition_met(state, step_index, current_step):
+        return True
+    if current_step.get("require_row_level") and not step_has_row_level_evidence(
+        state.get("artifacts") or [],
+        step_index=step_index,
+        replan_id=_current_replan_id(state),
+    ):
+        return True
+    if row_evidence_gaps(
+        str(state.get("user_query") or ""),
+        state.get("artifacts") or [],
+        plan=state.get("plan") if isinstance(state.get("plan"), dict) else None,
+    ):
         return True
     return step_index < len(steps) - 1
+
+
+def _step_is_complete(state: AgentState, config: AgentConfig, *, step_index: int, step: dict[str, Any]) -> bool:
+    """Return whether a plan step's required work is already satisfied."""
+    required = _required_tools_for_step(config, step)
+    called = _called_tools_for_step(state, step_index) | _called_tools_for_run(state)
+    if required - called:
+        return False
+    stop_condition = str(step.get("stop_condition") or "").strip()
+    if stop_condition and not _step_stop_condition_met(state, step_index, step):
+        return False
+    if step.get("require_row_level") and not step_has_row_level_evidence(
+        state.get("artifacts") or [],
+        step_index=step_index,
+        replan_id=_current_replan_id(state),
+    ):
+        return False
+    return True
+
+
+def _auto_advance_completed_steps(state: AgentState, config: AgentConfig) -> dict[str, Any] | None:
+    """Advance past steps whose required tools and stop conditions are already met."""
+    steps = (state.get("plan") or {}).get("steps") or []
+    if not steps:
+        return None
+    step_index = int(state.get("current_step_index") or 0)
+    if step_index >= len(steps):
+        return None
+
+    advanced_from = step_index
+    while step_index < len(steps):
+        current_step = steps[step_index]
+        if not _step_is_complete(state, config, step_index=step_index, step=current_step):
+            break
+        if step_index >= len(steps) - 1:
+            break
+        step_index += 1
+
+    if step_index == advanced_from:
+        return None
+
+    return {
+        "current_step_index": step_index,
+        "candidate_tools": [],
+        "events": [
+            {
+                "step": "executor.auto_advance",
+                "from_step": advanced_from,
+                "to_step": step_index,
+                "message": f"Advanced to plan step {step_index + 1} because prior step(s) were already complete.",
+            }
+        ],
+    }
+
+
+def _row_gaps_block_handoff(state: AgentState) -> list[str]:
+    """Return row-evidence gaps that must block synthesis handoff."""
+    return row_evidence_gaps(
+        str(state.get("user_query") or ""),
+        state.get("artifacts") or [],
+        plan=state.get("plan") if isinstance(state.get("plan"), dict) else None,
+    )
+
+
+def _handoff_to_fact_extracting(
+    *,
+    state: AgentState,
+    updates: dict[str, Any],
+    iteration: dict[str, Any],
+    reason: str,
+    step_index: int | None = None,
+    extra_events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Move to fact extraction only when row-evidence requirements are satisfied."""
+    missing = _row_gaps_block_handoff(state)
+    events = list(updates.get("events") or [])
+    if extra_events:
+        events.extend(extra_events)
+    updates["events"] = events
+    updates["iteration"] = iteration
+    if missing:
+        return _incomplete_evidence_result(
+            state=state,
+            updates=updates,
+            iteration=iteration,
+            reason=reason,
+            missing=missing,
+            step_index=step_index,
+        )
+    updates["phase"] = "fact_extracting"
+    return updates
 
 
 def _apply_argument_injection(
@@ -382,14 +730,23 @@ def _record_invalid_tool_arguments(
     tool_name: str,
     arguments: dict[str, Any],
     errors: list[str],
+    step_index: int,
 ) -> dict[str, Any]:
-    """Record invalid tool arguments into workflow state or telemetry."""
+    """Record invalid tool arguments into workflow state or telemetry.
+
+    The record carries step/replan ids so the duplicate-call guard sees repeated
+    identical *invalid* attempts too — without this, a greedy model that keeps
+    emitting the same broken call burns the entire iteration budget re-failing
+    validation instead of being coerced to finish/advance.
+    """
     record: ToolCallRecord = {
         "name": tool_name,
         "args_preview": json.dumps(arguments)[:300],
         "status": "invalid_args",
         "latency_ms": 0,
         "error": "; ".join(errors),
+        "step_index": step_index,
+        "replan_id": _current_replan_id(state),
     }
     tool_calls = list(state.get("tool_calls") or [])
     tool_calls.append(record)
@@ -609,12 +966,14 @@ def _run_tool_and_record(
     step_query: str,
     on_tool_call: Callable[[str, dict[str, Any], Any], None] | None,
     on_artifact: Callable[[Artifact], None] | None,
+    panel_retry: bool = True,
 ) -> dict[str, Any]:
     """Execute a tool call and fold the result into state updates.
 
     No destructive gating here — callers are either non-destructive paths or the
     approval node executing an explicitly approved call.
     """
+    arguments = normalize_tool_arguments(arguments)
     started = time.perf_counter()
     status = "ok"
     error: str | None = None
@@ -631,6 +990,45 @@ def _run_tool_and_record(
         status = "error"
         error = str(exc)
         result = {"ok": False, "error": error}
+
+    payload_error = classify_tool_result_failure(result)
+    if payload_error:
+        status = "failed"
+        error = payload_error
+
+    if (
+        panel_retry
+        and tool_name == "get_panel_data"
+        and status == "failed"
+        and isinstance(result, dict)
+    ):
+        retry_args = build_panel_data_retry_arguments(state, arguments, result)
+        if retry_args:
+            called_signatures, _ = _step_call_signatures_and_count(state, step_index)
+            retry_signature = (tool_name, json.dumps(retry_args)[:300])
+            if retry_signature not in called_signatures:
+                updates["events"].append(
+                    {
+                        "step": "executor.panel_data_retry",
+                        "tool": tool_name,
+                        "message": "Retrying get_panel_data with token defaults for open/missing filters.",
+                        "filled_tokens": sorted((retry_args.get("panel_tokens") or {}).keys()),
+                    }
+                )
+                return _run_tool_and_record(
+                    state=state,
+                    config=config,
+                    tools=tools,
+                    tool_name=tool_name,
+                    arguments=retry_args,
+                    updates=updates,
+                    iteration=iteration,
+                    step_index=step_index,
+                    step_query=step_query,
+                    on_tool_call=on_tool_call,
+                    on_artifact=on_artifact,
+                    panel_retry=False,
+                )
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     record: ToolCallRecord = {
@@ -687,6 +1085,7 @@ def _run_tool_and_record(
             "status": status,
             "arguments": arguments,
             "error": error,
+            "result_ok": status == "ok",
             "latency_ms": latency_ms,
             "artifact_id": artifact.get("id"),
             "artifact_score": round(float(artifact.get("composite_score") or 0.0), 3),
@@ -713,20 +1112,28 @@ def executor_node(
     iteration = dict(state.get("iteration") or {})
     iteration["executor_turns"] = int(iteration.get("executor_turns") or 0) + 1
     if iteration["executor_turns"] > config.policy.max_executor_iterations:
-        return {
-            "phase": "fact_extracting",
-            "iteration": iteration,
-            "events": [{"step": "executor.iteration_limit", "handoff": "fact_extractor"}],
-        }
+        return _handoff_to_fact_extracting(
+            state=state,
+            updates={"iteration": iteration, "events": []},
+            iteration=iteration,
+            reason="executor iteration limit",
+            extra_events=[{"step": "executor.iteration_limit", "handoff": "fact_extractor"}],
+        )
+
+    auto_updates = _auto_advance_completed_steps(state, config)
+    if auto_updates:
+        state = {**state, **auto_updates}
 
     # Generic early stop: once tool work stops producing useful new evidence,
     # stop exploring and answer with what we have rather than burning the budget.
     stalled, iteration = _update_no_progress(state, iteration, config)
     if stalled and not _plan_steps_incomplete(state, config):
-        return {
-            "phase": "fact_extracting",
-            "iteration": iteration,
-            "events": [
+        return _handoff_to_fact_extracting(
+            state=state,
+            updates={"iteration": iteration, "events": []},
+            iteration=iteration,
+            reason="executor no-progress stop",
+            extra_events=[
                 {
                     "step": "executor.no_progress_stop",
                     "handoff": "fact_extractor",
@@ -734,17 +1141,19 @@ def executor_node(
                     "useful_artifacts": int(iteration.get("useful_artifacts_seen") or 0),
                 }
             ],
-        }
+        )
 
     plan = state.get("plan") or {}
     steps = plan.get("steps") or []
     step_index = int(state.get("current_step_index") or 0)
     if step_index >= len(steps):
-        return {
-            "phase": "fact_extracting",
-            "iteration": iteration,
-            "events": [{"step": "executor.completed_steps", "handoff": "fact_extractor"}],
-        }
+        return _handoff_to_fact_extracting(
+            state=state,
+            updates={"iteration": iteration, "events": auto_updates.get("events", []) if auto_updates else []},
+            iteration=iteration,
+            reason="executor completed all plan steps",
+            extra_events=[{"step": "executor.completed_steps", "handoff": "fact_extractor"}],
+        )
 
     current_step = steps[step_index] if step_index < len(steps) else {}
     # Prefer the planner-rewritten standalone query (pronouns resolved) so
@@ -785,11 +1194,13 @@ def executor_node(
         )
     else:
         messages[-1]["content"] += (
-            "\n\nReturn ONLY JSON with one action:\n"
+            "\n\nReturn exactly ONE JSON object. \"action\" must be one of: search_tools, call_tool, finish_step, draft_answer"
+            " — never a tool name (tool names go in \"name\"):\n"
             '{"action":"search_tools","query":"..."}\n'
             '{"action":"call_tool","name":"tool_name","arguments":{...}}\n'
             '{"action":"finish_step"}\n'
-            '{"action":"draft_answer","answer":"..."}'
+            '{"action":"draft_answer","answer":"..."}\n'
+            'Example — to run search_panels: {"action":"call_tool","name":"search_panels","arguments":{"query":"..."}}'
         )
 
     action: dict[str, Any] | None = None
@@ -847,21 +1258,35 @@ def executor_node(
                 label="executor LLM call",
             )
     except DeadlineExceeded as exc:
-        return {
-            "phase": "fact_extracting",
-            "iteration": iteration,
-            "error": str(exc),
-            "events": [{"step": "executor.timeout", "error": str(exc), "handoff": "fact_extractor"}],
-        }
+        return _handoff_to_fact_extracting(
+            state=state,
+            updates={"iteration": iteration, "error": str(exc), "events": []},
+            iteration=iteration,
+            reason="executor timeout",
+            extra_events=[{"step": "executor.timeout", "error": str(exc), "handoff": "fact_extractor"}],
+        )
     if action is None:
         action = parse_executor_action(raw)
     action_type = str(action.get("action") or "").lower()
 
-    candidate_tools = _filter_candidates_by_policy(list(state.get("candidate_tools") or []), config=config)
+    # In native mode this exact filter already ran for native_candidates; reuse it.
+    candidate_tools = (
+        native_candidates
+        if native_mode
+        else _filter_candidates_by_policy(list(state.get("candidate_tools") or []), config=config)
+    )
+    # Models often put a tool name straight into the action field
+    # ({"action":"search_panels","query":...}); without this normalization the
+    # turn falls through to the draft path and no tool ever runs.
+    action, action_type, recovered_tool_action = _normalize_tool_name_action(action, action_type, candidate_tools)
     called_this_step = _called_tools_for_step(state, step_index)
     # Guidance is rebuilt every turn: a clean turn clears last turn's corrections,
     # and any veto/error below re-adds what the model must fix next turn.
     updates: dict[str, Any] = {"iteration": iteration, "phase": "executing", "executor_guidance": []}
+    if auto_updates:
+        updates.update({k: v for k, v in auto_updates.items() if k != "events"})
+        if auto_updates.get("events"):
+            prefetch_events = list(auto_updates.get("events") or []) + prefetch_events
     if prefetch_candidates:
         updates["candidate_tools"] = prefetch_candidates
     if prefetch_cache_update is not None:
@@ -875,24 +1300,30 @@ def executor_node(
             "executor_turn": iteration["executor_turns"],
         }
     ]
+    if recovered_tool_action:
+        updates["events"].append(
+            {
+                "step": "executor.action_recovered",
+                "tool": action.get("name"),
+                "message": f"Model used the tool name as the action; recovered as call_tool({action.get('name')}).",
+            }
+        )
 
     if action_type == "search_tools" and candidate_tools:
+        # _search_repeat_counter mutates `iteration` in place, which is already
+        # stored in updates["iteration"] above.
         repeat_count = _search_repeat_counter(iteration, step_index=step_index)
-        updates["iteration"] = iteration
         if repeat_count == 1:
-            _add_guidance(
+            return _veto(
                 updates,
-                "Do not call search_tools again: candidate tools are already listed in your context. "
-                "Choose call_tool with schema-valid arguments (fill every required argument from prior results or the user request).",
+                step="executor.tool_candidates_available",
+                guidance=(
+                    "Do not call search_tools again: candidate tools are already listed in your context. "
+                    "Choose call_tool with schema-valid arguments (fill every required argument from prior results or the user request)."
+                ),
+                message="Candidate tools are already available; select call_tool with schema-valid arguments.",
+                tool_count=len(candidate_tools),
             )
-            updates["events"].append(
-                {
-                    "step": "executor.tool_candidates_available",
-                    "message": "Candidate tools are already available; select call_tool with schema-valid arguments.",
-                    "tool_count": len(candidate_tools),
-                }
-            )
-            return updates
 
         # Only force a call the schema allows: a tool with unmet required
         # arguments would just fail validation and burn the turn (e.g. forcing
@@ -915,21 +1346,18 @@ def executor_node(
         elif repeat_count == 2 and not called_this_step:
             top = candidate_tools[0]
             required = _schema_required_fields(_schema_for_tool(str(top.get("name") or ""), candidate_tools))
-            _add_guidance(
+            return _veto(
                 updates,
-                f"Stop searching. Call {top.get('name')} with its required argument(s) "
-                f"{', '.join(required)} filled in (use values from prior tool results or the user request).",
+                step="executor.search_loop_breaker",
+                guidance=(
+                    f"Stop searching. Call {top.get('name')} with its required argument(s) "
+                    f"{', '.join(required)} filled in (use values from prior tool results or the user request)."
+                ),
+                message=(
+                    f"Repeated search_tools; every candidate needs required arguments "
+                    f"(e.g. {top.get('name')}: {', '.join(required)}) — asking the model to fill them."
+                ),
             )
-            updates["events"].append(
-                {
-                    "step": "executor.search_loop_breaker",
-                    "message": (
-                        f"Repeated search_tools; every candidate needs required arguments "
-                        f"(e.g. {top.get('name')}: {', '.join(required)}) — asking the model to fill them."
-                    ),
-                }
-            )
-            return updates
         else:
             action_type = "finish_step"
             updates["events"].append(
@@ -941,7 +1369,6 @@ def executor_node(
     else:
         iteration["search_repeat_count"] = 0
         iteration["search_repeat_step"] = step_index
-        updates["iteration"] = iteration
 
     if action_type == "call_tool":
         tool_name = str(action.get("name") or "")
@@ -950,18 +1377,57 @@ def executor_node(
         # e.g. a second get_panel_data with different panel_tokens — while an exact
         # repeat is skipped. The per-step budget counts total calls, not distinct
         # tool names, so a re-explore step gets a fresh budget of its own.
-        proposed_args = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+        proposed_args = normalize_tool_arguments(
+            action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+        )
+        call_schema = _schema_for_tool(tool_name, candidate_tools)
         injected_args = _apply_argument_injection(
             tool_name=tool_name,
             arguments=proposed_args,
-            schema=_schema_for_tool(tool_name, candidate_tools),
+            schema=call_schema,
             runtime_context=dict(state.get("runtime_context") or {}),
             config=config,
         )
+        # Deterministic repair before the dedup signature: required args the
+        # session already knows (prior calls / memory slots) are filled by name
+        # instead of burning an LLM turn on a guaranteed validation failure —
+        # and the signature then reflects the call as it will actually run.
+        repaired_fill = _repair_missing_arguments(state, arguments=injected_args, schema=call_schema)
+        if repaired_fill:
+            injected_args = {**injected_args, **repaired_fill}
         call_signature = (tool_name, json.dumps(injected_args)[:300])
         called_signatures, step_call_count = _step_call_signatures_and_count(state, step_index)
         max_per_step = config.policy.max_tool_calls_per_step
         if call_signature in called_signatures:
+            steps = (state.get("plan") or {}).get("steps") or []
+            current_step = steps[step_index] if 0 <= step_index < len(steps) else {}
+            if current_step.get("require_row_level") and not _step_stop_condition_met(
+                state, step_index, current_step
+            ):
+                if _finish_is_deadlocked(iteration, config):
+                    missing = [
+                        "Row-level tool results were not returned — prior get_panel_data calls did not produce rows."
+                    ]
+                    return _incomplete_evidence_result(
+                        state=state,
+                        updates=updates,
+                        iteration=iteration,
+                        reason="re-explore could not obtain row-level panel data",
+                        missing=missing,
+                        step_index=step_index,
+                    )
+                return _veto(
+                    updates,
+                    step="executor.duplicate_panel_data_no_rows",
+                    guidance=(
+                        f"Prior {tool_name} call did not return rows. Pass complete panel_tokens "
+                        "(include open filters like row and labs from get_dashboard_tokens defaults) "
+                        "before repeating the same call."
+                    ),
+                    message="Duplicate get_panel_data with no row-level evidence; try different panel_tokens.",
+                    tool=tool_name,
+                    step_index=step_index,
+                )
             action_type = "finish_step"
             _add_guidance(
                 updates,
@@ -1072,20 +1538,28 @@ def executor_node(
                 tool_name=tool_name,
                 arguments=arguments,
                 errors=[f"tool blocked by policy: {tool_name}"],
+                step_index=step_index,
             )
         candidate_names = {str(tool.get("name") or "") for tool in candidate_tools}
         if candidate_tools and tool_name not in candidate_names:
             errors = [f"tool was not discovered for this step: {tool_name}"]
         else:
-            schema = _schema_for_tool(tool_name, candidate_tools)
-            arguments = _apply_argument_injection(
-                tool_name=tool_name,
-                arguments=arguments,
-                schema=schema,
-                runtime_context=dict(state.get("runtime_context") or {}),
-                config=config,
-            )
-            errors = _validate_tool_arguments(tool_name, arguments, schema)
+            # The guard block already injected runtime-context arguments and
+            # applied the deterministic repair; reuse instead of recomputing.
+            arguments = injected_args
+            if repaired_fill:
+                updates["events"].append(
+                    {
+                        "step": "executor.arguments_repaired",
+                        "tool": tool_name,
+                        "filled": {k: str(v)[:120] for k, v in repaired_fill.items()},
+                        "message": (
+                            f"Filled missing required argument(s) for {tool_name} from session context: "
+                            f"{', '.join(sorted(repaired_fill))}"
+                        ),
+                    }
+                )
+            errors = _validate_tool_arguments(tool_name, arguments, call_schema)
         if errors:
             return _record_invalid_tool_arguments(
                 state=state,
@@ -1095,6 +1569,7 @@ def executor_node(
                 tool_name=tool_name,
                 arguments=arguments,
                 errors=errors,
+                step_index=step_index,
             )
         return _execute_tool_call_action(
             state=state,
@@ -1113,115 +1588,178 @@ def executor_node(
     if action_type == "finish_step":
         # A single arbitration point: the finish guards may veto a premature
         # finish, but only until the step is deadlocked (no new evidence for
-        # max_no_progress_turns). Past that, vetoing again would just spin the
-        # same coerced-finish loop, so the step is force-advanced instead.
+        # max_no_progress_turns). Past that, unresolved guards become an honest
+        # incomplete-evidence result instead of a fabricated best effort.
         deadlocked = _finish_is_deadlocked(iteration, config)
         if not deadlocked:
+            panel_gap = _panel_data_attempt_gap(current_step, state)
+            if panel_gap:
+                return _veto(
+                    updates,
+                    step="executor.panel_data_not_attempted",
+                    guidance=(
+                        "Call get_panel_data with panel_id from get_dashboard and panel_tokens "
+                        "(site, labs, row, availablepowerrange) before finishing this step."
+                    ),
+                    message=panel_gap,
+                    step_index=step_index,
+                    missing=[panel_gap],
+                )
             missing_follow_up = follow_up_tool_recall_missing(state)
             if missing_follow_up:
-                _add_guidance(
+                return _veto(
                     updates,
-                    f"{missing_follow_up[0]}. Pick a tool from the candidate list and call it with schema-valid arguments now.",
+                    step="executor.follow_up_evidence_missing",
+                    guidance=f"{missing_follow_up[0]}. Pick a tool from the candidate list and call it with schema-valid arguments now.",
+                    message=missing_follow_up[0],
+                    step_index=step_index,
+                    missing=missing_follow_up,
                 )
-                updates["events"].append(
-                    {
-                        "step": "executor.follow_up_evidence_missing",
-                        "step_index": step_index,
-                        "missing": missing_follow_up,
-                        "message": missing_follow_up[0],
-                    }
-                )
-                return updates
             stop_condition = str(current_step.get("stop_condition") or "").strip()
-            if stop_condition and not _step_has_evidence(state, step_index):
-                _add_guidance(
+            if stop_condition and not _step_stop_condition_met(state, step_index, current_step):
+                return _veto(
                     updates,
-                    f"Do not finish this step yet — its stop condition is unmet: {stop_condition}. Call a tool to gather that evidence.",
+                    step="executor.stop_condition_unmet",
+                    guidance=f"Do not finish this step yet — its stop condition is unmet: {stop_condition}. Call a tool to gather that evidence.",
+                    message=(
+                        f"Stop condition not met yet: {stop_condition}. "
+                        "Call tools and gather evidence before finish_step."
+                    ),
+                    step_index=step_index,
+                    stop_condition=stop_condition,
                 )
-                updates["events"].append(
-                    {
-                        "step": "executor.stop_condition_unmet",
-                        "step_index": step_index,
-                        "stop_condition": stop_condition,
-                        "message": (
-                            f"Stop condition not met yet: {stop_condition}. "
-                            "Call tools and gather evidence before finish_step."
-                        ),
-                    }
-                )
-                return updates
             required_tools = _required_tools_for_step(config, current_step)
-            called = _called_tools_for_step(state, step_index) | _called_tools_for_run(state)
+            # called_this_step was computed at turn start and state is unchanged.
+            called = called_this_step | _called_tools_for_run(state)
             missing_required = sorted(required_tools - called)
             if missing_required:
-                _add_guidance(
+                return _veto(
                     updates,
-                    f"Call {', '.join(missing_required)} (with schema-valid arguments) before finishing this step.",
+                    step="executor.required_tools_missing",
+                    guidance=f"Call {', '.join(missing_required)} (with schema-valid arguments) before finishing this step.",
+                    message=f"Required tools not yet called: {', '.join(missing_required)}",
+                    step_index=step_index,
+                    required_tools=missing_required,
                 )
-                updates["events"].append(
-                    {
-                        "step": "executor.required_tools_missing",
-                        "step_index": step_index,
-                        "required_tools": missing_required,
-                        "message": f"Required tools not yet called: {', '.join(missing_required)}",
-                    }
-                )
-                return updates
         else:
+            missing: list[str] = []
+            missing.extend(follow_up_tool_recall_missing(state))
+            panel_gap = _panel_data_attempt_gap(current_step, state)
+            if panel_gap:
+                missing.append(panel_gap)
+            stop_condition = str(current_step.get("stop_condition") or "").strip()
+            if stop_condition and not _step_stop_condition_met(state, step_index, current_step):
+                missing.append(f"Stop condition not met: {stop_condition}")
+            required_tools = _required_tools_for_step(config, current_step)
+            called = called_this_step | _called_tools_for_run(state)
+            missing_required = sorted(required_tools - called)
+            if missing_required:
+                missing.append(f"Required tools not successfully called: {', '.join(missing_required)}")
+            if missing:
+                return _incomplete_evidence_result(
+                    state=state,
+                    updates=updates,
+                    iteration=iteration,
+                    reason="step guards remained unmet after the no-progress budget",
+                    missing=missing,
+                    step_index=step_index,
+                )
             updates["events"].append(
                 {
                     "step": "executor.finish_deadlock_break",
                     "step_index": step_index,
                     "no_progress_turns": int(iteration.get("no_progress_turns") or 0),
-                    "message": "Step guards blocked finish with no new evidence; advancing to avoid a loop.",
+                    "message": "No guard remains unmet; advancing after no-progress deadlock.",
                 }
             )
         next_index = step_index + 1
         # Each step gets a fresh stall budget so a deadlock on one step does not
-        # immediately trip the no-progress stop on the next.
+        # immediately trip the no-progress stop on the next. (iteration is the
+        # same object already stored in updates["iteration"].)
         iteration["no_progress_turns"] = 0
-        updates["iteration"] = iteration
         updates["current_step_index"] = next_index
         updates["candidate_tools"] = []
         updates["events"].append({"step": "executor.finish_step", "step_index": step_index})
         if next_index >= len(steps):
-            updates["phase"] = "fact_extracting"
-            updates["events"].append({"step": "executor.completed_steps", "handoff": "fact_extractor"})
+            return _handoff_to_fact_extracting(
+                state=state,
+                updates=updates,
+                iteration=iteration,
+                reason="executor finished final plan step",
+                step_index=step_index,
+                extra_events=[{"step": "executor.completed_steps", "handoff": "fact_extractor"}],
+            )
         return updates
+
+    # An unrecognized JSON action that isn't a candidate tool either must not
+    # silently become a draft (that is how runs ended with zero tool calls).
+    # Tell the model the valid actions and retry; the deadlock cap bounds this.
+    if action_type not in _KNOWN_ACTIONS and action_type and not _finish_is_deadlocked(iteration, config):
+        tool_names = ", ".join(str(c.get("name") or "") for c in candidate_tools[:6]) or "none discovered yet"
+        return _veto(
+            updates,
+            step="executor.unknown_action",
+            guidance=(
+                f"'{action_type}' is not a valid action. Reply with one of: search_tools, call_tool, finish_step, draft_answer. "
+                f"To run a tool use {{\"action\":\"call_tool\",\"name\":\"<tool>\",\"arguments\":{{...}}}} (candidates: {tool_names})."
+            ),
+            message=f"Unknown action '{action_type}'; asking the model to choose a valid one.",
+            action=action_type,
+        )
 
     answer = str(action.get("answer") or raw).strip()
     missing_follow_up = follow_up_tool_recall_missing(state)
+    missing_row_level = _row_level_answer_gaps(state)
     # Same arbitration as finish_step: the veto may block a premature draft, but
     # once the step is deadlocked (no new evidence for max_no_progress_turns)
-    # repeating the veto only burns the remaining budget, so the draft proceeds.
+    # unresolved evidence becomes a terminal incomplete-evidence result.
     if missing_follow_up and not _finish_is_deadlocked(iteration, config):
-        _add_guidance(
+        return _veto(
             updates,
-            f"{missing_follow_up[0]}. Do not draft an answer yet — pick a tool from the candidate list and call it with schema-valid arguments.",
+            step="executor.follow_up_evidence_missing",
+            guidance=f"{missing_follow_up[0]}. Do not draft an answer yet — pick a tool from the candidate list and call it with schema-valid arguments.",
+            message=missing_follow_up[0],
+            step_index=step_index,
+            missing=missing_follow_up,
         )
-        updates["events"].append(
-            {
-                "step": "executor.follow_up_evidence_missing",
-                "step_index": step_index,
-                "missing": missing_follow_up,
-                "message": missing_follow_up[0],
-            }
+    if missing_row_level and not _finish_is_deadlocked(iteration, config):
+        row_guidance = (
+            f"{missing_row_level[0]} Call a tool that returns row-level results "
+            "(for example get_panel_data with panel_id and panel_tokens) before draft_answer."
         )
-        return updates
-    if missing_follow_up:
-        updates["events"].append(
-            {
-                "step": "executor.finish_deadlock_break",
-                "step_index": step_index,
-                "no_progress_turns": int(iteration.get("no_progress_turns") or 0),
-                "message": "Follow-up evidence guard kept blocking with no new evidence; accepting the draft to avoid a loop.",
-            }
+        if current_step.get("require_row_level"):
+            row_guidance = (
+                f"{missing_row_level[0]} You are on step '{current_step.get('title', 'Query panel data')}'. "
+                "Call get_panel_data with panel_id from get_dashboard and panel_tokens for site/labs/row/"
+                "availablepowerrange from the user request. Do not draft_answer until rows return."
+            )
+        return _veto(
+            updates,
+            step="executor.row_level_evidence_missing",
+            guidance=row_guidance,
+            message=missing_row_level[0],
+            step_index=step_index,
+            missing=missing_row_level,
+        )
+    if missing_follow_up or missing_row_level:
+        return _incomplete_evidence_result(
+            state=state,
+            updates=updates,
+            iteration=iteration,
+            reason="draft evidence guards remained unmet after the no-progress budget",
+            missing=list(missing_follow_up) + list(missing_row_level),
+            step_index=step_index,
         )
     updates["draft_answer"] = answer
     updates["draft_kind"] = "executor_draft"
-    updates["phase"] = "fact_extracting"
-    updates["events"].append({"step": "executor.draft_answer", "handoff": "fact_extractor"})
-    return updates
+    return _handoff_to_fact_extracting(
+        state=state,
+        updates=updates,
+        iteration=iteration,
+        reason="executor draft answer",
+        step_index=step_index,
+        extra_events=[{"step": "executor.draft_answer", "handoff": "fact_extractor"}],
+    )
 
 
 def _fallback_answer(state: AgentState, *, config: AgentConfig) -> str:

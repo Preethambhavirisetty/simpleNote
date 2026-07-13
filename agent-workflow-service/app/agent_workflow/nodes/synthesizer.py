@@ -4,10 +4,18 @@ from typing import Any
 
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
+from app.agent_workflow.follow_up import is_follow_up_turn
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
+from app.agent_workflow.evidence_grade import (
+    artifacts_have_row_level_data,
+    artifacts_have_usable_row_data,
+    claim_class_from_query,
+    row_evidence_gaps,
+)
 from app.agent_workflow.providers.llm import LlmProvider
 from app.agent_workflow.state import AgentState
 from app.agent_workflow.telemetry import llm_call
+
 
 
 def synthesizer_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -> dict[str, Any]:
@@ -76,9 +84,17 @@ def _done_or_reviewing(
 
 def _run_has_risk(state: AgentState) -> bool:
     """Return whether deterministic signals justify a reviewer call."""
+    from app.agent_workflow.evidence_grade import artifacts_have_row_level_data
+    from app.agent_workflow.nodes.reviewer import _completion_gaps
+
     if state.get("error"):
         return True
-    return any(str(record.get("status") or "") != "ok" for record in state.get("tool_calls") or [])
+    if any(str(record.get("status") or "") != "ok" for record in state.get("tool_calls") or []):
+        return True
+    artifacts = state.get("artifacts") or []
+    if artifacts and not artifacts_have_row_level_data(artifacts):
+        return True
+    return bool(_completion_gaps(state))
 
 
 def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]:
@@ -92,6 +108,19 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
     plan = state.get("plan") or {}
     criteria = "\n".join(f"- {item}" for item in plan.get("acceptance_criteria") or [])
     history_block = _follow_up_history_block(state, config=config)
+    evidence_guard = ""
+    gaps = row_evidence_gaps(
+        str(state.get("user_query") or ""),
+        state.get("artifacts") or [],
+        plan=state.get("plan") if isinstance(state.get("plan"), dict) else None,
+    )
+    if gaps and not artifacts_have_usable_row_data(state.get("artifacts") or []):
+        evidence_guard = (
+            "CRITICAL: No row-level panel/query results are in the evidence. "
+            "Do not answer yes/no on capacity, availability, or counts. "
+            "Do not invent kW values, lab names, or row lists. "
+            "State clearly that live row data is missing and what filter/tool step failed.\n\n"
+        )
     user_content = (
         f"User request:\n{state.get('user_query', '')}\n\n"
         f"Goal:\n{plan.get('goal', '')}\n\n"
@@ -102,15 +131,26 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
     )
     if history_block:
         user_content = f"{history_block}\n\n{user_content}"
+    if evidence_guard:
+        user_content = evidence_guard + user_content
+    discovery_hint = ""
+    if claim_class_from_query(str(state.get("user_query") or "")) == "discovery":
+        discovery_hint = (
+            "For dashboard discovery questions, name autopod_rows_availability first when it "
+            "appears in list_dashboards results — it is the primary dashboard for lab row "
+            "power availability and hosting capacity.\n\n"
+        )
+        user_content = discovery_hint + user_content
     return [
         {
             "role": "system",
             "content": (
-                "You are the synthesizer node in a tool workflow. Write one clear final-answer draft. "
+                "You are the synthesizer node in a tool workflow. Write one clear, conversational final-answer draft. "
+                "Lead with the direct answer in the first sentence. Put dashboard/source context at the end, not the top. "
                 "Ground the answer in the primary evidence (verbatim tool results) below; the compact facts "
                 "are a provenance index over that evidence. Do not invent details beyond it, and do not "
                 "mention internal nodes, review, or hidden policy. If evidence is incomplete, say what is "
-                "unavailable.\n\n"
+                "missing and what tool step is needed — do not tell the user to filter in a UI.\n\n"
                 f"{MARKDOWN_OUTPUT_RULES}"
             ),
         },
@@ -123,8 +163,7 @@ def _messages(state: AgentState, *, config: AgentConfig) -> list[dict[str, str]]
 
 def _follow_up_history_block(state: AgentState, *, config: AgentConfig) -> str:
     """Bounded prior-turn context for formatting/clarification follow-ups."""
-    runtime = state.get("runtime_context") if isinstance(state.get("runtime_context"), dict) else {}
-    if not runtime.get("follow_up"):
+    if not is_follow_up_turn(state):
         return ""
     messages = state.get("messages") or []
     if not messages:

@@ -150,6 +150,66 @@ def test_recent_tool_calls_show_errors_in_prompt():
     assert "missing required argument: name" in prompt
 
 
+# --- tool-name-as-action recovery (analysis-2 regression) ---------------------
+
+
+class _RecordingTools(ToolProvider):
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+
+    def search_tools(self, query: str, *, limit: int = 25, allowlist=None) -> list[ToolCandidate]:
+        return []
+
+    def call_tool(self, name: str, arguments: dict) -> dict:
+        self.calls.append((name, arguments))
+        return {"ok": True, "items": [{"panel": "ROWS AVAILABILITY"}]}
+
+
+_SEARCH_PANELS_TOOL = {
+    "name": "search_panels",
+    "title": "Search Panels",
+    "description": "Semantic search over dashboard panels",
+    "score": 0.9,
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+    },
+}
+
+
+def test_tool_name_as_action_recovers_into_call_tool():
+    # analysis-2: {"action":"search_panels","query":...} fell through to the
+    # draft path and the whole run made zero tool calls. It must become a call.
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"search_panels","query":"autopod rows availability"}')
+    updates = executor_node(
+        _state(candidate_tools=[_SEARCH_PANELS_TOOL]),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls == [("search_panels", {"query": "autopod rows availability"})]
+    assert any(e.get("step") == "executor.action_recovered" for e in updates["events"])
+    assert "draft_answer" not in updates
+
+
+def test_unknown_action_gets_guidance_not_silent_draft():
+    config = _config()
+    llm = _ScriptedLlm('{"action":"fetch_rows","target":"lab"}')
+    updates = executor_node(
+        _state(candidate_tools=[_SEARCH_PANELS_TOOL]),
+        config=config,
+        llm=llm,
+        tools=_RecordingTools(),
+    )
+    assert "draft_answer" not in updates  # not silently drafted
+    guidance = updates.get("executor_guidance") or []
+    assert guidance and "call_tool" in guidance[0]
+    assert any(e.get("step") == "executor.unknown_action" for e in updates["events"])
+
+
 # --- loop breaker must not force schema-invalid calls -------------------------
 
 
@@ -172,10 +232,9 @@ def test_search_loop_breaker_skips_tools_with_required_args():
 # --- draft veto deadlock break -------------------------------------------------
 
 
-def test_draft_veto_yields_after_no_progress_cap():
-    # Mirrors the analysis.md run: mid-plan (later steps pending, so the
-    # no-progress early stop stays suppressed) with the follow-up guard vetoing
-    # draft_answer every turn. After the stall cap the draft must be accepted.
+def test_draft_veto_becomes_incomplete_after_no_progress_cap():
+    # Mid-plan with the follow-up guard vetoing draft_answer every turn. After
+    # the stall cap the loop must stop honestly, not accept a metadata draft.
     config = _config(max_no_progress_turns=3)
     llm = _ScriptedLlm('{"action":"draft_answer","answer":"Best effort from metadata."}')
     follow_up_runtime = {"follow_up": True, "require_tools": True}
@@ -209,8 +268,243 @@ def test_draft_veto_yields_after_no_progress_cap():
         llm=llm,
         tools=_NoopTools(),
     )
-    assert deadlocked.get("draft_answer") == "Best effort from metadata."
-    assert any(e.get("step") == "executor.finish_deadlock_break" for e in deadlocked["events"])
+    assert deadlocked.get("phase") == "done"
+    assert deadlocked.get("error", "").startswith("Incomplete evidence:")
+    assert "Best effort from metadata" not in deadlocked.get("final_answer", "")
+    assert any(e.get("step") == "executor.incomplete_evidence" for e in deadlocked["events"])
+
+
+# --- deterministic argument repair (a.txt: 4 wasted turns on missing `name`) ---
+
+
+_TOKENS_TOOL = {
+    "name": "get_dashboard_tokens",
+    "title": "Get Dashboard Tokens",
+    "description": "Return the token catalog for a dashboard",
+    "score": 0.9,
+    "input_schema": {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "required": ["name"],
+    },
+}
+
+
+def test_missing_required_arg_repaired_from_prior_call():
+    config = _config()
+    tools = _RecordingTools()
+    # Model asks for get_dashboard_tokens with NO args; a prior successful call
+    # already used name=autopod_rows_availability — repair must fill it and run.
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_dashboard_tokens","arguments":{}}')
+    updates = executor_node(
+        _state(
+            candidate_tools=[_TOKENS_TOOL],
+            tool_calls=[
+                {
+                    "name": "get_dashboard",
+                    "status": "ok",
+                    "step_index": 0,
+                    "replan_id": 0,
+                    "args_preview": '{"name": "autopod_rows_availability"}',
+                }
+            ],
+        ),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls == [("get_dashboard_tokens", {"name": "autopod_rows_availability"})]
+    assert any(e.get("step") == "executor.arguments_repaired" for e in updates["events"])
+    assert not any(e.get("step") == "executor.tool_args_invalid" for e in updates["events"])
+
+
+def test_missing_required_arg_repaired_from_memory_slot():
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_dashboard_tokens","arguments":{}}')
+    updates = executor_node(
+        _state(
+            candidate_tools=[_TOKENS_TOOL],
+            conversation_memory={"name": {"value": "aiera_power", "turn": 1}},
+        ),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls == [("get_dashboard_tokens", {"name": "aiera_power"})]
+
+
+def test_unrepairable_missing_arg_still_produces_guidance():
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_dashboard_tokens","arguments":{}}')
+    updates = executor_node(
+        _state(candidate_tools=[_TOKENS_TOOL]),  # nothing known to fill from
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls == []
+    assert any(e.get("step") == "executor.tool_args_invalid" for e in updates["events"])
+    assert any("name" in g for g in (updates.get("executor_guidance") or []))
+
+
+_PANEL_DATA_TOOL = {
+    "name": "get_panel_data",
+    "title": "Get Panel Data",
+    "description": "Fetch live rows for a panel",
+    "score": 0.9,
+    "input_schema": {
+        "type": "object",
+        "properties": {"panel_id": {"type": "integer"}, "panel_tokens": {"type": "object"}},
+        "required": ["panel_id"],
+    },
+}
+
+
+def test_missing_arg_repaired_from_tool_result_payload():
+    # a.txt regression: panel_id lives in get_dashboard's RESULT, not in any
+    # prior call's arguments. A unique same-named scalar in a recent artifact
+    # must be used to fill the required argument.
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_panel_data","arguments":{}}')
+    updates = executor_node(
+        _state(
+            candidate_tools=[_PANEL_DATA_TOOL],
+            artifacts=[
+                {
+                    "tool": "get_dashboard",
+                    "step_index": 0,
+                    "replan_id": 0,
+                    "composite_score": 0.8,
+                    "summary": "1 panel",
+                    "raw_ref": {"panels": [{"panel_id": 77, "title": "ROWS AVAILABILITY"}]},
+                }
+            ],
+        ),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls == [("get_panel_data", {"panel_id": 77})]
+    assert any(e.get("step") == "executor.arguments_repaired" for e in updates["events"])
+
+
+def test_ambiguous_result_values_are_never_guessed():
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_panel_data","arguments":{}}')
+    updates = executor_node(
+        _state(
+            candidate_tools=[_PANEL_DATA_TOOL],
+            artifacts=[
+                {
+                    "tool": "search_panels",
+                    "step_index": 0,
+                    "replan_id": 0,
+                    "composite_score": 0.8,
+                    "summary": "2 panels",
+                    "raw_ref": {"panels": [{"panel_id": 12}, {"panel_id": 99}]},
+                }
+            ],
+        ),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls == []  # two candidate values -> no guess, normal invalid path
+    assert any(e.get("step") == "executor.tool_args_invalid" for e in updates["events"])
+
+
+def test_repeated_identical_invalid_call_is_deduped_not_revalidated():
+    # a.txt regression: 10 consecutive identical get_panel_data(missing panel_id)
+    # turns. The second identical invalid attempt must hit the duplicate guard,
+    # not re-fail validation forever.
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_panel_data","arguments":{}}')
+    first = executor_node(
+        _state(candidate_tools=[_PANEL_DATA_TOOL]),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert any(e.get("step") == "executor.tool_args_invalid" for e in first["events"])
+
+    second = executor_node(
+        _state(
+            candidate_tools=[_PANEL_DATA_TOOL],
+            tool_calls=first.get("tool_calls") or [],
+            iteration=first["iteration"],
+        ),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert any(e.get("step") == "executor.duplicate_tool_skipped" for e in second["events"])
+    assert not any(e.get("step") == "executor.tool_args_invalid" for e in second["events"])
+    assert tools.calls == []
+
+
+def test_failed_artifact_does_not_satisfy_required_tool():
+    config = _config()
+    llm = _ScriptedLlm('{"action":"finish_step"}')
+    updates = executor_node(
+        _state(
+            plan={"goal": "check", "steps": [{"title": "Fetch", "action": "fetch", "required_tools": ["get_panel_data"]}]},
+            candidate_tools=[_PANEL_DATA_TOOL],
+            artifacts=[
+                {
+                    "tool": "get_panel_data",
+                    "step_index": 0,
+                    "replan_id": 0,
+                    "raw_ref": {"ok": False, "error": "upstream failed"},
+                }
+            ],
+        ),
+        config=config,
+        llm=llm,
+        tools=_RecordingTools(),
+    )
+
+    assert any(e.get("step") == "executor.required_tools_missing" for e in updates["events"])
+    assert updates.get("phase") != "fact_extracting"
+
+
+def test_repaired_duplicate_call_is_deduped():
+    # The dedup signature must reflect the REPAIRED arguments, or a repeated
+    # empty-args request would re-execute the same repaired call.
+    config = _config()
+    tools = _RecordingTools()
+    llm = _ScriptedLlm('{"action":"call_tool","name":"get_dashboard_tokens","arguments":{}}')
+    prior = {
+        "name": "get_dashboard",
+        "status": "ok",
+        "step_index": 0,
+        "replan_id": 0,
+        "args_preview": '{"name": "autopod_rows_availability"}',
+    }
+    first = executor_node(
+        _state(candidate_tools=[_TOKENS_TOOL], tool_calls=[prior]),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert len(tools.calls) == 1
+    second = executor_node(
+        _state(
+            candidate_tools=[_TOKENS_TOOL],
+            tool_calls=(first.get("tool_calls") or []),
+            artifacts=first.get("artifacts") or [],
+            iteration=first["iteration"],
+        ),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert len(tools.calls) == 1  # no second execution
+    assert any(e.get("step") == "executor.duplicate_tool_skipped" for e in second["events"])
 
 
 # --- REJECT re-explores when evidence is missing -------------------------------
@@ -232,3 +526,87 @@ def test_reject_with_missing_evidence_re_explores():
     updates = reviewer_node(state, config=config, llm=llm)
     assert updates["phase"] == "executing"  # re-explore instead of shipping the rejected draft
     assert any(e.get("step") == "reviewer.re_explore" for e in updates["events"])
+
+
+# --- nested tool args + payload failure classification -------------------------
+
+
+class _NestedPanelTools(ToolProvider):
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+
+    def search_tools(self, query: str, *, limit: int = 25, allowlist=None) -> list[ToolCandidate]:
+        return []
+
+    def call_tool(self, name: str, arguments: dict) -> dict:
+        self.calls.append((name, dict(arguments)))
+        return {"ok": True, "row_count": 1, "rows": [{"lab": "RTP11-108"}]}
+
+
+def test_nested_params_are_flattened_before_panel_data_call():
+    config = _config()
+    tools = _NestedPanelTools()
+    llm = _ScriptedLlm(
+        '{"action":"call_tool","name":"get_panel_data","arguments":{'
+        '"params":{"panel_id":77,"panel_tokens":{"site":"RTP","availablepowerrange":"Available_Power>30"}},'
+        '"panel_id":77}}'
+    )
+    updates = executor_node(
+        _state(candidate_tools=[_PANEL_DATA_TOOL]),
+        config=config,
+        llm=llm,
+        tools=tools,
+    )
+    assert tools.calls
+    _name, args = tools.calls[0]
+    assert args["panel_id"] == 77
+    assert args["panel_tokens"]["site"] == "RTP"
+    assert updates["tool_calls"][-1]["status"] == "ok"
+
+
+class _OpenFilterRetryTools(ToolProvider):
+    def __init__(self):
+        self.calls: list[tuple[str, dict]] = []
+
+    def search_tools(self, query: str, *, limit: int = 25, allowlist=None) -> list[ToolCandidate]:
+        return []
+
+    def call_tool(self, name: str, arguments: dict) -> dict:
+        self.calls.append((name, dict(arguments)))
+        if len(self.calls) == 1:
+            return {
+                "ok": False,
+                "error": "open filters",
+                "open_filters": ["row"],
+                "token_defaults": {"row": "ALL"},
+            }
+        return {"ok": True, "row_count": 2, "rows": [{"lab": "RTP11-108"}, {"lab": "RTP12-F340"}]}
+
+
+def test_open_filters_triggers_panel_data_retry_and_marks_first_call_failed():
+    config = _config()
+    tools = _OpenFilterRetryTools()
+    llm = _ScriptedLlm(
+        '{"action":"call_tool","name":"get_panel_data","arguments":{"panel_id":77,"panel_tokens":{"site":"RTP"}}}'
+    )
+    state = _state(
+        candidate_tools=[_PANEL_DATA_TOOL],
+        artifacts=[
+            {
+                "tool": "get_dashboard_tokens",
+                "step_index": 0,
+                "replan_id": 0,
+                "composite_score": 0.8,
+                "summary": "tokens",
+                "raw_ref": {"token_catalog": [{"name": "row", "default": "ALL"}]},
+            }
+        ],
+    )
+    updates = executor_node(state, config=config, llm=llm, tools=tools)
+    assert len(tools.calls) == 2
+    assert tools.calls[1][1]["panel_tokens"]["row"] == "ALL"
+    assert any(e.get("step") == "executor.panel_data_retry" for e in updates["events"])
+    failed = [c for c in updates["tool_calls"] if c.get("status") == "failed"]
+    assert failed
+    ok_calls = [c for c in updates["tool_calls"] if c.get("status") == "ok"]
+    assert ok_calls

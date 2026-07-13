@@ -2,10 +2,11 @@
 policy:
   enable_fast_path: true
   enable_planner: true
+  enable_playbooks: true
   max_executor_iterations: 10
   max_review_cycles: 1
-  max_explore_cycles: 0
-  max_tool_calls_per_step: 3
+  max_explore_cycles: 1
+  max_tool_calls_per_step: 5
   enable_running_summary: false
   reviewer:
     enabled: true

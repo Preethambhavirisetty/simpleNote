@@ -5,7 +5,8 @@ import re
 import hashlib
 import json
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,15 @@ from app.agent_workflow.runtime_schema import AgentConfigModel
 
 
 _ENV_PATTERN = re.compile(r"\$\{([^}]+)\}")
+
+
+@lru_cache(maxsize=64)
+def _read_prompt_file(path_str: str) -> str | None:
+    """Read and cache a static prompt file; None when it does not exist."""
+    path = Path(path_str)
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    return None
 
 
 def _resolve_env(value: str) -> str:
@@ -223,6 +233,8 @@ class AgentPolicy:
     artifact_store_ttl_seconds: int = 86400
     require_tool_on_follow_up: bool = True
     enable_conversation_memory: bool = True
+    enable_follow_up_reuse: bool = True
+    enable_playbooks: bool = True
     conversation_memory_max_slots: int = 10
     truncation: TruncationPolicy = field(default_factory=TruncationPolicy)
     tools: ToolPolicy = field(default_factory=ToolPolicy)
@@ -271,7 +283,10 @@ class LlmConfig:
     temperature: float = 0.2
     top_p: float = 0.9
     top_k: int = 40
-    seed: int = 0xFFFFFFFF
+    # None = no seed sent; backend samples freshly per request. Pin an integer
+    # only for reproducibility runs (identical prompts then repeat identical
+    # output — including identical mistakes on retries).
+    seed: int | None = None
     native_tool_calling: bool = False
 
 
@@ -327,10 +342,10 @@ class AgentConfig:
         path = self.prompts.get(role, "")
         if not path:
             return ""
-        prompt_path = self.base_dir / path
-        if prompt_path.is_file():
-            return prompt_path.read_text(encoding="utf-8")
-        return path
+        # Prompt files are static per config; cache the read so every prompt
+        # build (once per node call, per turn) does not re-hit the disk.
+        cached = _read_prompt_file(str(self.base_dir / path))
+        return cached if cached is not None else path
 
     def safe_dict(self) -> dict[str, Any]:
         """Return a JSON-safe view of the config with secrets redacted.
@@ -431,110 +446,11 @@ class AgentConfig:
                     for server in self.mcp.servers
                 ],
             },
-            "policy": {
-                "max_executor_iterations": policy.max_executor_iterations,
-                "max_review_cycles": policy.max_review_cycles,
-                "max_explore_cycles": policy.max_explore_cycles,
-                "max_tool_calls_per_step": policy.max_tool_calls_per_step,
-                "max_no_progress_turns": policy.max_no_progress_turns,
-                "min_progress_score": policy.min_progress_score,
-                "max_context_tokens": policy.max_context_tokens,
-                "llm_timeout_seconds": policy.llm_timeout_seconds,
-                "tool_timeout_seconds": policy.tool_timeout_seconds,
-                "max_retained_artifacts": policy.max_retained_artifacts,
-                "max_retained_tool_calls": policy.max_retained_tool_calls,
-                "max_retained_events": policy.max_retained_events,
-                "tool_discovery_cache_size": policy.tool_discovery_cache_size,
-                "reject_action": policy.reject_action,
-                "destructive_tools": list(policy.destructive_tools),
-                "require_destructive_confirmation": policy.require_destructive_confirmation,
-                "enable_fast_path": policy.enable_fast_path,
-                "render_final_answer": policy.render_final_answer,
-                "enforce_grounding": policy.enforce_grounding,
-                "enable_planner": policy.enable_planner,
-                "enable_reviewer": policy.enable_reviewer,
-                "enable_running_summary": policy.enable_running_summary,
-                "cross_turn_artifact_persistence": policy.cross_turn_artifact_persistence,
-                "artifact_store_ttl_seconds": policy.artifact_store_ttl_seconds,
-                "require_tool_on_follow_up": policy.require_tool_on_follow_up,
-                "enable_conversation_memory": policy.enable_conversation_memory,
-                "conversation_memory_max_slots": policy.conversation_memory_max_slots,
-                "summary": {
-                    "compact_after_artifacts": policy.summary.compact_after_artifacts,
-                    "keep_after_summary": policy.summary.keep_after_summary,
-                    "max_cycles": policy.summary.max_cycles,
-                    "max_tokens": policy.summary.max_tokens,
-                },
-                "revision": {
-                    "max_cycles": policy.revision.max_cycles,
-                },
-                "truncation": {
-                    "max_artifact_chars": policy.truncation.max_artifact_chars,
-                    "max_string_field_chars": policy.truncation.max_string_field_chars,
-                    "max_fact_chars": policy.truncation.max_fact_chars,
-                    "max_list_rows_visible": policy.truncation.max_list_rows_visible,
-                    "dict_list_budget_reserve": policy.truncation.dict_list_budget_reserve,
-                    "dict_list_min_budget": policy.truncation.dict_list_min_budget,
-                    "score_weights": dict(policy.truncation.score_weights),
-                    "freshness_half_life_seconds": policy.truncation.freshness_half_life_seconds,
-                },
-                "tools": {
-                    "allowlist": list(policy.tools.allowlist),
-                    "denylist": list(policy.tools.denylist),
-                    "required_tools": dict(policy.tools.required_tools),
-                    "argument_injection": dict(policy.tools.argument_injection),
-                },
-                "planner": {
-                    "enabled": policy.planner.enabled,
-                    "max_tokens": policy.planner.max_tokens,
-                },
-                "reviewer": {
-                    "enabled": policy.reviewer.enabled,
-                    "max_tokens": policy.reviewer.max_tokens,
-                    "max_cycles": policy.reviewer.max_cycles,
-                    "reject_action": policy.reviewer.reject_action,
-                    "mode": policy.reviewer.mode,
-                },
-                "executor": {
-                    "choose_action_max_tokens": policy.executor.choose_action_max_tokens,
-                    "native_tool_max_tokens": policy.executor.native_tool_max_tokens,
-                    "synthesize_max_tokens": policy.executor.synthesize_max_tokens,
-                    "max_native_tools": policy.executor.max_native_tools,
-                    "tool_description_max_chars": policy.executor.tool_description_max_chars,
-                    "fallback_artifact_limit": policy.executor.fallback_artifact_limit,
-                    "mechanical_artifact_limit": policy.executor.mechanical_artifact_limit,
-                    "mechanical_line_limit": policy.executor.mechanical_line_limit,
-                    "fallback_summary_chars": policy.executor.fallback_summary_chars,
-                },
-                "finalizer": {
-                    "max_tokens": policy.finalizer.max_tokens,
-                    "max_artifact_lines": policy.finalizer.max_artifact_lines,
-                    "artifact_line_max_chars": policy.finalizer.artifact_line_max_chars,
-                },
-                "router": {
-                    "fast_path_max_tokens": policy.router.fast_path_max_tokens,
-                    "fast_path_max_query_chars": policy.router.fast_path_max_query_chars,
-                    "fast_path_max_query_words": policy.router.fast_path_max_query_words,
-                    "fast_path_history_messages": policy.router.fast_path_history_messages,
-                    "fast_path_history_content_chars": policy.router.fast_path_history_content_chars,
-                    "merge_state_max_events": policy.router.merge_state_max_events,
-                },
-                "context": {
-                    "system_budget_padding": policy.context.system_budget_padding,
-                    "min_artifact_budget_tokens": policy.context.min_artifact_budget_tokens,
-                    "trim_section_min_chars": policy.context.trim_section_min_chars,
-                    "max_tools_in_prompt": policy.context.max_tools_in_prompt,
-                    "max_tool_calls_in_prompt": policy.context.max_tool_calls_in_prompt,
-                    "max_artifacts_in_prompt": policy.context.max_artifacts_in_prompt,
-                    "max_history_messages": policy.context.max_history_messages,
-                    "history_preview_head_chars": policy.context.history_preview_head_chars,
-                    "history_preview_tail_chars": policy.context.history_preview_tail_chars,
-                    "artifact_summary_ratio": policy.context.artifact_summary_ratio,
-                    "artifact_summary_min_chars": policy.context.artifact_summary_min_chars,
-                },
-                "model": policy.model,
-                "instructions": policy.instructions,
-            },
+            # The full policy participates in the cache key via asdict, so any
+            # new field automatically invalidates the compiled-graph cache instead
+            # of silently colliding (safe_dict already relies on asdict(policy)
+            # being JSON-safe; no secrets live in policy).
+            "policy": asdict(policy),
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
@@ -596,6 +512,8 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         artifact_store_ttl_seconds=_as_int(policy_raw.artifact_store_ttl_seconds, 86400),
         require_tool_on_follow_up=_as_bool(policy_raw.require_tool_on_follow_up, True),
         enable_conversation_memory=_as_bool(policy_raw.enable_conversation_memory, True),
+        enable_follow_up_reuse=_as_bool(policy_raw.enable_follow_up_reuse, True),
+        enable_playbooks=_as_bool(policy_raw.enable_playbooks, True),
         conversation_memory_max_slots=_as_int(policy_raw.conversation_memory_max_slots, 10),
         truncation=TruncationPolicy(
             max_artifact_chars=_as_int(trunc_raw.max_artifact_chars, 2500),
@@ -689,7 +607,10 @@ def parse_agent_config(raw: dict[str, Any], *, base_dir: Path | None = None) -> 
         temperature=_as_float(llm_raw.temperature, 0.2),
         top_p=_as_float(llm_raw.top_p, 0.9),
         top_k=_as_int(llm_raw.top_k, 40),
-        seed=_as_int(llm_raw.seed, 0xFFFFFFFF),
+        # Legacy configs used 0xFFFFFFFF as the "unset" sentinel (llama.cpp's
+        # LLAMA_DEFAULT_SEED); normalize it to None so no backend receives a
+        # literal seed unless one was deliberately configured.
+        seed=(None if llm_raw.seed is None or _as_int(llm_raw.seed, 0) == 0xFFFFFFFF else _as_int(llm_raw.seed, 0)),
         native_tool_calling=_as_bool(llm_raw.native_tool_calling, False),
     )
 
@@ -849,6 +770,8 @@ def merge_agent_config(base: AgentConfig, overrides: dict[str, Any]) -> AgentCon
             "artifact_store_ttl_seconds": base.policy.artifact_store_ttl_seconds,
             "require_tool_on_follow_up": base.policy.require_tool_on_follow_up,
             "enable_conversation_memory": base.policy.enable_conversation_memory,
+            "enable_follow_up_reuse": base.policy.enable_follow_up_reuse,
+            "enable_playbooks": base.policy.enable_playbooks,
             "conversation_memory_max_slots": base.policy.conversation_memory_max_slots,
             "summary": {
                 "compact_after_artifacts": base.policy.summary.compact_after_artifacts,

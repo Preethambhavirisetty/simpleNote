@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from app.agent_workflow.config import AgentConfig
 from app.agent_workflow.deadlines import DeadlineExceeded, run_with_deadline
 from app.agent_workflow.prompts.output_markdown import MARKDOWN_OUTPUT_RULES
@@ -51,20 +53,72 @@ def revision_node(state: AgentState, *, config: AgentConfig, llm: LlmProvider) -
     }
 
 
+def _row_evidence_snippet(state: AgentState, *, limit: int = 40) -> str:
+    """Compact row-level evidence for numeric fidelity during revision."""
+    lines: list[str] = []
+    for artifact in state.get("artifacts") or []:
+        if str(artifact.get("tool") or "") != "get_panel_data":
+            continue
+        raw_ref = artifact.get("raw_ref") if isinstance(artifact.get("raw_ref"), dict) else {}
+        rows = raw_ref.get("rows")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                lines.append(json.dumps(row, ensure_ascii=True, sort_keys=True))
+            if len(lines) >= limit:
+                return "\n".join(lines)
+    return "\n".join(lines)
+
+
+def _filter_conflict_instruction(changes: list[str]) -> str:
+    joined = " ".join(changes).lower()
+    if "conflicts with" not in joined and "filter" not in joined:
+        return ""
+    return (
+        "FILTER CONFLICT: When site and lab disagree, do not claim the answer applies to the "
+        "conflicting site/region in the opening sentence. Lead with the lab/site that matches "
+        "the returned data, note the user's conflicting filter, and keep numeric values unchanged.\n\n"
+    )
+
+
+def _numeric_fidelity_instruction(changes: list[str], issues: list[str]) -> str:
+    joined = " ".join(changes + issues).lower()
+    if not any(token in joined for token in ("numeric", "kW", "kw", "value", "table", "correct")):
+        return ""
+    return (
+        "NUMERIC FIDELITY: Copy every kW/capacity number exactly from the facts and row evidence "
+        "snippet below. Do not round, swap, or reuse numbers from the flawed draft.\n\n"
+    )
+
+
+def _ordered_facts(state: AgentState) -> str:
+    facts = list(state.get("facts") or [])
+    panel_facts = [fact for fact in facts if str(fact.get("tool") or "") == "get_panel_data"]
+    other_facts = [fact for fact in facts if str(fact.get("tool") or "") != "get_panel_data"]
+    ordered = panel_facts + other_facts
+    return "\n".join(f"- {fact.get('text', '')} [tool={fact.get('tool', '')}]" for fact in ordered)
+
+
 def _messages(state: AgentState) -> list[dict[str, str]]:
     """Build the revision prompt from the same facts and concrete defects."""
     review = state.get("review") or {}
     issues = list(review.get("issues") or [])
     required = list(review.get("required_changes") or [])
     missing = list(review.get("missing_evidence") or [])
-    facts = "\n".join(f"- {fact.get('text', '')} [tool={fact.get('tool', '')}]" for fact in state.get("facts") or [])
-    changes = "\n".join(f"- {item}" for item in (required or issues or missing))
+    changes = "\n".join(f"- {item}" for item in (required or issues))
+    unverified = "\n".join(f"- {item}" for item in missing)
+    row_snippet = _row_evidence_snippet(state)
+    filter_instruction = _filter_conflict_instruction(required + issues)
+    numeric_instruction = _numeric_fidelity_instruction(required, issues)
     return [
         {
             "role": "system",
             "content": (
                 "You are the revision node. Improve the draft using only the same facts. "
                 "Do not call tools, ask for hidden evidence, or add unsupported claims. "
+                "Never invent values, rows, names, or numbers that are not in the facts — "
+                "a fabricated answer is worse than an honest incomplete one. "
                 "If evidence is missing, state the limitation plainly.\n\n"
                 f"{MARKDOWN_OUTPUT_RULES}"
             ),
@@ -72,10 +126,24 @@ def _messages(state: AgentState) -> list[dict[str, str]]:
         {
             "role": "user",
             "content": (
+                f"{filter_instruction}"
+                f"{numeric_instruction}"
                 f"User request:\n{state.get('user_query', '')}\n\n"
                 f"Current draft:\n{state.get('draft_answer', '')}\n\n"
                 f"Reviewer issues or required changes:\n{changes or '(none)'}\n\n"
-                f"Facts:\n{facts or '(none)'}\n\n"
+                + (
+                    "Evidence that could NOT be verified (the revised answer must say so "
+                    "explicitly and must NOT present any of it as confirmed):\n"
+                    f"{unverified}\n\n"
+                    if unverified
+                    else ""
+                )
+                + (
+                    f"Row-level evidence snippet (authoritative for numeric values):\n{row_snippet}\n\n"
+                    if row_snippet
+                    else ""
+                )
+                + f"Facts:\n{_ordered_facts(state) or '(none)'}\n\n"
                 "Return only the revised answer in GFM markdown."
             ),
         },

@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from app.schema.responses import ApiResponse, FolderData
@@ -53,6 +53,84 @@ def create_folder(
     """Create a folder for the authenticated user."""
     folder = service.create(db, current_user.id, payload)
     return success_response(_folder_dict(folder), "Folder created")
+
+
+# -- Internal service routes (Agent -> Backend) ------------------------------
+# These mirror the cookie-auth folder routes, but authenticate service-to-service
+# calls with X-Internal-Key and scope every operation to X-User-Id.
+
+def _internal_user_id(x_internal_key: str, x_user_id: str) -> UUID:
+    from app.deps.internal import verify_internal_key
+
+    verify_internal_key(x_internal_key)
+    return UUID(x_user_id)
+
+
+@router.get("/internal/", response_model=ApiResponse[list[FolderData]], summary="List folders internally")
+def internal_list_folders(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    x_internal_key: str = Header(...),
+    x_user_id: str = Header(...),
+    db: Session = Depends(get_postgres_session),
+    service: FolderService = Depends(get_folder_service),
+):
+    user_id = _internal_user_id(x_internal_key, x_user_id)
+    folders = service.list(db, user_id, skip=skip, limit=limit)
+    return success_response([_folder_dict(f) for f in folders], "Folders retrieved")
+
+
+@router.post("/internal/", response_model=ApiResponse[FolderData], summary="Create a folder internally")
+def internal_create_folder(
+    payload: FolderCreate,
+    x_internal_key: str = Header(...),
+    x_user_id: str = Header(...),
+    db: Session = Depends(get_postgres_session),
+    service: FolderService = Depends(get_folder_service),
+):
+    user_id = _internal_user_id(x_internal_key, x_user_id)
+    folder = service.create(db, user_id, payload)
+    return success_response(_folder_dict(folder), "Folder created")
+
+
+@router.get("/internal/{folder_id}", response_model=ApiResponse[FolderData], summary="Get a folder internally")
+def internal_get_folder(
+    folder_id: UUID,
+    x_internal_key: str = Header(...),
+    x_user_id: str = Header(...),
+    db: Session = Depends(get_postgres_session),
+    service: FolderService = Depends(get_folder_service),
+):
+    user_id = _internal_user_id(x_internal_key, x_user_id)
+    folder = service.get(db, folder_id, user_id)
+    return success_response(_folder_dict(folder), "Folder retrieved")
+
+
+@router.patch("/internal/{folder_id}", response_model=ApiResponse[FolderData], summary="Update a folder internally")
+def internal_update_folder(
+    folder_id: UUID,
+    payload: FolderUpdate,
+    x_internal_key: str = Header(...),
+    x_user_id: str = Header(...),
+    db: Session = Depends(get_postgres_session),
+    service: FolderService = Depends(get_folder_service),
+):
+    user_id = _internal_user_id(x_internal_key, x_user_id)
+    folder = service.update(db, folder_id, user_id, payload)
+    return success_response(_folder_dict(folder), "Folder updated")
+
+
+@router.delete("/internal/{folder_id}", response_model=ApiResponse[None], summary="Delete a folder internally")
+def internal_delete_folder(
+    folder_id: UUID,
+    x_internal_key: str = Header(...),
+    x_user_id: str = Header(...),
+    db: Session = Depends(get_postgres_session),
+    service: FolderService = Depends(get_folder_service),
+):
+    user_id = _internal_user_id(x_internal_key, x_user_id)
+    service.delete(db, folder_id, user_id, user_role=["user"])
+    return success_response(None, "Folder deleted")
 
 
 @router.get("/{folder_id}", response_model=ApiResponse[FolderData], summary="Get a folder")

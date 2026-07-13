@@ -48,7 +48,10 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
     # Nodes store durable-ish workflow events in state. This function turns
     # those internal events into API/SSE events that clients can render.
     events: list[dict[str, Any]] = []
-    merged: AgentState = {**prev, **update}
+
+    def merged(key: str) -> Any:
+        """Read a key with update-wins semantics, without copying the state."""
+        return update[key] if key in update else prev.get(key)
 
     if "plan" in update and update.get("plan"):
         plan = update["plan"]
@@ -114,6 +117,9 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
             "executor.required_tools_missing",
             "executor.tool_policy_blocked",
             "executor.finish_deadlock_break",
+            "executor.action_recovered",
+            "executor.unknown_action",
+            "executor.arguments_repaired",
         }:
             events.append({"type": "debug", "message": entry.get("message", "")})
         elif step == "executor.tool_args_invalid":
@@ -158,16 +164,17 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
             status = str(entry.get("status") or "error")
             arguments = entry.get("arguments") if isinstance(entry.get("arguments"), dict) else {}
             error_text = str(entry.get("error") or "").strip()
+            succeeded = status == "ok" and entry.get("result_ok", True) is not False
             events.append(
                 {
                     "type": "agent_activity",
-                    "phase": "completed" if status == "ok" else "failed",
+                    "phase": "completed" if succeeded else "failed",
                     "tool": tool_name,
-                    "label": f"Tool call: {tool_name}" + (" succeeded" if status == "ok" else " failed"),
+                    "label": f"Tool call: {tool_name}" + (" succeeded" if succeeded else " failed"),
                     "input_preview": json.dumps(arguments, default=str)[:800] if arguments else "",
                     "result_preview": error_text if error_text else "Completed successfully",
                     "error": error_text or None,
-                    "status": status,
+                    "status": "ok" if succeeded else status,
                 }
             )
         elif step == "executor.completed_steps":
@@ -320,7 +327,7 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
                 }
             )
 
-    if update.get("error") and merged.get("phase") == "reviewing":
+    if update.get("error") and merged("phase") == "reviewing":
         events.append({"type": "debug", "message": f"Error: {update['error']}"})
 
     # Every terminal path routes through the finalizer, so the terminal `done`
@@ -328,15 +335,15 @@ def map_graph_update(update: dict[str, Any], prev: AgentState, *, node_name: str
     # phase="done" as a routing signal (e.g. reviewer APPROVE), but emitting a
     # `done` for those too would surface duplicate/early terminal events.
     emit_done = node_name is None or node_name == "finalizer"
-    if emit_done and merged.get("final_answer") and merged.get("phase") == "done":
+    if emit_done and merged("final_answer") and merged("phase") == "done":
         events.append(
             {
                 "type": "done",
-                "answer": merged.get("final_answer"),
-                "review": merged.get("review"),
-                "artifact_count": len(merged.get("artifacts") or []),
-                "tool_call_count": len(merged.get("tool_calls") or []),
-                "error": merged.get("error"),
+                "answer": merged("final_answer"),
+                "review": merged("review"),
+                "artifact_count": len(merged("artifacts") or []),
+                "tool_call_count": len(merged("tool_calls") or []),
+                "error": merged("error"),
             }
         )
     return events

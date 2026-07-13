@@ -40,7 +40,7 @@ def test_parse_args_recovers_entities_from_truncated_preview():
 
     full = json.dumps({"dashboard": "autopod_rows_availability", "query": "x" * 400})
     truncated = full[:300]  # invalid JSON mid-string
-    recovered = cm._parse_args(truncated)
+    recovered = cm.parse_args_preview(truncated)
     assert recovered.get("dashboard") == "autopod_rows_availability"
 
 
@@ -171,13 +171,14 @@ def test_memory_cleared_on_new_topic(monkeypatch):
 
     history = [{"role": "user", "content": "list dashboards"}, {"role": "assistant", "content": "done"}]
 
-    _req, _ = eng._prepare_session(
+    _req, _, mem = eng._prepare_session(
         RunRequest(query="what is the error rate for payments", session_id="s1", history=history)
     )
     cleared = eng._clear_conversation_memory_if_new_topic(
         session_id="s1",
         is_follow_up=bool((_req.runtime_context or {}).get("follow_up")),
         thread_id="t1",
+        prior=mem,
     )
     assert cleared is not None
     assert cleared["label"] == "memory.cleared"
@@ -185,13 +186,14 @@ def test_memory_cleared_on_new_topic(monkeypatch):
     assert store.load("s1") == {}
 
     store.data["s1"] = {"dashboard": {"value": "aiera_power", "turn": 1}}
-    _req2, _ = eng._prepare_session(
+    _req2, _, mem2 = eng._prepare_session(
         RunRequest(query="how many panels does it have?", session_id="s1", history=history)
     )
     assert eng._clear_conversation_memory_if_new_topic(
         session_id="s1",
         is_follow_up=bool((_req2.runtime_context or {}).get("follow_up")),
         thread_id="t2",
+        prior=mem2,
     ) is None
     assert store.load("s1")["dashboard"]["value"] == "aiera_power"
 
@@ -243,12 +245,13 @@ def test_memory_not_cleared_on_power_refinement_follow_up(monkeypatch):
         "if there is no explicit filter for less than 30, "
         "give me all rows from all from 0 to under 30"
     )
-    req, _ = eng._prepare_session(RunRequest(query=follow_up, session_id="s1", history=history))
+    req, _, mem = eng._prepare_session(RunRequest(query=follow_up, session_id="s1", history=history))
     assert (req.runtime_context or {}).get("follow_up") is True
     assert eng._clear_conversation_memory_if_new_topic(
         session_id="s1",
         is_follow_up=bool((req.runtime_context or {}).get("follow_up")),
         thread_id="t-power",
+        prior=mem,
     ) is None
     assert store.load("s1")["dashboard"]["value"] == "autopod_rows_availability"
 

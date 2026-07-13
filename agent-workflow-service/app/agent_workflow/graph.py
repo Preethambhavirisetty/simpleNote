@@ -101,6 +101,7 @@ def build_graph(
         {
             "planner": "planner",
             "executor": "executor",
+            "fact_extractor": "fact_extractor",
         },
     )
     graph.add_conditional_edges(
@@ -169,8 +170,17 @@ def route_after_planner(state: AgentState) -> str:
 
 
 def route_after_start(state: AgentState) -> str:
-    """Choose whether a run starts with planning or direct execution."""
-    return "executor" if (state.get("phase") or "") == "executing" else "planner"
+    """Choose whether a run starts with planning, execution, or evidence reuse.
+
+    A follow-up whose evidence already persists from earlier turns enters at
+    fact extraction — straight to synthesis/review, no planner/executor pass.
+    The reviewer's re-explore path remains the safety net when the reused
+    evidence turns out not to cover the question.
+    """
+    phase = state.get("phase") or ""
+    if phase == "fact_extracting":
+        return "fact_extractor"
+    return "executor" if phase == "executing" else "planner"
 
 
 def route_after_executor(state: AgentState, *, config: AgentConfig) -> str:

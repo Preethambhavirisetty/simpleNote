@@ -36,7 +36,9 @@ class OpenAiChatCompletionsProvider:
     temperature: float = 0.2
     top_p: float = 0.9
     top_k: int = 40
-    seed: int = 0xFFFFFFFF
+    # None = omitted from the request body (the None-filter in _post_json/stream
+    # drops it), so the backend uses a fresh RNG per request.
+    seed: int | None = None
     default_max_tokens: int = 1024
     _client: httpx.Client | None = field(default=None, init=False, repr=False)
     _usage_totals: dict[str, int] = field(default_factory=lambda: {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, init=False, repr=False)

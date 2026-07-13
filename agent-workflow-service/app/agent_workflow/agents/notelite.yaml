@@ -1,0 +1,203 @@
+name: notelite-agent
+prompts:
+  planner: prompts/planner.md
+  executor: prompts/executor.md
+  reviewer: prompts/reviewer.md
+llm:
+  base_url: ${LLM_API_BASE_GENERAL}
+  api_key: ${LLM_API_KEY}
+  model: ${LLM_MODEL}
+  send_auth_header: ${LLM_SEND_AUTH_HEADER}
+  default_max_tokens: 2048
+  temperature: ${LLM_TEMPERATURE}
+  top_p: ${LLM_TOP_P}
+  top_k: ${LLM_TOP_K}
+  seed: ${LLM_SEED}
+  native_tool_calling: true
+mcp:
+  url: ${MCP_URL}
+  auth_token: ${MCP_AUTH_TOKEN}
+policy:
+  instructions: |
+    You answer using the user's Notelite notes through MCP tools. Always keep results scoped to the runtime user_id. Prefer search_notes for answer-ready RAG evidence, locate_notes for source/location questions, summarize_notes for summaries, get_note/get_folder for exact inspection, list_folders/list_notes/list_tags for browsing, and mutating tools only when the user explicitly asks to change notes, folders, or tags. Do not invent note contents, folders, citations, or dates that are not present in tool results. If tools return no relevant notes, say that plainly.
+  max_executor_iterations: 12
+  max_review_cycles: 2
+  max_explore_cycles: 1
+  max_tool_calls_per_step: 3
+  max_no_progress_turns: 3
+  max_context_tokens: 24000
+  llm_timeout_seconds: 90
+  tool_timeout_seconds: 180
+  max_retained_artifacts: 80
+  max_retained_tool_calls: 40
+  max_retained_events: 100
+  tool_discovery_cache_size: 16
+  reject_action: abort
+  enable_fast_path: true
+  render_final_answer: true
+  enforce_grounding: true
+  enable_planner: true
+  enable_reviewer: true
+  enable_running_summary: true
+  cross_turn_artifact_persistence: true
+  artifact_store_ttl_seconds: 86400
+  require_tool_on_follow_up: true
+  enable_conversation_memory: true
+  enable_follow_up_reuse: true
+  enable_playbooks: true
+
+  planner:
+    enabled: true
+    max_tokens: 1800
+
+  reviewer:
+    enabled: true
+    max_tokens: 1200
+    max_cycles: 2
+    reject_action: abort
+    mode: always
+
+  executor:
+    choose_action_max_tokens: 1000
+    native_tool_max_tokens: 1000
+    synthesize_max_tokens: 3000
+    max_native_tools: 6
+    tool_description_max_chars: 1200
+    fallback_artifact_limit: 8
+    mechanical_artifact_limit: 12
+    mechanical_line_limit: 100
+    fallback_summary_chars: 800
+
+  finalizer:
+    max_tokens: 2200
+    max_artifact_lines: 10
+    artifact_line_max_chars: 1200
+
+  summary:
+    compact_after_artifacts: 14
+    keep_after_summary: 6
+    max_cycles: 3
+    max_tokens: 700
+
+  revision:
+    max_cycles: 1
+
+  router:
+    fast_path_max_tokens: 512
+    fast_path_max_query_chars: 220
+    fast_path_max_query_words: 28
+    fast_path_history_messages: 4
+    fast_path_history_content_chars: 1200
+    merge_state_max_events: 100
+
+  context:
+    system_budget_padding: 50
+    min_artifact_budget_tokens: 500
+    trim_section_min_chars: 400
+    max_tools_in_prompt: 6
+    max_tool_calls_in_prompt: 6
+    max_artifacts_in_prompt: 24
+    max_history_messages: 8
+    history_preview_head_chars: 500
+    history_preview_tail_chars: 500
+    artifact_summary_ratio: 0.7
+    artifact_summary_min_chars: 1000
+
+  truncation:
+    max_artifact_chars: 10000
+    max_string_field_chars: 1400
+    max_fact_chars: 5000
+    max_list_rows_visible: 80
+    dict_list_budget_reserve: 96
+    dict_list_min_budget: 400
+    score_weights:
+      relevance: 0.45
+      freshness: 0.2
+      uniqueness: 0.15
+      actionability: 0.2
+    freshness_half_life_seconds: 3600
+
+  tools:
+    allowlist:
+      - search_notes
+      - locate_notes
+      - list_folders
+      - list_notes
+      - get_folder
+      - get_note
+      - summarize_notes
+      - create_folder
+      - update_folder
+      - delete_folder
+      - create_note
+      - update_note
+      - move_note
+      - delete_note
+      - list_tags
+      - create_tag
+      - update_tag
+      - delete_tag
+      - add_tag_to_note
+      - remove_tag_from_note
+    denylist: []
+    required_tools: {}
+    argument_injection:
+      search_notes:
+        user_id: user_id
+        role: role
+        history: history
+      locate_notes:
+        user_id: user_id
+        role: role
+        history: history
+      list_folders:
+        user_id: user_id
+      list_notes:
+        user_id: user_id
+      summarize_notes:
+        user_id: user_id
+      get_folder:
+        user_id: user_id
+      get_note:
+        user_id: user_id
+      create_folder:
+        user_id: user_id
+      update_folder:
+        user_id: user_id
+      delete_folder:
+        user_id: user_id
+      create_note:
+        user_id: user_id
+      update_note:
+        user_id: user_id
+      move_note:
+        user_id: user_id
+      delete_note:
+        user_id: user_id
+      list_tags:
+        user_id: user_id
+      create_tag:
+        user_id: user_id
+      update_tag:
+        user_id: user_id
+      delete_tag:
+        user_id: user_id
+      add_tag_to_note:
+        user_id: user_id
+      remove_tag_from_note:
+        user_id: user_id
+
+  destructive_tools:
+    - create_folder
+    - update_folder
+    - delete_folder
+    - create_note
+    - update_note
+    - move_note
+    - delete_note
+    - create_tag
+    - update_tag
+    - delete_tag
+    - add_tag_to_note
+    - remove_tag_from_note
+  require_destructive_confirmation: true

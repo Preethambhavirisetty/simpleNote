@@ -9,17 +9,19 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import httpx
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+APP_ROOT = PROJECT_ROOT / "app"
 MCP_APP_ROOT = Path(__file__).resolve().parent
-AGENT_ROOT = REPO_ROOT / "notelite_agent"
 
 
 def _load_fastmcp() -> Any:
     """Load the installed MCP SDK despite this app directory also being named mcp."""
     original_path = list(sys.path)
     local_package = sys.modules.pop("mcp", None)
-    blocked_paths = {REPO_ROOT, MCP_APP_ROOT}
+    blocked_paths = {APP_ROOT, MCP_APP_ROOT}
     try:
         sys.path = [
             entry
@@ -35,8 +37,8 @@ def _load_fastmcp() -> Any:
 
 FastMCP = _load_fastmcp()
 
-if str(AGENT_ROOT) not in sys.path:
-    sys.path.insert(0, str(AGENT_ROOT))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 mcp = FastMCP("Notelite Tools")
@@ -253,6 +255,209 @@ _TOOL_CATALOG: list[dict[str, Any]] = [
 ]
 
 
+_TOOL_CATALOG.extend(
+    [
+        {
+            "name": "get_note",
+            "title": "Get Note",
+            "description": "Fetch one Notelite note by id, including content when requested.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "Tenant/user scope for notes."},
+                    "note_id": {"type": "string", "description": "Note id to inspect."},
+                    "include_content": {"type": "boolean", "default": True},
+                },
+                "required": ["user_id", "note_id"],
+            },
+            "annotations": {"title": "Get Note", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["get", "open", "read", "inspect", "note", "content", "details"],
+        },
+        {
+            "name": "get_folder",
+            "title": "Get Folder",
+            "description": "Fetch one Notelite folder by id.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "Tenant/user scope for folders."},
+                    "folder_id": {"type": "string", "description": "Folder id to inspect."},
+                },
+                "required": ["user_id", "folder_id"],
+            },
+            "annotations": {"title": "Get Folder", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["get", "open", "inspect", "folder", "details"],
+        },
+        {
+            "name": "create_note",
+            "title": "Create Note",
+            "description": "Create a Notelite note in a folder. The backend queues ingestion for non-empty content.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "folder_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "content_text": {"type": "string", "default": ""},
+                    "description": {"type": "string"},
+                    "is_pinned": {"type": "boolean", "default": False},
+                    "is_memory_included": {"type": "boolean", "default": False},
+                },
+                "required": ["user_id", "folder_id", "title"],
+            },
+            "annotations": {"title": "Create Note", "readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            "keywords": ["create", "add", "write", "save", "new", "note"],
+        },
+        {
+            "name": "update_note",
+            "title": "Update Note",
+            "description": "Update note title, description, folder, flags, or full text content. Content changes trigger re-ingestion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "note_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "content_text": {"type": "string"},
+                    "description": {"type": "string"},
+                    "folder_id": {"type": "string"},
+                    "is_pinned": {"type": "boolean"},
+                    "is_memory_included": {"type": "boolean"},
+                },
+                "required": ["user_id", "note_id"],
+            },
+            "annotations": {"title": "Update Note", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["update", "edit", "rename", "pin", "unpin", "memory", "note", "content"],
+        },
+        {
+            "name": "move_note",
+            "title": "Move Note",
+            "description": "Move a note to another folder and re-index its folder metadata.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "note_id": {"type": "string"},
+                    "folder_id": {"type": "string"},
+                },
+                "required": ["user_id", "note_id", "folder_id"],
+            },
+            "annotations": {"title": "Move Note", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["move", "relocate", "folder", "note"],
+        },
+        {
+            "name": "delete_note",
+            "title": "Delete Note",
+            "description": "Delete a note and queue removal from the vector index.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"user_id": {"type": "string"}, "note_id": {"type": "string"}},
+                "required": ["user_id", "note_id"],
+            },
+            "annotations": {"title": "Delete Note", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["delete", "remove", "trash", "note"],
+        },
+        {
+            "name": "create_folder",
+            "title": "Create Folder",
+            "description": "Create a Notelite folder for the runtime user.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "is_pinned": {"type": "boolean", "default": False},
+                },
+                "required": ["user_id", "name"],
+            },
+            "annotations": {"title": "Create Folder", "readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            "keywords": ["create", "add", "new", "folder", "workspace"],
+        },
+        {
+            "name": "update_folder",
+            "title": "Update Folder",
+            "description": "Rename or pin/unpin a Notelite folder.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "folder_id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "is_pinned": {"type": "boolean"},
+                },
+                "required": ["user_id", "folder_id"],
+            },
+            "annotations": {"title": "Update Folder", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["update", "rename", "pin", "unpin", "folder"],
+        },
+        {
+            "name": "delete_folder",
+            "title": "Delete Folder",
+            "description": "Delete a folder and queue vector-index deletion for child notes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"user_id": {"type": "string"}, "folder_id": {"type": "string"}},
+                "required": ["user_id", "folder_id"],
+            },
+            "annotations": {"title": "Delete Folder", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["delete", "remove", "folder", "workspace"],
+        },
+    ]
+)
+
+_TOOL_CATALOG.extend(
+    [
+        {
+            "name": "list_tags",
+            "title": "List Tags",
+            "description": "List the user's Notelite tags.",
+            "inputSchema": {"type": "object", "properties": {"user_id": {"type": "string"}}, "required": ["user_id"]},
+            "annotations": {"title": "List Tags", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["tags", "labels", "list", "browse"],
+        },
+        {
+            "name": "create_tag",
+            "title": "Create Tag",
+            "description": "Create a Notelite tag.",
+            "inputSchema": {"type": "object", "properties": {"user_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["user_id", "name"]},
+            "annotations": {"title": "Create Tag", "readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            "keywords": ["create", "add", "new", "tag", "label"],
+        },
+        {
+            "name": "update_tag",
+            "title": "Update Tag",
+            "description": "Rename a Notelite tag.",
+            "inputSchema": {"type": "object", "properties": {"user_id": {"type": "string"}, "tag_id": {"type": "string"}, "name": {"type": "string"}}, "required": ["user_id", "tag_id", "name"]},
+            "annotations": {"title": "Update Tag", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["rename", "update", "tag", "label"],
+        },
+        {
+            "name": "delete_tag",
+            "title": "Delete Tag",
+            "description": "Delete a Notelite tag.",
+            "inputSchema": {"type": "object", "properties": {"user_id": {"type": "string"}, "tag_id": {"type": "string"}}, "required": ["user_id", "tag_id"]},
+            "annotations": {"title": "Delete Tag", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["delete", "remove", "tag", "label"],
+        },
+        {
+            "name": "add_tag_to_note",
+            "title": "Add Tag To Note",
+            "description": "Attach an existing tag to an existing note.",
+            "inputSchema": {"type": "object", "properties": {"user_id": {"type": "string"}, "note_id": {"type": "string"}, "tag_id": {"type": "string"}}, "required": ["user_id", "note_id", "tag_id"]},
+            "annotations": {"title": "Add Tag To Note", "readOnlyHint": False, "destructiveHint": False, "openWorldHint": False},
+            "keywords": ["add", "attach", "tag", "label", "note"],
+        },
+        {
+            "name": "remove_tag_from_note",
+            "title": "Remove Tag From Note",
+            "description": "Remove a tag association from a note.",
+            "inputSchema": {"type": "object", "properties": {"user_id": {"type": "string"}, "note_id": {"type": "string"}, "tag_id": {"type": "string"}}, "required": ["user_id", "note_id", "tag_id"]},
+            "annotations": {"title": "Remove Tag From Note", "readOnlyHint": False, "destructiveHint": True, "openWorldHint": False},
+            "keywords": ["remove", "detach", "tag", "label", "note"],
+        },
+    ]
+)
+
 
 def _require_query(query: str) -> str:
     value = str(query or "").strip()
@@ -301,6 +506,129 @@ def _backend_api_base(backend_base_url: str | None = None) -> str:
         or "http://localhost:8000/api"
     )
     return str(configured).rstrip("/")
+
+
+_backend_http: httpx.Client | None = None
+_backend_http_base: str | None = None
+
+
+def _backend_service_base(backend_base_url: str | None = None) -> str:
+    configured = backend_base_url or os.getenv("NOTELITE_BACKEND_API_BASE") or os.getenv("BACKEND_API_BASE")
+    if not configured:
+        try:
+            from app.core.config import BACKEND_INTERNAL_URL_BASE
+
+            configured = BACKEND_INTERNAL_URL_BASE
+        except Exception:
+            configured = "http://localhost:8000/api"
+    base = str(configured).rstrip("/")
+    for suffix in ("/conversations/internal", "/conversations"):
+        if base.endswith(suffix):
+            base = base[: -len(suffix)]
+            break
+    if not base.endswith("/api") and "/api/" not in base:
+        base = f"{base}/api"
+    return base.rstrip("/")
+
+
+def _backend_client() -> httpx.Client:
+    global _backend_http, _backend_http_base
+    base = _backend_service_base()
+    if _backend_http is None or _backend_http_base != base:
+        _backend_http = httpx.Client(base_url=base, timeout=20.0)
+        _backend_http_base = base
+    return _backend_http
+
+
+def _backend_headers(user_id: str) -> dict[str, str]:
+    from app.core.config import AGENT_API_KEY
+    from app.logger import get_trace_id
+
+    headers = {
+        "X-Internal-Key": AGENT_API_KEY,
+        "X-User-Id": _require_user_id(user_id),
+        "Content-Type": "application/json",
+    }
+    trace_id = get_trace_id()
+    if trace_id:
+        headers["X-Trace-Id"] = trace_id
+    return headers
+
+
+def _compact_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): value for key, value in payload.items() if value is not None}
+
+
+def _backend_request(
+    method: str,
+    path: str,
+    *,
+    user_id: str,
+    json_body: Mapping[str, Any] | None = None,
+    params: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    try:
+        response = _backend_client().request(
+            method,
+            path,
+            headers=_backend_headers(user_id),
+            json=dict(json_body or {}) if json_body is not None else None,
+            params=_compact_payload(params or {}),
+            timeout=20.0,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except httpx.HTTPStatusError as exc:
+        detail: Any
+        try:
+            detail = exc.response.json()
+        except ValueError:
+            detail = exc.response.text
+        return {
+            "ok": False,
+            "status_code": exc.response.status_code,
+            "error": f"Backend {method} {path} failed",
+            "detail": detail,
+        }
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"Backend {method} {path} failed", "detail": str(exc)}
+
+    if not isinstance(body, Mapping):
+        return {"ok": False, "error": f"Backend {method} {path} returned a non-object response"}
+    return {
+        "ok": True,
+        "data": body.get("data"),
+        "message": body.get("message"),
+        "status_code": response.status_code,
+    }
+
+
+def _note_from_backend_response(response: dict[str, Any], *, include_content: bool = True) -> dict[str, Any]:
+    if not response.get("ok"):
+        return response
+    note = response.get("data") or {}
+    return {
+        "ok": True,
+        "note": _public_note(note, include_content=include_content) if isinstance(note, Mapping) else note,
+        "message": response.get("message"),
+    }
+
+
+def _folder_from_backend_response(response: dict[str, Any]) -> dict[str, Any]:
+    if not response.get("ok"):
+        return response
+    return {"ok": True, "folder": response.get("data"), "message": response.get("message")}
+
+
+def _tiptap_doc_from_text(text: str | None) -> dict[str, Any]:
+    lines = str(text or "").splitlines() or [""]
+    paragraphs: list[dict[str, Any]] = []
+    for line in lines:
+        paragraph: dict[str, Any] = {"type": "paragraph"}
+        if line:
+            paragraph["content"] = [{"type": "text", "text": line}]
+        paragraphs.append(paragraph)
+    return {"type": "doc", "content": paragraphs}
 
 
 def _clamped_limit(limit: int, default: int = 50) -> int:
@@ -575,26 +903,15 @@ def list_folders(
     limit: int = 50,
 ) -> dict[str, Any]:
     """List folders for a server-authenticated user scope."""
-    from sqlalchemy import text
-
-    from app.db.postgres import DatabaseManager
-
-    with DatabaseManager.get_session_factory()() as session:
-        rows = session.execute(
-            text(
-                """
-                SELECT id::text AS id, user_id::text AS user_id, name, is_pinned,
-                       created_at, updated_at
-                FROM folders
-                WHERE user_id::text = :user_id
-                ORDER BY is_pinned DESC, updated_at DESC
-                OFFSET :skip
-                LIMIT :limit
-                """
-            ),
-            {"user_id": _require_user_id(user_id), "skip": max(0, int(skip or 0)), "limit": _clamped_limit(limit)},
-        ).mappings().all()
-    return {"ok": True, "folders": [_json_ready(dict(row)) for row in rows], "message": "Folders retrieved"}
+    response = _backend_request(
+        "GET",
+        "/folders/internal/",
+        user_id=user_id,
+        params={"skip": max(0, int(skip or 0)), "limit": _clamped_limit(limit)},
+    )
+    if not response.get("ok"):
+        return response
+    return {"ok": True, "folders": response.get("data") or [], "message": response.get("message")}
 
 
 @mcp.tool()
@@ -608,43 +925,26 @@ def list_notes(
     include_content: bool = False,
 ) -> dict[str, Any]:
     """List notes for a server-authenticated user scope with optional filters."""
-    from sqlalchemy import text
-
-    from app.db.postgres import DatabaseManager
-
-    where = ["n.user_id::text = :user_id"]
-    params: dict[str, Any] = {
-        "user_id": _require_user_id(user_id),
-        "skip": max(0, int(skip or 0)),
-        "limit": _clamped_limit(limit),
-    }
-    if folder_id:
-        where.append("n.folder_id::text = :folder_id")
-        params["folder_id"] = str(folder_id)
-    if pinned_only:
-        where.append("n.is_pinned IS TRUE")
-    if search:
-        where.append("(n.title ILIKE :search OR coalesce(n.content_text, '') ILIKE :search)")
-        params["search"] = f"%{search}%"
-
-    query = text(
-        f"""
-        SELECT n.id::text AS id, n.user_id::text AS user_id, n.folder_id::text AS folder_id,
-               n.title, coalesce(n.description, '') AS description, n.content_text,
-               n.version, n.note_size, n.is_pinned, n.is_memory_included,
-               n.created_at, n.updated_at, f.name AS folder
-        FROM notes n
-        JOIN folders f ON f.id = n.folder_id
-        WHERE {' AND '.join(where)}
-        ORDER BY n.is_pinned DESC, n.updated_at DESC
-        OFFSET :skip
-        LIMIT :limit
-        """
+    response = _backend_request(
+        "GET",
+        "/notes/internal/",
+        user_id=user_id,
+        params={
+            "folder_id": folder_id,
+            "pinned_only": bool(pinned_only),
+            "search": search,
+            "skip": max(0, int(skip or 0)),
+            "limit": _clamped_limit(limit),
+        },
     )
-    with DatabaseManager.get_session_factory()() as session:
-        rows = session.execute(query, params).mappings().all()
-    notes = [_public_note(_json_ready(dict(row)), include_content=include_content) for row in rows]
-    return {"ok": True, "notes": notes, "message": "Notes retrieved"}
+    if not response.get("ok"):
+        return response
+    notes = [
+        _public_note(note, include_content=include_content)
+        for note in (response.get("data") or [])
+        if isinstance(note, Mapping)
+    ]
+    return {"ok": True, "notes": notes, "message": response.get("message")}
 
 
 @mcp.tool()
@@ -685,6 +985,196 @@ def summarize_notes(
         if include_context:
             response["context_texts"] = [_chunk_preview(text, 900) for text in list(retrieval.context_texts or [])[: _bounded_k(k, 8)]]
     return response
+
+
+@mcp.tool()
+def get_note(user_id: str, note_id: str, include_content: bool = True) -> dict[str, Any]:
+    """Fetch one note by id through the backend internal API."""
+    response = _backend_request("GET", f"/notes/internal/{str(note_id).strip()}", user_id=user_id)
+    return _note_from_backend_response(response, include_content=include_content)
+
+
+@mcp.tool()
+def get_folder(user_id: str, folder_id: str) -> dict[str, Any]:
+    """Fetch one folder by id through the backend internal API."""
+    response = _backend_request("GET", f"/folders/internal/{str(folder_id).strip()}", user_id=user_id)
+    return _folder_from_backend_response(response)
+
+
+@mcp.tool()
+def create_note(
+    user_id: str,
+    folder_id: str,
+    title: str,
+    content_text: str = "",
+    description: str | None = None,
+    is_pinned: bool = False,
+    is_memory_included: bool = False,
+) -> dict[str, Any]:
+    """Create a note through the backend so ownership checks and ingestion dispatch run."""
+    payload = {
+        "title": str(title or "").strip(),
+        "folder_id": str(folder_id).strip(),
+        "description": description,
+        "content": _tiptap_doc_from_text(content_text),
+        "is_pinned": bool(is_pinned),
+        "is_memory_included": bool(is_memory_included),
+    }
+    if not payload["title"]:
+        return {"ok": False, "error": "title is required"}
+    response = _backend_request("POST", "/notes/internal/", user_id=user_id, json_body=_compact_payload(payload))
+    return _note_from_backend_response(response, include_content=True)
+
+
+@mcp.tool()
+def update_note(
+    user_id: str,
+    note_id: str,
+    title: str | None = None,
+    content_text: str | None = None,
+    description: str | None = None,
+    folder_id: str | None = None,
+    is_pinned: bool | None = None,
+    is_memory_included: bool | None = None,
+) -> dict[str, Any]:
+    """Update a note through the backend so versioning and ingestion dispatch run."""
+    payload: dict[str, Any] = {
+        "title": str(title).strip() if title is not None else None,
+        "description": description,
+        "folder_id": str(folder_id).strip() if folder_id else None,
+        "is_pinned": is_pinned,
+        "is_memory_included": is_memory_included,
+    }
+    if content_text is not None:
+        payload["content"] = _tiptap_doc_from_text(content_text)
+    payload = _compact_payload(payload)
+    if not payload:
+        return {"ok": False, "error": "at least one update field is required"}
+    response = _backend_request("PATCH", f"/notes/internal/{str(note_id).strip()}", user_id=user_id, json_body=payload)
+    return _note_from_backend_response(response, include_content=True)
+
+
+@mcp.tool()
+def move_note(user_id: str, note_id: str, folder_id: str) -> dict[str, Any]:
+    """Move a note through the backend and re-index folder metadata."""
+    response = _backend_request(
+        "PATCH",
+        f"/notes/internal/{str(note_id).strip()}/move",
+        user_id=user_id,
+        json_body={"folder_id": str(folder_id).strip()},
+    )
+    return _note_from_backend_response(response, include_content=False)
+
+
+@mcp.tool()
+def delete_note(user_id: str, note_id: str) -> dict[str, Any]:
+    """Delete a note through the backend and queue vector-index cleanup."""
+    return _backend_request("DELETE", f"/notes/internal/{str(note_id).strip()}", user_id=user_id)
+
+
+@mcp.tool()
+def create_folder(user_id: str, name: str, is_pinned: bool = False) -> dict[str, Any]:
+    """Create a folder through the backend internal API."""
+    folder_name = str(name or "").strip()
+    if not folder_name:
+        return {"ok": False, "error": "name is required"}
+    response = _backend_request(
+        "POST",
+        "/folders/internal/",
+        user_id=user_id,
+        json_body={"name": folder_name, "is_pinned": bool(is_pinned)},
+    )
+    return _folder_from_backend_response(response)
+
+
+@mcp.tool()
+def update_folder(
+    user_id: str,
+    folder_id: str,
+    name: str | None = None,
+    is_pinned: bool | None = None,
+) -> dict[str, Any]:
+    """Rename or pin/unpin a folder through the backend internal API."""
+    payload = _compact_payload(
+        {
+            "name": str(name).strip() if name is not None else None,
+            "is_pinned": is_pinned,
+        }
+    )
+    if not payload:
+        return {"ok": False, "error": "at least one update field is required"}
+    response = _backend_request("PATCH", f"/folders/internal/{str(folder_id).strip()}", user_id=user_id, json_body=payload)
+    return _folder_from_backend_response(response)
+
+
+@mcp.tool()
+def delete_folder(user_id: str, folder_id: str) -> dict[str, Any]:
+    """Delete a folder through the backend and queue cleanup for child notes."""
+    return _backend_request("DELETE", f"/folders/internal/{str(folder_id).strip()}", user_id=user_id)
+
+
+@mcp.tool()
+def list_tags(user_id: str) -> dict[str, Any]:
+    """List tags through the backend internal API."""
+    response = _backend_request("GET", "/tags/internal/", user_id=user_id)
+    if not response.get("ok"):
+        return response
+    return {"ok": True, "tags": response.get("data") or [], "message": response.get("message")}
+
+
+@mcp.tool()
+def create_tag(user_id: str, name: str) -> dict[str, Any]:
+    """Create a tag through the backend internal API."""
+    tag_name = str(name or "").strip()
+    if not tag_name:
+        return {"ok": False, "error": "name is required"}
+    response = _backend_request("POST", "/tags/internal/", user_id=user_id, json_body={"name": tag_name})
+    if not response.get("ok"):
+        return response
+    return {"ok": True, "tag": response.get("data"), "message": response.get("message")}
+
+
+@mcp.tool()
+def update_tag(user_id: str, tag_id: str, name: str) -> dict[str, Any]:
+    """Rename a tag through the backend internal API."""
+    tag_name = str(name or "").strip()
+    if not tag_name:
+        return {"ok": False, "error": "name is required"}
+    response = _backend_request(
+        "PATCH",
+        f"/tags/internal/{str(tag_id).strip()}",
+        user_id=user_id,
+        json_body={"name": tag_name},
+    )
+    if not response.get("ok"):
+        return response
+    return {"ok": True, "tag": response.get("data"), "message": response.get("message")}
+
+
+@mcp.tool()
+def delete_tag(user_id: str, tag_id: str) -> dict[str, Any]:
+    """Delete a tag through the backend internal API."""
+    return _backend_request("DELETE", f"/tags/internal/{str(tag_id).strip()}", user_id=user_id)
+
+
+@mcp.tool()
+def add_tag_to_note(user_id: str, note_id: str, tag_id: str) -> dict[str, Any]:
+    """Attach an existing tag to an existing note through the backend."""
+    return _backend_request(
+        "POST",
+        f"/notes/internal/{str(note_id).strip()}/tags/{str(tag_id).strip()}",
+        user_id=user_id,
+    )
+
+
+@mcp.tool()
+def remove_tag_from_note(user_id: str, note_id: str, tag_id: str) -> dict[str, Any]:
+    """Remove a tag association from a note through the backend."""
+    return _backend_request(
+        "DELETE",
+        f"/notes/internal/{str(note_id).strip()}/tags/{str(tag_id).strip()}",
+        user_id=user_id,
+    )
 
 
 if __name__ == "__main__":

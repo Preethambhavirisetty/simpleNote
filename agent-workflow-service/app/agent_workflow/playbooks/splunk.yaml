@@ -1,0 +1,97 @@
+playbooks:
+  - id: dashboard_discovery
+    match:
+      claims: [discovery]
+    evidence_required: catalog
+    dashboard: autopod_rows_availability
+    goal: Identify dashboards and panels relevant to lab row power availability.
+    search_query_template: "{query}"
+    steps:
+      - title: List dashboards
+        action: List dashboards related to the user's discovery request.
+        tool_hint: list_dashboards
+        required_tools: [list_dashboards]
+        stop_condition: Dashboard catalog results are available.
+      - title: Search panels
+        action: Search panels matching power availability or row capacity topics.
+        tool_hint: search_panels
+        required_tools: [search_panels]
+        stop_condition: Relevant panels or dashboards are identified.
+    acceptance_criteria:
+      - Relevant dashboards and panels are named without inventing live metrics.
+
+  - id: row_power_scalar
+    match:
+      claims: [scalar]
+      topics: [power, available, load, row, lab]
+    evidence_required: row_level
+    dashboard: autopod_rows_availability
+    goal: Find the available power for the specific lab and row named in the request.
+    search_query_template: "autopod_rows_availability panel data {query}"
+    steps:
+      - title: Resolve dashboard
+        action: Locate the autopod_rows_availability dashboard and its panel metadata.
+        required_tools: [list_dashboards, get_dashboard]
+        stop_condition: Dashboard and panel metadata are available.
+      - title: Resolve tokens
+        action: Read dashboard token defaults for labs, row, and available power filters.
+        required_tools: [get_dashboard_tokens]
+        stop_condition: Token metadata is available.
+      - title: Query panel data
+        action: Call get_panel_data with explicit labs and row filters from the request.
+        required_tools: [get_panel_data]
+        require_row_level: true
+        stop_condition: Row-level tool results have been returned for this step.
+    acceptance_criteria:
+      - Row-level panel data is retrieved for the named lab and row.
+      - Answer cites usable numeric values or states clearly when values are missing.
+
+  - id: row_power_listing
+    match:
+      claims: [listing]
+      topics: [rows, power, available, rtp, bgl, site, lab, kw]
+    evidence_required: row_level
+    dashboard: autopod_rows_availability
+    goal: List rows that match the requested site, lab, or power threshold filters.
+    search_query_template: "autopod_rows_availability rows available power {query}"
+    steps:
+      - title: Resolve dashboard
+        action: Locate the autopod_rows_availability dashboard and panel metadata.
+        required_tools: [list_dashboards, get_dashboard]
+        stop_condition: Dashboard and panel metadata are available.
+      - title: Resolve tokens
+        action: Read dashboard token defaults and map site or labs filters from the request.
+        required_tools: [get_dashboard_tokens]
+        stop_condition: Token metadata is available.
+      - title: Query panel data
+        action: Call get_panel_data with site, labs, row, and availablepowerrange filters.
+        required_tools: [get_panel_data]
+        require_row_level: true
+        stop_condition: Row-level tool results have been returned for this step.
+    acceptance_criteria:
+      - Matching rows are listed from live panel data or the answer states none were found.
+
+  - id: row_power_capacity
+    match:
+      claims: [existence, threshold]
+      topics: [power, capacity, available, host, server, enough, kw]
+    evidence_required: row_level
+    dashboard: autopod_rows_availability
+    goal: Determine whether there is enough available power for the requested site or lab.
+    search_query_template: "autopod_rows_availability available power capacity {query}"
+    steps:
+      - title: Resolve dashboard
+        action: Locate the autopod_rows_availability dashboard and panel metadata.
+        required_tools: [list_dashboards, get_dashboard]
+        stop_condition: Dashboard and panel metadata are available.
+      - title: Resolve tokens
+        action: Read dashboard token defaults and map site or labs filters from the request.
+        required_tools: [get_dashboard_tokens]
+        stop_condition: Token metadata is available.
+      - title: Query panel data
+        action: Call get_panel_data with site, labs, and availablepowerrange filters.
+        required_tools: [get_panel_data]
+        require_row_level: true
+        stop_condition: Row-level tool results have been returned for this step.
+    acceptance_criteria:
+      - Yes/no capacity answer is grounded in row-level values or honestly marked incomplete.
