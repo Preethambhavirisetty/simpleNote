@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
 
@@ -24,6 +25,7 @@ export default function ChatPage() {
   const newConversation = useChatStore((s) => s.newConversation)
   const deleteConversation = useChatStore((s) => s.deleteConversation)
   const sendMessage = useChatStore((s) => s.sendMessage)
+  const cancelStream = useChatStore((s) => s.cancelStream)
   const retryLastMessage = useChatStore((s) => s.retryLastMessage)
 
   const [input, setInput] = useState('')
@@ -72,16 +74,16 @@ export default function ChatPage() {
 
   const handleDelete = async () => {
     if (!activeConvId || !window.confirm('Delete this conversation?')) return
-    await deleteConversation(activeConvId)
-    navigate('/chat', { replace: true })
+    const result = await deleteConversation(activeConvId)
+    if (result.ok) navigate('/chat', { replace: true })
   }
 
   return (
     <div className="chat-workspace flex h-full min-w-0 flex-col overflow-hidden">
       <header className="workspace-border flex h-[74px] shrink-0 items-center justify-between border-b px-6 lg:px-8">
         <div className="min-w-0">
-          <p className="workspace-faint text-[10px] font-semibold uppercase tracking-[0.15em]">Conversation</p>
-          <h1 className="workspace-primary mt-1 truncate text-sm font-medium">
+          <p className="workspace-faint text-caption font-semibold uppercase tracking-[0.15em]">Conversation</p>
+          <h1 className="workspace-secondary mt-1 truncate text-sm font-medium">
             {activeConversation?.title || 'New conversation'}
           </h1>
         </div>
@@ -115,6 +117,7 @@ export default function ChatPage() {
           textareaRef={textareaRef}
           isStreaming={isStreaming}
           onSend={() => handleSend()}
+          onCancel={cancelStream}
           onPrompt={handleSend}
         />
       </div>
@@ -138,7 +141,7 @@ function EmptyState({ user, onPrompt }) {
         {prompts.map(([title, prompt]) => (
           <button key={title} onClick={() => onPrompt(prompt)} className="workspace-card rounded-2xl p-4 text-left">
             <span className="workspace-primary block text-xs font-medium">{title}</span>
-            <span className="workspace-faint mt-1.5 block text-[11px] leading-5">{prompt}</span>
+            <span className="workspace-faint mt-1.5 block text-caption leading-5">{prompt}</span>
           </button>
         ))}
       </div>
@@ -168,7 +171,7 @@ function Message({ message, user, onRetry }) {
         <div className="workspace-card workspace-primary max-w-[78%] rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-6">
           {message.content}
         </div>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#b8ff67] text-[11px] font-semibold text-[#10140d]">{initials}</span>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#b8ff67] text-caption font-semibold text-[#10140d]">{initials}</span>
       </div>
     )
   }
@@ -182,11 +185,11 @@ function Message({ message, user, onRetry }) {
             {[0, 150, 300].map((delay) => <span key={delay} className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#b8ff67]" style={{ animationDelay: `${delay}ms` }} />)}
           </span>
         ) : (
-          <div className="chat-markdown"><ReactMarkdown>{message.content}</ReactMarkdown></div>
+          <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
         )}
         {message.isStreaming && message.content && <span className="animate-pulse text-[#b8ff67]">▋</span>}
         {!message.isStreaming && (
-          <div className="workspace-faint mt-3 flex flex-wrap items-center gap-2 text-[10px]">
+          <div className="workspace-faint mt-3 flex flex-wrap items-center gap-2 text-caption">
             {!message.isError && <button onClick={handleCopy} className="workspace-pill rounded-full px-2.5 py-1">{copied ? 'Copied' : 'Copy'}</button>}
             {!message.isError && message.sources?.length > 0 && (
               <button onClick={() => setSourcesOpen((open) => !open)} className="workspace-pill rounded-full px-2.5 py-1">
@@ -203,7 +206,7 @@ function Message({ message, user, onRetry }) {
               <button
                 key={source}
                 onClick={() => window.open(`/notes?note=${source}`, '_blank', 'noopener,noreferrer')}
-                className="workspace-pill workspace-muted rounded-lg px-2.5 py-1.5 text-[10px]"
+                className="workspace-pill workspace-muted rounded-lg px-2.5 py-1.5 text-caption"
                 title={String(source)}
               >
                 Source {index + 1}
@@ -216,7 +219,7 @@ function Message({ message, user, onRetry }) {
   )
 }
 
-function Composer({ input, setInput, textareaRef, isStreaming, onSend, onPrompt }) {
+function Composer({ input, setInput, textareaRef, isStreaming, onSend, onCancel, onPrompt }) {
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
@@ -242,7 +245,7 @@ function Composer({ input, setInput, textareaRef, isStreaming, onSend, onPrompt 
               key={title}
               onClick={() => onPrompt(prompt)}
               disabled={isStreaming}
-              className="workspace-pill workspace-muted whitespace-nowrap rounded-full px-3 py-1.5 text-[10px] disabled:opacity-40"
+              className="workspace-pill workspace-muted whitespace-nowrap rounded-full px-3 py-1.5 text-caption disabled:opacity-40"
             >
               {title}
             </button>

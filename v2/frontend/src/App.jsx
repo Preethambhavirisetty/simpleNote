@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
@@ -8,9 +8,14 @@ import FeatureGate from '@/components/FeatureGate'
 import AppLayout from '@/pages/AppLayout'
 import LoginPage from '@/pages/auth/LoginPage'
 import RegisterPage from '@/pages/auth/RegisterPage'
-import NotesPage from '@/pages/NotesPage'
-import ChatPage from '@/pages/ChatPage'
 import HomePage from '@/pages/HomePage'
+
+const NotesPage = lazy(() => import('@/pages/NotesPage'))
+const ChatPage = lazy(() => import('@/pages/ChatPage'))
+
+function RouteLoader({ children }) {
+  return <Suspense fallback={<div className="route-loader" role="status"><span className="note-spinner" /><span>Loading workspace…</span></div>}>{children}</Suspense>
+}
 
 const router = createBrowserRouter([
   { path: '/', element: <HomePage /> },
@@ -23,10 +28,10 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { path: '/notes', element: <NotesPage /> },
-      { path: '/folders/:folderId', element: <NotesPage /> },
-      { path: '/chat', element: <FeatureGate flag="chat"><ChatPage /></FeatureGate> },
-      { path: '/chat/:conversationId', element: <FeatureGate flag="chat"><ChatPage /></FeatureGate> },
+      { path: '/notes', element: <RouteLoader><NotesPage /></RouteLoader> },
+      { path: '/folders/:folderId', element: <RouteLoader><NotesPage /></RouteLoader> },
+      { path: '/chat', element: <FeatureGate flag="chat"><RouteLoader><ChatPage /></RouteLoader></FeatureGate> },
+      { path: '/chat/:conversationId', element: <FeatureGate flag="chat"><RouteLoader><ChatPage /></RouteLoader></FeatureGate> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

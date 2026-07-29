@@ -5,7 +5,6 @@ import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
 
 let activeStreamController = null
-const pendingConversationLoads = new Map()
 let requestedConversationId = null
 
 export const useChatStore = create(
@@ -68,8 +67,11 @@ export const useChatStore = create(
             conversations: s.conversations.filter((c) => c.id !== convId),
             ...(activeConvId === convId ? { activeConvId: null, messages: [] } : {}),
           }))
-        } catch {
-          // silent
+          return { ok: true }
+        } catch (err) {
+          console.error('[chatStore] deleteConversation failed:', err)
+          set({ error: 'Failed to delete conversation' })
+          return { ok: false, error: 'Failed to delete conversation' }
         }
       },
 
@@ -204,6 +206,37 @@ function _updateLastMsg(set, patch) {
   set((s) => ({
     messages: s.messages.map((m, i) => (i === s.messages.length - 1 ? { ...m, ...patch } : m)),
   }))
+}
+
+function _cancelActiveStream(set) {
+  activeStreamController?.abort()
+  activeStreamController = null
+  set((state) => ({
+    isStreaming: false,
+    messages: state.messages.map((message) => (
+      message.isStreaming ? { ...message, isStreaming: false } : message
+    )),
+  }))
+}
+
+function _normalizeReferences(references) {
+  if (!Array.isArray(references)) return []
+  return references
+    .map((reference, index) => {
+      if (typeof reference === 'string') {
+        return { note_id: reference, title: `Source ${index + 1}` }
+      }
+      if (!reference || typeof reference !== 'object') return null
+      const noteId = reference.note_id ?? reference.noteId ?? reference.id
+      if (!noteId) return null
+      return {
+        note_id: String(noteId),
+        folder_id: reference.folder_id ?? reference.folderId,
+        title: reference.title ?? reference.note_title ?? `Source ${index + 1}`,
+        folder: reference.folder ?? reference.folder_name,
+      }
+    })
+    .filter(Boolean)
 }
 
 function _friendlyErrorMessage(err) {

@@ -10,9 +10,9 @@ import { CHARACTER_OPTIONS } from '@/lib/avatarOptions'
 // ---------- Section wrapper ----------
 function Section({ title, children }) {
   return (
-    <div className="py-4 px-5 border-b border-zinc-200 dark:border-zinc-800">
+    <div className="py-4 px-5">
       {title && (
-        <p className="text-label font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-3">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
           {title}
         </p>
       )}
@@ -221,24 +221,21 @@ export default function SettingsPanel() {
   }
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={handleBackdropClick}
-        className={`fixed inset-0 z-40 bg-black/20 dark:bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${
-          isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
-        }`}
-      />
-
+    <div
+      onClick={handleBackdropClick}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/20 dark:bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ${
+        isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+      }`}
+    >
       {/* Panel */}
       <div
         ref={panelRef}
-        className={`fixed top-0 right-0 bottom-0 z-50 w-80 bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
+        className={`settings-panel-surface relative flex w-full max-w-md max-h-[85vh] flex-col overflow-hidden rounded-3xl shadow-2xl transition-[transform,opacity] duration-300 ease-out ${
+          isOpen ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.97] opacity-0'
         }`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="relative z-10 flex items-center justify-between px-5 py-4 border-b border-zinc-200 dark:border-zinc-800">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Settings</h2>
           <button
             onClick={close}
@@ -250,7 +247,7 @@ export default function SettingsPanel() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="relative z-10 flex-1 overflow-y-auto">
           {/* Profile */}
           <Section>
             <div className="flex items-center gap-3">
@@ -298,7 +295,7 @@ export default function SettingsPanel() {
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-zinc-200 dark:border-zinc-800">
+        <div className="relative z-10 px-5 py-4 border-t border-zinc-200 dark:border-zinc-800">
           <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
@@ -310,6 +307,6 @@ export default function SettingsPanel() {
           </button>
         </div>
       </div>
-    </>
+    </div>
   )
 }

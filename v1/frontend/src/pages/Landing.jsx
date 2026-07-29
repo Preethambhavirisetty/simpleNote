@@ -108,7 +108,7 @@ export default function Landing() {
           </p>
           <button
             onClick={() => navigate('/register')}
-            className="px-6 sm:px-8 py-3 sm:py-4 bg-black text-white text-base sm:text-lg hover:bg-gray-800 transition-colors"
+            className="px-6 sm:px-8 py-3 sm:py-4 bg-white text-white text-base sm:text-lg hover:bg-gray-800 transition-colors"
           >
             Get Started Free
           </button>

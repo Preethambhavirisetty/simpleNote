@@ -2,7 +2,7 @@
  * SSE streaming through the cookie-authenticated backend proxy.
  * Events: meta, delta, error, done.
  */
-export async function streamChat({ body, onMeta, onDelta, onDone, onError }) {
+export async function streamChat({ body, signal, onMeta, onDelta, onDone, onError }) {
   let reader
   let doneFired = false
 
