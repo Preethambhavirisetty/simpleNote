@@ -65,6 +65,8 @@ _others/
 decisions/
 v2_/
 mydocs/
+docs/
 
 
 agent-workflow-service-v1/
+logging-v1/
