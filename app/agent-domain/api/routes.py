@@ -4,6 +4,7 @@ GET  /api/domain/catalog
 GET  /api/domain/catalog/validation
 GET  /api/domain/playbooks
 GET  /api/domain/playbooks/{playbook_id}
+POST /api/domain/playbooks/candidates
 POST /api/domain/playbooks/search
 GET  /api/domain/operations
 GET  /api/domain/operations/{name}
@@ -20,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from config import PLAYBOOK_SEARCH_LIMIT
 from schemas.catalog_schema import Catalog, Mapping, Operation, StepDefinition
-from schemas.playbook_schema import Playbook, PlaybookMatch
+from schemas.playbook_schema import Playbook, PlaybookCandidates, PlaybookMatch
 from services.catalog import CatalogService
 from services.mappings import MappingService
 from services.operations import OperationService
@@ -42,6 +43,12 @@ class PlaybookSearchRequest(BaseModel):
 
     query: str
     limit: int = Field(default=PLAYBOOK_SEARCH_LIMIT, ge=1, le=50)
+
+
+class PlaybookCandidatesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str
 
 
 class CatalogValidation(BaseModel):
@@ -70,8 +77,15 @@ async def list_playbooks() -> list[Playbook]:
     return playbook_service.list_playbooks()
 
 
+@router.post("/playbooks/candidates")
+async def get_candidates(request: PlaybookCandidatesRequest) -> PlaybookCandidates:
+    """What the runtime's selector should ask about. Prefer this over /search."""
+    return playbook_service.get_candidates(request.query)
+
+
 @router.post("/playbooks/search")
 async def search_playbooks(request: PlaybookSearchRequest) -> list[PlaybookMatch]:
+    """Raw semantic ranking. Recall-oriented: rank 1 is not a routing decision."""
     return playbook_service.search_playbooks(request.query, request.limit)
 
 

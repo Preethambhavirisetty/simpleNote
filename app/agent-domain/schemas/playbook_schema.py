@@ -8,6 +8,8 @@ steps, and a step optionally names an operation from the operation catalog.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -37,3 +39,16 @@ class Playbook(DomainModel):
 class PlaybookMatch(DomainModel):
     playbook: Playbook
     score: float
+
+
+class PlaybookCandidates(DomainModel):
+    """The playbooks a selector LLM should choose between for one question.
+
+    `selection_mode` says how the list was produced: "all" when the catalog is
+    small enough to show in full, "semantic" when search had to narrow it.
+    Scores are deliberately omitted — ranking is a recall device here, and
+    showing it to the selector only biases the choice.
+    """
+
+    selection_mode: Literal["all", "semantic"]
+    playbooks: list[Playbook]
