@@ -169,9 +169,9 @@ services:
 
   agent:
     env_file:
-      - ./notelite_agent/.env
+      - ./orchestrator/.env
     build:
-      context: ./notelite_agent
+      context: ./orchestrator
       dockerfile: Dockerfile
     container_name: notelite-agent
     restart: unless-stopped
@@ -191,10 +191,10 @@ services:
       AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
       AGENT_WORKFLOW_CONFIG_NAME: notelite
     volumes:
-      - ./notelite_agent/app:/app/app:ro
+      - ./orchestrator/app:/app/app:ro
       - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
-      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
       - "8000"
     networks:
@@ -203,9 +203,9 @@ services:
   # Notelite MCP tool server — read-only tools exposed to agent-workflow
   agent-mcp:
     env_file:
-      - ./notelite_agent/.env
+      - ./orchestrator/.env
     build:
-      context: ./notelite_agent
+      context: ./orchestrator
       dockerfile: Dockerfile
     container_name: notelite-agent-mcp
     restart: unless-stopped
@@ -224,10 +224,10 @@ services:
       LOKI_URL:               http://loki:3100
       RUN_MIGRATIONS:         "false"
     volumes:
-      - ./notelite_agent/app:/app/app:ro
+      - ./orchestrator/app:/app/app:ro
       - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
-      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
       - "8000"
     networks:
@@ -236,7 +236,7 @@ services:
   # Standalone agent workflow orchestration service
   agent-workflow:
     env_file:
-      - ./notelite_agent/.env
+      - ./orchestrator/.env
     build:
       context: ./agent-workflow-service
       dockerfile: Dockerfile
@@ -257,9 +257,9 @@ services:
   # Agent Celery worker — ingestion + conversation queues
   agent-celery:
     env_file:
-      - ./notelite_agent/.env
+      - ./orchestrator/.env
     build:
-      context: ./notelite_agent
+      context: ./orchestrator
       dockerfile: Dockerfile
     container_name: notelite-agent-celery
     restart: unless-stopped
@@ -282,9 +282,9 @@ services:
       # Migrations run only in the agent API container; the worker must not race it.
       RUN_MIGRATIONS:         "false"
     volumes:
-      - ./notelite_agent/app:/app/app:ro
+      - ./orchestrator/app:/app/app:ro
       - agent-model-cache:/app/.cache
-      - ./notelite_agent/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
       - ./feature_flags.json:/app/feature_flags.json:ro
     networks:
       - notelite-net

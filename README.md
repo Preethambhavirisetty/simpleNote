@@ -343,7 +343,7 @@ At query time, when you retrieve chunk N you often want to expand context by als
 NOTE: The one thing most production apps do that you don't yet is document-level pre-processing — running a lightweight pass over the full document before chunking to extract the document type, primary language, estimated structure density, and overall topic. That global context improves chunking decisions, particularly for freeform notes where there are no structural signals to work from. Worth adding eventually but not blocking.
 
 
-also update keyword/entitity extractor documentation in [docs](v2/notelite_agent/docs/) 
+also update keyword/entitity extractor documentation in [docs](v2/orchestrator/docs/) 
 
 
 ### STARTUP STEPS

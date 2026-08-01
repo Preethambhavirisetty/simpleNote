@@ -66,7 +66,7 @@ CELERY_RESULT_BACKEND = _require_env("CELERY_RESULT_BACKEND")
 INGESTION_TASK_STRING = _require_env("INGESTION_TASK_STRING")
 INGESTION_QUEUE = _require_env("INGESTION_QUEUE", "ingestion")
 
-# Shared secret for service-to-service calls from the notelite_agent.
+# Shared secret for service-to-service calls from the orchestrator.
 AGENT_API_KEY = _require_env("AGENT_API_KEY")
 AGENT_INTERNAL_URL = _require_env("AGENT_INTERNAL_URL", "http://localhost:3002")
 AGENT_WORKFLOW_INTERNAL_URL = _require_env("AGENT_WORKFLOW_INTERNAL_URL", "http://agent-workflow:5453")
