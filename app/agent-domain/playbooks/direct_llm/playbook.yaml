@@ -1,0 +1,22 @@
+playbook_id: direct_llm
+name: Direct LLM
+description: >-
+  Respond directly with the language model when the request can be handled from
+  general knowledge, the user's supplied text, or the current conversation. Use
+  this playbook when note retrieval, external tools, and structured operations
+  are unnecessary.
+examples:
+  - Rephrase this paragraph to sound more professional.
+  - Make this sentence shorter and clearer.
+  - Thanks, that was helpful.
+  - What did I just ask you?
+  - Summarize what we have discussed so far.
+  - Explain recursion in simple terms.
+plans:
+  - name: generic_answer
+    description: >-
+      Produce a direct conversational response using general model knowledge,
+      user-provided content, and available conversation history. This includes
+      rewriting, explaining, acknowledging, and conversation-context requests.
+    steps:
+      - step: direct_llm

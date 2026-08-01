@@ -1,3 +1,315 @@
+# The domain's capability vocabulary. An operation declares what the runtime can
+# ask for and which parameters that request accepts; `mappings.yaml` declares
+# which MCP tool performs it and where each tool argument comes from.
+#
+# Parameters listed here are the model-facing contract only. Trusted values such
+# as user_id, role, and history are never parameters — the runtime injects them
+# through the mapping's context bindings.
 operations:
-  query:
-    description: ...
+
+  # ── Retrieval ───────────────────────────────────────────────────────────────
+
+  search_notes:
+    description: >-
+      Gather answer-ready evidence from the user's notes using the full
+      retrieval pipeline: contextualization, temporal filtering, HyDE expansion,
+      dense and sparse search, fusion, reranking, and neighbour expansion.
+    parameters:
+      query:
+        type: string
+        description: The information need to gather evidence for.
+        required: true
+      k:
+        type: integer
+        description: Maximum reranked seed chunks before context expansion.
+        default: 12
+      include_context:
+        type: boolean
+        description: Include bounded context text previews alongside the evidence.
+        default: false
+    returns: Ranked evidence chunks with note references and summaries.
+
+  locate_notes:
+    description: >-
+      Find the notes most likely to contain the requested information and return
+      note-level references with folder placement, snippets, keywords, and
+      relevance signals.
+    parameters:
+      query:
+        type: string
+        description: What to find in the notes.
+        required: true
+      k:
+        type: integer
+        description: Maximum reranked seed chunks before grouping by note.
+        default: 10
+    returns: Note references with snippets and relevance signals.
+
+  summarize_notes:
+    description: >-
+      Return indexed summaries for specific notes, or discover notes for a query
+      first and then summarize those.
+    parameters:
+      query:
+        type: string
+        description: Information need used to discover relevant notes first.
+      note_ids:
+        type: array
+        description: Note ids to summarize directly instead of searching.
+      k:
+        type: integer
+        description: Maximum notes to summarize when discovering by query.
+        default: 8
+    returns: Per-note summaries.
+
+  # ── Workspace reads ─────────────────────────────────────────────────────────
+
+  list_notes:
+    description: >-
+      List notes with optional folder, pinned, and title-text filters. Returns
+      metadata unless content is explicitly requested.
+    parameters:
+      folder_id:
+        type: string
+        description: Restrict results to one folder.
+      search:
+        type: string
+        description: Backend text search over note titles and content.
+      pinned_only:
+        type: boolean
+        description: Return only pinned notes.
+        default: false
+      skip:
+        type: integer
+        description: Number of notes to skip for pagination.
+        default: 0
+      limit:
+        type: integer
+        description: Maximum notes to return (1-200).
+        default: 50
+      include_content:
+        type: boolean
+        description: Include full note content in each result.
+        default: false
+    returns: Note metadata records.
+
+  get_note:
+    description: Fetch one note by id, including its content when requested.
+    parameters:
+      note_id:
+        type: string
+        description: Id of the note to inspect.
+        required: true
+      include_content:
+        type: boolean
+        description: Include the note body.
+        default: true
+    returns: One note record.
+
+  list_folders:
+    description: List the user's folders so workspace organisation can be inspected.
+    parameters:
+      skip:
+        type: integer
+        description: Number of folders to skip for pagination.
+        default: 0
+      limit:
+        type: integer
+        description: Maximum folders to return (1-200).
+        default: 50
+    returns: Folder records.
+
+  get_folder:
+    description: Fetch one folder by id.
+    parameters:
+      folder_id:
+        type: string
+        description: Id of the folder to inspect.
+        required: true
+    returns: One folder record.
+
+  list_tags:
+    description: List the user's tags.
+    returns: Tag records.
+
+  # ── Note writes ─────────────────────────────────────────────────────────────
+
+  create_note:
+    description: >-
+      Create a note in a folder. Non-empty content is queued for ingestion by
+      the backend.
+    parameters:
+      folder_id:
+        type: string
+        description: Folder the note belongs to.
+        required: true
+      title:
+        type: string
+        description: Note title.
+        required: true
+      content_text:
+        type: string
+        description: Plain-text body of the note.
+        default: ""
+      description:
+        type: string
+        description: Short note description.
+      is_pinned:
+        type: boolean
+        description: Pin the note in the workspace.
+        default: false
+      is_memory_included:
+        type: boolean
+        description: Allow the note to be used as assistant memory.
+        default: false
+    returns: The created note.
+
+  update_note:
+    description: >-
+      Update a note's title, description, folder, flags, or body. Content
+      changes trigger re-ingestion.
+    parameters:
+      note_id:
+        type: string
+        description: Id of the note to update.
+        required: true
+      title:
+        type: string
+        description: New title.
+      content_text:
+        type: string
+        description: New plain-text body.
+      description:
+        type: string
+        description: New description.
+      folder_id:
+        type: string
+        description: New folder for the note.
+      is_pinned:
+        type: boolean
+        description: New pinned state.
+      is_memory_included:
+        type: boolean
+        description: New memory-inclusion state.
+    returns: The updated note.
+
+  move_note:
+    description: Move a note to another folder and re-index its folder metadata.
+    parameters:
+      note_id:
+        type: string
+        description: Id of the note to move.
+        required: true
+      folder_id:
+        type: string
+        description: Destination folder id.
+        required: true
+    returns: The moved note.
+
+  delete_note:
+    description: Delete a note and queue its removal from the vector index.
+    parameters:
+      note_id:
+        type: string
+        description: Id of the note to delete.
+        required: true
+    returns: Deletion confirmation.
+
+  # ── Folder writes ───────────────────────────────────────────────────────────
+
+  create_folder:
+    description: Create a folder in the user's workspace.
+    parameters:
+      name:
+        type: string
+        description: Folder name.
+        required: true
+      is_pinned:
+        type: boolean
+        description: Pin the folder in the workspace.
+        default: false
+    returns: The created folder.
+
+  update_folder:
+    description: Rename a folder or change its pinned state.
+    parameters:
+      folder_id:
+        type: string
+        description: Id of the folder to update.
+        required: true
+      name:
+        type: string
+        description: New folder name.
+      is_pinned:
+        type: boolean
+        description: New pinned state.
+    returns: The updated folder.
+
+  delete_folder:
+    description: >-
+      Delete a folder and queue vector-index deletion for the notes inside it.
+    parameters:
+      folder_id:
+        type: string
+        description: Id of the folder to delete.
+        required: true
+    returns: Deletion confirmation.
+
+  # ── Tag writes ──────────────────────────────────────────────────────────────
+
+  create_tag:
+    description: Create a tag.
+    parameters:
+      name:
+        type: string
+        description: Tag name.
+        required: true
+    returns: The created tag.
+
+  update_tag:
+    description: Rename a tag.
+    parameters:
+      tag_id:
+        type: string
+        description: Id of the tag to rename.
+        required: true
+      name:
+        type: string
+        description: New tag name.
+        required: true
+    returns: The updated tag.
+
+  delete_tag:
+    description: Delete a tag.
+    parameters:
+      tag_id:
+        type: string
+        description: Id of the tag to delete.
+        required: true
+    returns: Deletion confirmation.
+
+  add_tag_to_note:
+    description: Attach an existing tag to an existing note.
+    parameters:
+      note_id:
+        type: string
+        description: Id of the note to tag.
+        required: true
+      tag_id:
+        type: string
+        description: Id of the tag to attach.
+        required: true
+    returns: The note-tag association.
+
+  remove_tag_from_note:
+    description: Remove a tag association from a note.
+    parameters:
+      note_id:
+        type: string
+        description: Id of the note to untag.
+        required: true
+      tag_id:
+        type: string
+        description: Id of the tag to remove.
+        required: true
+    returns: Deletion confirmation.

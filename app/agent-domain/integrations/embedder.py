@@ -4,13 +4,13 @@ from functools import lru_cache
 
 from sentence_transformers import SentenceTransformer
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+from config import EMBEDDING_DEVICE, EMBEDDING_MODEL
 
 
 @lru_cache(maxsize=1)
 def get_embedder() -> SentenceTransformer:
     """Return the single embedding model instance used by this process."""
-    return SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+    return SentenceTransformer(EMBEDDING_MODEL, device=EMBEDDING_DEVICE)
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:

@@ -1,0 +1,35 @@
+playbook_id: notes_qa
+name: Notes Q&A
+description: >-
+  Answer a question using the user's own notes as the evidence. Use this
+  playbook when the request asks what the notes say about a topic, needs facts
+  the user wrote down, or expects prose grounded in stored content. The result
+  is an answer, not a list of notes.
+examples:
+  - What did I decide about the pricing model?
+  - What do my notes say about the vendor migration?
+  - Do I have anything written about the Q3 roadmap?
+  - What were the action items from the design review?
+  - Explain my notes on retrieval evaluation.
+  - Give me an overview of everything I have on onboarding.
+plans:
+  - name: answer_from_notes
+    description: >-
+      Gather chunk-level evidence for the question and write a grounded answer
+      that cites the notes it came from. The default for specific questions.
+    steps:
+      - step: semantic_search
+        operation: search_notes
+      - step: aggregation
+      - step: summarize
+
+  - name: summarize_topic
+    description: >-
+      Return indexed note summaries for a topic rather than chunk-level
+      evidence. Use for broad "give me an overview of X" requests where whole
+      notes matter more than individual passages.
+    steps:
+      - step: execute_operation
+        operation: summarize_notes
+      - step: aggregation
+      - step: summarize

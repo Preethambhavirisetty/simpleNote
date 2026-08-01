@@ -1,0 +1,46 @@
+playbook_id: search_notes
+name: Search Notes
+description: >-
+  Find the notes themselves rather than answering from their content. Use this
+  playbook when the user wants to locate notes, browse a folder, or see which
+  notes mention something, and the expected result is a list of notes with
+  where they live.
+examples:
+  - Find my notes about the vendor migration.
+  - Which notes mention Postgres?
+  - Show me the notes in my Work folder.
+  - List my pinned notes.
+  - Where did I write about the onboarding checklist?
+  - What folders do I have?
+plans:
+  - name: find_notes
+    description: >-
+      Locate notes semantically related to the request and return references
+      with snippets and folder placement. The default when the request names a
+      topic rather than a filter.
+    steps:
+      - step: resolve_filters
+      - step: validate_filters
+      - step: semantic_search
+        operation: locate_notes
+      - step: aggregation
+
+  - name: browse_notes
+    description: >-
+      List notes by explicit workspace filters - folder, pinned state, or title
+      text - when the request names a concrete filter instead of a topic.
+    steps:
+      - step: resolve_filters
+      - step: validate_filters
+      - step: execute_operation
+        operation: list_notes
+      - step: aggregation
+
+  - name: browse_folders
+    description: >-
+      List the user's folders so the workspace layout can be inspected before
+      choosing notes.
+    steps:
+      - step: execute_operation
+        operation: list_folders
+      - step: aggregation

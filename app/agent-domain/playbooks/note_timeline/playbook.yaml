@@ -1,0 +1,39 @@
+playbook_id: note_timeline
+name: Note Timeline
+description: >-
+  Answer time-scoped questions about notes: what was written or changed in a
+  date range, which notes are the most recent, or how work progressed over
+  time. Use this playbook whenever the request is anchored to a period rather
+  than to a topic alone.
+examples:
+  - What did I write last week?
+  - Show my notes from March.
+  - What are my most recent notes?
+  - What have I worked on since Monday?
+  - Give me a timeline of my project notes.
+  - Which notes did I update yesterday?
+plans:
+  - name: recent_notes
+    description: >-
+      List the notes in the requested time window, newest first. Use when the
+      user wants to see the notes rather than a narrative.
+    steps:
+      - step: resolve_filters
+      - step: validate_filters
+      - step: execute_operation
+        operation: list_notes
+      - step: sort_by_date
+      - step: aggregation
+
+  - name: timeline_digest
+    description: >-
+      Order the notes in the requested window by date and describe the activity
+      as a narrative timeline. Use when the user asks what happened or what they
+      worked on over a period.
+    steps:
+      - step: resolve_filters
+      - step: validate_filters
+      - step: semantic_search
+        operation: locate_notes
+      - step: sort_by_date
+      - step: summarize

@@ -1,0 +1,61 @@
+# The step vocabulary a playbook plan may use. Each name has an implementation
+# in agent-runtime under workflows/steps/. `kind` tells the runtime how to run
+# it, and whether the step must name an operation:
+#
+#   llm        - one language model call; must not name an operation
+#   operation  - calls a catalog operation through its MCP tool mapping
+#   transform  - deterministic post-processing over earlier step output
+steps:
+  direct_llm:
+    kind: llm
+    description: >-
+      Answer directly from general knowledge, the user's supplied text, and
+      conversation history. No retrieval, no tools.
+
+  resolve_filters:
+    kind: llm
+    description: >-
+      Read the question and conversation history and extract structured filters
+      such as folder, tag, pinned state, title text, and date range.
+
+  summarize:
+    kind: llm
+    description: >-
+      Write the user-facing answer from the evidence collected by earlier steps,
+      citing the notes it came from and never asserting anything unsupported.
+
+  semantic_search:
+    kind: operation
+    description: >-
+      Run a retrieval operation for the question and keep the returned evidence
+      or note references as the step result.
+
+  execute_operation:
+    kind: operation
+    description: >-
+      Run any catalog operation with parameters resolved from the request and
+      trusted runtime context.
+
+  direct_tool:
+    kind: operation
+    description: >-
+      Perform one explicit workspace action the user asked for, pausing first
+      when the mapping requires approval.
+
+  validate_filters:
+    kind: transform
+    description: >-
+      Check resolved filters against the target operation's parameter contract
+      and drop or correct values the operation cannot accept.
+
+  sort_by_date:
+    kind: transform
+    description: >-
+      Order the collected notes by their timestamps, newest first, so
+      time-scoped requests read as a timeline.
+
+  aggregation:
+    kind: transform
+    description: >-
+      Merge results from earlier steps into one deduplicated, ranked collection
+      before the answer is written.

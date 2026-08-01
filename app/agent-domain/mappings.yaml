@@ -1,3 +1,212 @@
+# Operation → MCP tool bindings. This is the only place a tool name appears in
+# the system; the runtime resolves an operation to a server, a tool, and a set
+# of argument bindings.
+#
+# Each argument value names its source:
+#   param.<name>    - a parameter declared by the operation, omitted when absent
+#   context.<name>  - a server-derived value the runtime injects (user_id, role,
+#                     history). The model can neither supply nor override these.
+#   const.<value>   - a fixed literal
+#
+# `destructive` marks operations that change or remove data;
+# `requires_approval` makes the runtime pause for confirmation before running.
 mappings:
-  - name: query
-    tool: ...
+
+  # ── Retrieval ───────────────────────────────────────────────────────────────
+
+  - operation: search_notes
+    server: notelite
+    tool: search_notes
+    arguments:
+      query: param.query
+      k: param.k
+      include_context: param.include_context
+      user_id: context.user_id
+      role: context.role
+      history: context.history
+
+  - operation: locate_notes
+    server: notelite
+    tool: locate_notes
+    arguments:
+      query: param.query
+      k: param.k
+      user_id: context.user_id
+      role: context.role
+      history: context.history
+
+  - operation: summarize_notes
+    server: notelite
+    tool: summarize_notes
+    arguments:
+      query: param.query
+      note_ids: param.note_ids
+      k: param.k
+      user_id: context.user_id
+
+  # ── Workspace reads ─────────────────────────────────────────────────────────
+
+  - operation: list_notes
+    server: notelite
+    tool: list_notes
+    arguments:
+      folder_id: param.folder_id
+      search: param.search
+      pinned_only: param.pinned_only
+      skip: param.skip
+      limit: param.limit
+      include_content: param.include_content
+      user_id: context.user_id
+
+  - operation: get_note
+    server: notelite
+    tool: get_note
+    arguments:
+      note_id: param.note_id
+      include_content: param.include_content
+      user_id: context.user_id
+
+  - operation: list_folders
+    server: notelite
+    tool: list_folders
+    arguments:
+      skip: param.skip
+      limit: param.limit
+      user_id: context.user_id
+
+  - operation: get_folder
+    server: notelite
+    tool: get_folder
+    arguments:
+      folder_id: param.folder_id
+      user_id: context.user_id
+
+  - operation: list_tags
+    server: notelite
+    tool: list_tags
+    arguments:
+      user_id: context.user_id
+
+  # ── Note writes ─────────────────────────────────────────────────────────────
+
+  - operation: create_note
+    server: notelite
+    tool: create_note
+    arguments:
+      folder_id: param.folder_id
+      title: param.title
+      content_text: param.content_text
+      description: param.description
+      is_pinned: param.is_pinned
+      is_memory_included: param.is_memory_included
+      user_id: context.user_id
+
+  - operation: update_note
+    server: notelite
+    tool: update_note
+    destructive: true
+    requires_approval: true
+    arguments:
+      note_id: param.note_id
+      title: param.title
+      content_text: param.content_text
+      description: param.description
+      folder_id: param.folder_id
+      is_pinned: param.is_pinned
+      is_memory_included: param.is_memory_included
+      user_id: context.user_id
+
+  - operation: move_note
+    server: notelite
+    tool: move_note
+    destructive: true
+    requires_approval: true
+    arguments:
+      note_id: param.note_id
+      folder_id: param.folder_id
+      user_id: context.user_id
+
+  - operation: delete_note
+    server: notelite
+    tool: delete_note
+    destructive: true
+    requires_approval: true
+    arguments:
+      note_id: param.note_id
+      user_id: context.user_id
+
+  # ── Folder writes ───────────────────────────────────────────────────────────
+
+  - operation: create_folder
+    server: notelite
+    tool: create_folder
+    arguments:
+      name: param.name
+      is_pinned: param.is_pinned
+      user_id: context.user_id
+
+  - operation: update_folder
+    server: notelite
+    tool: update_folder
+    destructive: true
+    requires_approval: true
+    arguments:
+      folder_id: param.folder_id
+      name: param.name
+      is_pinned: param.is_pinned
+      user_id: context.user_id
+
+  - operation: delete_folder
+    server: notelite
+    tool: delete_folder
+    destructive: true
+    requires_approval: true
+    arguments:
+      folder_id: param.folder_id
+      user_id: context.user_id
+
+  # ── Tag writes ──────────────────────────────────────────────────────────────
+
+  - operation: create_tag
+    server: notelite
+    tool: create_tag
+    arguments:
+      name: param.name
+      user_id: context.user_id
+
+  - operation: update_tag
+    server: notelite
+    tool: update_tag
+    destructive: true
+    requires_approval: true
+    arguments:
+      tag_id: param.tag_id
+      name: param.name
+      user_id: context.user_id
+
+  - operation: delete_tag
+    server: notelite
+    tool: delete_tag
+    destructive: true
+    requires_approval: true
+    arguments:
+      tag_id: param.tag_id
+      user_id: context.user_id
+
+  - operation: add_tag_to_note
+    server: notelite
+    tool: add_tag_to_note
+    arguments:
+      note_id: param.note_id
+      tag_id: param.tag_id
+      user_id: context.user_id
+
+  - operation: remove_tag_from_note
+    server: notelite
+    tool: remove_tag_from_note
+    destructive: true
+    requires_approval: true
+    arguments:
+      note_id: param.note_id
+      tag_id: param.tag_id
+      user_id: context.user_id

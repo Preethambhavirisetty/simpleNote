@@ -573,3 +573,7 @@ Intent classifier  (lightweight: keyword rules + optional LLM)
 | No rate limiting | A single large note can saturate the LLM endpoint | Medium |
 | `version` guard unused | `is_stale_ingestion` is never called from the route | Low |
 | Observability | No metrics endpoint; no distributed tracing; structlog only | Low |
+
+
+
+/catalog/validation, /playbooks, /playbooks/{id}, POST /playbooks/search, /operations[/{name}], /mappings[/{operation}], /steps[/{name}]. /mappings/{operation} is the per-call lookup execute_operation needs.

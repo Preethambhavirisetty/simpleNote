@@ -1,38 +1,29 @@
 from __future__ import annotations
 
-import json
-from math import sqrt
-from pathlib import Path
 from threading import Lock
 
 from fastapi import HTTPException
 
+from config import PLAYBOOK_SEARCH_LIMIT
 from integrations.embedder import embed_texts
-from utils import CatalogNotFoundError, list_child_dirs, read_yaml
-
-
-PLAYBOOK_EMBEDDINGS_FILE = (
-    Path(__file__).resolve().parents[1] / "assets" / "playbook_embeddings.json"
+from schemas.playbook_schema import Playbook, PlaybookMatch
+from utils import (
+    CATALOG_ROOT,
+    CatalogNotFoundError,
+    build_model,
+    list_child_dirs,
+    read_yaml,
 )
 
 
 class PlaybookService:
+    """Reads playbooks from the catalog and ranks them against a question."""
+
     def __init__(self) -> None:
         self._embeddings: dict[str, list[float]] | None = None
         self._embedding_lock = Lock()
 
-    def _playbook_path(self, playbook_id: str) -> str:
-        return f"playbooks/{playbook_id}/playbook.yaml"
-
-    def _playbook_ids(self) -> list[str]:
-        try:
-            return list_child_dirs("playbooks")
-        except CatalogNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="Playbook Catalog Not Found") from exc
-        except NotADirectoryError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    def get_playbook(self, playbook_id: str) -> dict:
+    def get_playbook(self, playbook_id: str) -> Playbook:
         if (
             not playbook_id
             or "/" in playbook_id
@@ -42,109 +33,100 @@ class PlaybookService:
             raise HTTPException(status_code=404, detail="Playbook Not Found")
 
         try:
-            return read_yaml(self._playbook_path(playbook_id))
+            payload = read_yaml(f"playbooks/{playbook_id}/playbook.yaml")
         except CatalogNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Playbook Not Found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    def list_playbooks(self) -> list[dict]:
+        playbook = build_model(Playbook, payload, f"Playbook '{playbook_id}'")
+        if playbook.playbook_id != playbook_id:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Playbook '{playbook_id}' declares playbook_id "
+                    f"'{playbook.playbook_id}'"
+                ),
+            )
+        return playbook
+
+    def list_playbooks(self) -> list[Playbook]:
         return [self.get_playbook(playbook_id) for playbook_id in self._playbook_ids()]
 
-    @staticmethod
-    def _embedding_text(playbook: dict) -> str:
-        name = playbook.get("name", "")
-        description = playbook.get("description", "")
-        examples = playbook.get("examples", [])
-        if isinstance(examples, list):
-            examples_text = "\n".join(str(example) for example in examples)
-        else:
-            examples_text = str(examples)
-        return f"name: {name}\ndescription: {description}\nexamples:\n{examples_text}"
-
-    def _save_embeddings(self, embeddings: dict[str, list[float]]) -> None:
-        PLAYBOOK_EMBEDDINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        temporary_file = PLAYBOOK_EMBEDDINGS_FILE.with_suffix(".json.tmp")
-        with temporary_file.open("w", encoding="utf-8") as file:
-            json.dump(embeddings, file, indent=2, sort_keys=True)
-        temporary_file.replace(PLAYBOOK_EMBEDDINGS_FILE)
-
-    def _load_embeddings(self) -> dict[str, list[float]]:
-        if not PLAYBOOK_EMBEDDINGS_FILE.is_file():
-            return {}
-
-        try:
-            with PLAYBOOK_EMBEDDINGS_FILE.open("r", encoding="utf-8") as file:
-                payload = json.load(file)
-        except (json.JSONDecodeError, OSError):
-            return {}
-
-        if not isinstance(payload, dict):
-            return {}
-
-        embeddings: dict[str, list[float]] = {}
-        for playbook_id, embedding in payload.items():
-            if not isinstance(embedding, list):
-                continue
-            try:
-                embeddings[str(playbook_id)] = [float(value) for value in embedding]
-            except (TypeError, ValueError):
-                continue
-        return embeddings
-
-    def generate_playbook_embeddings(self) -> dict[str, list[float]]:
-        playbook_ids = self._playbook_ids()
-        playbooks = [self.get_playbook(playbook_id) for playbook_id in playbook_ids]
-        vectors = embed_texts([self._embedding_text(playbook) for playbook in playbooks])
-        embeddings = dict(zip(playbook_ids, vectors, strict=True))
-        self._save_embeddings(embeddings)
-        self._embeddings = embeddings
-        return embeddings
-
-    def initialize_embeddings(self) -> None:
-        if self._embeddings is not None:
-            return
-
-        with self._embedding_lock:
-            if self._embeddings is not None:
-                return
-
-            cached = self._load_embeddings()
-            playbook_ids = set(self._playbook_ids())
-            if cached and set(cached) == playbook_ids:
-                self._embeddings = cached
-                return
-
-            self.generate_playbook_embeddings()
-
-    @staticmethod
-    def _cosine_similarity(left: list[float], right: list[float]) -> float:
-        if len(left) != len(right) or not left:
-            return 0.0
-        left_norm = sqrt(sum(value * value for value in left))
-        right_norm = sqrt(sum(value * value for value in right))
-        if left_norm == 0 or right_norm == 0:
-            return 0.0
-        return sum(a * b for a, b in zip(left, right)) / (left_norm * right_norm)
-
-    def search_playbooks(self, query: str, limit: int = 5) -> list[dict]:
-        normalized_query = query.strip()
-        if not normalized_query:
+    def search_playbooks(
+        self, query: str, limit: int = PLAYBOOK_SEARCH_LIMIT
+    ) -> list[PlaybookMatch]:
+        question = query.strip()
+        if not question:
             raise HTTPException(status_code=422, detail="Search query must not be empty")
 
-        self.initialize_embeddings()
-        query_embedding = embed_texts([normalized_query])[0]
-        embeddings = self._embeddings or {}
+        embeddings = self.initialize_embeddings()
+        question_embedding = embed_texts([question])[0]
 
         ranked = sorted(
             (
-                (playbook_id, self._cosine_similarity(query_embedding, embedding))
+                (playbook_id, self._similarity(question_embedding, embedding))
                 for playbook_id, embedding in embeddings.items()
             ),
             key=lambda item: (-item[1], item[0]),
         )[:limit]
 
         return [
-            {"playbook": self.get_playbook(playbook_id), "score": score}
+            PlaybookMatch(playbook=self.get_playbook(playbook_id), score=score)
             for playbook_id, score in ranked
         ]
+
+    def initialize_embeddings(self) -> dict[str, list[float]]:
+        """Embed every playbook once, at startup or on the first search."""
+        if self._embeddings is not None:
+            return self._embeddings
+
+        with self._embedding_lock:
+            if self._embeddings is None:
+                playbooks = self.list_playbooks()
+                vectors = embed_texts(
+                    [self._embedding_text(playbook) for playbook in playbooks]
+                )
+                self._embeddings = {
+                    playbook.playbook_id: vector
+                    for playbook, vector in zip(playbooks, vectors, strict=True)
+                }
+            return self._embeddings
+
+    def _playbook_ids(self) -> list[str]:
+        try:
+            playbook_ids = list_child_dirs("playbooks")
+        except CatalogNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Playbook Catalog Not Found") from exc
+        except NotADirectoryError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        # Skip directories scaffolded for a playbook that is not written yet.
+        return [
+            playbook_id
+            for playbook_id in playbook_ids
+            if self._is_written(playbook_id)
+        ]
+
+    @staticmethod
+    def _is_written(playbook_id: str) -> bool:
+        playbook_file = CATALOG_ROOT / f"playbooks/{playbook_id}/playbook.yaml"
+        return (
+            playbook_file.is_file()
+            and playbook_file.read_text(encoding="utf-8").strip() != ""
+        )
+
+    @staticmethod
+    def _embedding_text(playbook: Playbook) -> str:
+        examples_text = "\n".join(playbook.examples)
+        return (
+            f"playbook_id: {playbook.playbook_id}\n"
+            f"name: {playbook.name}\n"
+            f"description: {playbook.description}\n"
+            f"examples:\n{examples_text}"
+        )
+
+    @staticmethod
+    def _similarity(left: list[float], right: list[float]) -> float:
+        # embed_texts returns L2-normalised vectors, so the dot product is the cosine.
+        return sum(a * b for a, b in zip(left, right, strict=True))
