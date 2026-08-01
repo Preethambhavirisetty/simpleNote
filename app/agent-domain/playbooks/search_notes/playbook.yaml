@@ -44,3 +44,21 @@ plans:
       - step: execute_operation
         operation: list_folders
       - step: aggregation
+
+  - name: browse_tags
+    description: >-
+      List the tags that exist in the workspace. Reading tags, not applying
+      them.
+    steps:
+      - step: execute_operation
+        operation: list_tags
+      - step: aggregation
+
+  - name: open_note
+    description: >-
+      Read one specific note back to the user when they identify the note
+      itself rather than describing a topic to search for.
+    steps:
+      - step: execute_operation
+        operation: get_note
+      - step: aggregation

@@ -577,3 +577,21 @@ Intent classifier  (lightweight: keyword rules + optional LLM)
 
 
 /catalog/validation, /playbooks, /playbooks/{id}, POST /playbooks/search, /operations[/{name}], /mappings[/{operation}], /steps[/{name}]. /mappings/{operation} is the per-call lookup execute_operation needs.
+
+
+integrations/domain.py + loaders/ — HTTP client for GET /catalog, cached at startup, hydrating the same pydantic models. This is the seam; everything else reads through it.
+state/state.py + schemas/playbook.py — the run state the graph threads through.
+routing/playbook_selector.py — POST /playbooks/search for candidates, then the LLM picks a playbook and a plan using prompts/playbook_selector.yaml.
+integrations/mcp.py + workflows/steps/execute_operation.py — mapping → tool call, with param.*/context.* binding and the requires_approval gate. The riskiest piece; worth doing early.
+The remaining 8 steps, then graph/ — builder, nodes, edges wiring a plan's steps into the graph.
+
+
+### Command to test playbook selector across 
+set -a && . ./.env && set +a &&   DOMAIN_API_BASE=http://127.0.0.1:8100   .venv/bin/python /tmp/claude-1000/-home-ubuntu-simpleNote/7daa9aa0-a663-44c7-9fa7-c360c254a939/scratchpad/live_selector.py
+
+
+GOOD: I tried eight representations (description only, examples only, multi-vector max, mean-of-top-2, plan descriptions included, mean-centering). The winner — one vector per example plus the description, scored max, with the corpus mean subtracted — gets 67%→78%. Nothing got past 78%. That's the ceiling for MiniLM-L6-v2 on this distinction, not a tuning gap.
+
+GOOD: Choosing LLM for the final pick is the right design, and this eval is the evidence for it: 98% recall@3 is a solid candidate list; 78% top-1 is a coin-flip you don't want to route on.
+
+GOOD: when the catalog does grow past 7, re-run the eval before trusting the cut — recall@3 = 98% is measured at 5 playbooks, and recall@7 out of 20 is a different question. 

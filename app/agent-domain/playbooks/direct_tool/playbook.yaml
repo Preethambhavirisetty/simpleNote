@@ -1,10 +1,13 @@
 playbook_id: direct_tool
 name: Direct Tool
 description: >-
-  Perform one explicit workspace action on a note, folder, or tag. Use this
-  playbook when the request is an instruction to create, update, move, delete,
-  or tag something rather than a question to answer. Each plan is a single
-  operation; destructive ones pause for approval before they run.
+  Change something in the workspace: create, update, move, delete, or re-tag a
+  note, folder, or tag. Use this playbook only when the request is an
+  instruction to modify the workspace. Requests that merely read or list
+  something belong to the search playbook, not here, and text the user pasted
+  into the conversation is not workspace content - rewriting or translating it
+  changes nothing and does not belong here either. Each plan performs a single
+  change, and destructive ones pause for approval before they run.
 examples:
   - Create a note called Sprint Retro in my Work folder.
   - Rename the folder Personal to Life Admin.
@@ -39,12 +42,6 @@ plans:
       - step: direct_tool
         operation: delete_note
 
-  - name: inspect_note
-    description: Open one known note and read it back to the user.
-    steps:
-      - step: direct_tool
-        operation: get_note
-
   - name: create_folder
     description: Create a new folder in the workspace.
     steps:
@@ -62,12 +59,6 @@ plans:
     steps:
       - step: direct_tool
         operation: delete_folder
-
-  - name: list_tags
-    description: Show the tags that already exist before tagging something.
-    steps:
-      - step: direct_tool
-        operation: list_tags
 
   - name: create_tag
     description: Create a new tag.

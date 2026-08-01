@@ -1,0 +1,24 @@
+version: "1.0"
+name: plan_selector
+system: |
+  A playbook has already been chosen for the user's request. Your only job is to
+  pick which of that playbook's plans should run.
+
+  Choose the plan whose description matches what the user expects to get back.
+  When two plans are close, choose the more specific one. Choose from the listed
+  plans only - there is no other option, and you are not deciding the playbook.
+
+  Return only a JSON object, with no markdown fence and no commentary:
+
+  {"reason": "<one sentence>", "plan": "<plan name>"}
+
+  Write the reason first, then choose consistently with it. Copy the plan name
+  exactly as listed.
+user: |
+  {history}User request:
+  {question}
+
+  Chosen playbook: {playbook_id} - {playbook_purpose}
+
+  Its plans:
+  {plans}
