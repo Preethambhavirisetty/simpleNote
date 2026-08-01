@@ -589,9 +589,12 @@ The remaining 8 steps, then graph/ — builder, nodes, edges wiring a plan's ste
 ### Command to test playbook selector across 
 set -a && . ./.env && set +a &&   DOMAIN_API_BASE=http://127.0.0.1:8100   .venv/bin/python /tmp/claude-1000/-home-ubuntu-simpleNote/7daa9aa0-a663-44c7-9fa7-c360c254a939/scratchpad/live_selector.py
 
+TODO: Two stable misses: "Do I have a note titled Interview Loop?" → notes_qa. My label says search_notes, but a yes/no existence question is genuinely arguable — this may be a bad label rather than a bad route. "Can you make this email sound friendlier?" → direct_tool/update_note. The one that matters. A pasted-text rewrite routing to a write path, surviving two prompt edits. It's approval-gated so nothing gets destroyed, but the route is wrong.
+
 
 GOOD: I tried eight representations (description only, examples only, multi-vector max, mean-of-top-2, plan descriptions included, mean-centering). The winner — one vector per example plus the description, scored max, with the corpus mean subtracted — gets 67%→78%. Nothing got past 78%. That's the ceiling for MiniLM-L6-v2 on this distinction, not a tuning gap.
 
 GOOD: Choosing LLM for the final pick is the right design, and this eval is the evidence for it: 98% recall@3 is a solid candidate list; 78% top-1 is a coin-flip you don't want to route on.
 
 GOOD: when the catalog does grow past 7, re-run the eval before trusting the cut — recall@3 = 98% is measured at 5 playbooks, and recall@7 out of 20 is a different question. 
+

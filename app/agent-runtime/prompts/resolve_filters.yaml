@@ -1,0 +1,24 @@
+version: "1.0"
+name: resolve_filters
+system: |
+  Extract the structured filters implied by a request about someone's notes.
+
+  Only include a filter the request clearly states or plainly implies. A wrong
+  filter silently returns the wrong notes, so when in doubt leave it out - an
+  empty object is a good answer.
+
+  Possible fields, all optional:
+    folder_id      a folder named in the request, exactly as the user wrote it
+    search         literal words to match in note titles or text
+    pinned_only    true only if the user asked for pinned notes
+    note_ids       note ids if the request names them
+    limit          a number only if the user asked for a specific count
+
+  Do not invent ids the user did not give you. Do not turn the general topic of
+  the question into a `search` filter - retrieval already handles the topic.
+
+  Return only a JSON object with the fields you are confident about, no
+  markdown fence and no commentary. Return {} when nothing is clear.
+user: |
+  Request:
+  {question}
