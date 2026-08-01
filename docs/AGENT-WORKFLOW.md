@@ -991,3 +991,63 @@ Truncation exists to bound large tool results, not to shrink small ones. A strin
 ## 168. Action Controller (Per-Stage Testing)
 
 Alongside the run, stream, and resume endpoints, an action endpoint runs one isolated pipeline stage per call for manual or Postman testing. It can load and inspect a configuration (with secrets redacted), validate a request, build initial state, check the fast path, resolve or apply an exploration profile, parse planner or reviewer markdown, exercise truncation and scoring, evaluate a routing function, or run any single node against scripted mock providers. It is the tool for verifying one node's behavior in isolation without driving the whole graph, and it enumerates its own supported actions.
+
+## 169. LLM Route Classifier
+
+Beyond the deterministic fast path, the runtime can run one small classification call before the graph starts. The classifier sees the user question, a bounded slice of recent conversation, the semantic tool-search results for the question, the session's remembered entities, and the agent's playbook catalog. It returns one of four routes: direct, simple, complex, or playbook. The classifier is opt-in per configuration (the exploration profiles enable it) and fails safe — any error, unparseable output, or disallowed verdict falls back to complex, the full pipeline.
+
+The tool search the classifier performs is not wasted: its results seed the executor's candidate tools, so on most runs the first discovery turn disappears and the classification call largely pays for itself.
+
+## 170. Routes And Their Effects
+
+Direct means no tools are needed at all — questions about the agent itself, greetings, thanks, or rephrasing. The runtime answers immediately from the agent identity and tool manifest with no graph and no tools. Simple means at most a couple of tool calls: the planner is skipped in favor of a single-step plan, the executor runs with a tightened budget, the reviewer is skipped, and the answer is synthesized normally. Complex is the full deep pipeline exactly as before routing existed. Playbook installs a pre-authored plan template and runs the full pipeline over it.
+
+When the caller forces deep exploration, the classifier is restricted to complex and playbook (and skipped entirely when no playbooks exist). A turn that requires fresh tool evidence — a follow-up under the recall policy, or a caller flag — can never be routed direct; the same guard the fast path applies.
+
+## 171. Playbooks
+
+A playbook is a configuration-defined plan template: steps in the same shape the planner produces (title, action, tool hint, stop condition, required tools), plus a match rule and an evidence contract. The runtime supports two complementary playbook sources.
+
+The first is a **deterministic YAML recipe** (`playbooks/*.yaml`) matched by claim class and topic words. It runs *before* the LLM route classifier: when a recipe matches, the run is routed complex and the planner installs the recipe's steps directly, tagging any step marked `require_row_level` and stamping the plan's `evidence_required` contract. This keeps app-specific procedures (which dashboard, which tokens, what "done" means) out of framework code and out of the model's discretion — a catalog request can never be silently downgraded to a shallow path.
+
+The second is a **classifier-selected template** (`policy.playbooks`) matched semantically by the LLM router against each playbook's description, used when no deterministic recipe applies.
+
+Either way the planner call is skipped (the procedure was authored by a human), the reviewer still verifies, and reviewer-driven re-exploration can still extend the plan. Playbooks pin the procedure, not the answer, and do not restrict what else the agent can answer — unmatched questions route normally.
+
+## 172. Agent Identity
+
+Identity is a short configuration text stating who the agent is, what it can do in user terms, and what is out of scope. It is appended to every role's system prompt (grounding scope decisions and refusals) and it powers direct answers to questions like "who are you" and "what can you do". Agents created dynamically from a UI can set it explicitly; when it is absent, the runtime composes a fallback from the agent name and the discovered tools' descriptions, so even an agent with no configured identity describes itself truthfully from its manifest.
+
+## 173. Conversation Memory
+
+Conversation memory is a small per-session slot map of established entities, captured deterministically at the end of each turn and stored per session (Redis when configured, bounded in-process otherwise). It is injected into prompts only on follow-up turns and cleared when a new topic starts. Every slot keeps a bounded history of superseded values, so switching from one entity to another does not forget the first ("compare with the first one" still resolves).
+
+Slots are captured from three generic sources, no app-specific values hard-coded: the arguments of successful tool calls (keyed by argument name); the entities inside result payloads (items under generic collection keys like `items`/`rows`/`results`, keyed by generic identity keys like `name`/`id`/`title`); and the user's own phrasing, which yields three special slots — `active_entity` (the specific resource the user named this turn, with its inferred type), `active_collection` (what kind of thing the turn is about), and `output_shape` (table, list, count) so a follow-up keeps the format the user asked for. These special slots are pinned so the recency cap never evicts them.
+
+Memory feeds five consumers: follow-up detection (naming a remembered entity — current or superseded — makes a turn a follow-up even when no phrasing pattern matches); the route classifier (terse follow-ups classify with real entity context); prompt context for planner, executor, and synthesizer; deterministic argument repair (the active entity fills a missing `name`, the output shape fills a missing `format`); and direct answers. A sanitized bounded `memory_preview` exposes the slot map for observability without leaking unbounded content.
+
+## 174. Cross-Turn Evidence: Memory-First
+
+Earlier revisions reused a prior turn's raw artifacts as answer evidence. That proved too coarse — reusing a `list_dashboards` result when the follow-up actually asks about *panels* short-circuits the deeper drill-down — so cross-turn artifact persistence is disabled and continuity is carried by conversation memory instead. Memory remembers *what the conversation established* (the active dashboard, the requested format) rather than *the bytes a tool returned*, which is the right granularity for follow-ups: the next turn re-runs the right tool with the remembered entity already filled in, instead of answering from stale coarse evidence. The persistence machinery remains in the codebase behind its flag for future use.
+
+## 175. Executor Guidance Loop
+
+Every guard that rejects an executor action — invalid tool arguments, duplicate calls, budget exhaustion, unmet stop conditions, unknown actions — records a plain-language correction that is injected into the next executor prompt as "corrections from your last action". Without this the model repeats the rejected action verbatim, especially under greedy sampling. Guidance is rebuilt each turn, so a clean action clears stale corrections.
+
+## 176. Deterministic Argument Repair
+
+When a tool call is missing a required argument, the runtime first tries to fill it deterministically by exact parameter name from values the session already holds: arguments of prior successful calls, remembered memory slots, and — when a result payload contains exactly one unambiguous value under that name — recent tool results. Ambiguity is never guessed; schema validation always re-runs after a fill. This turns "call the tokens tool (missing: name)" into an executed call instead of burning model turns asking it to restate a value it already produced.
+
+## 177. Action Recovery And Loop Escapes
+
+Models sometimes emit a tool name in the action field itself; the executor recovers that as a proper tool call rather than letting it fall through to a draft. Unknown actions receive guidance instead of silently becoming drafts. Repeated identical invalid calls are deduplicated by the same signature guard that catches repeated successful calls. And when finish-blocking guards have vetoed progress for the configured stall window, the arbitration rule lets the step advance rather than burn the remaining budget — bounded escapes for every loop shape observed in production traces.
+
+## 178. Claim Classes And The Evidence Contract
+
+Questions are classified by the evidence they need: discovery (enumerate catalog resources — metadata is the answer), listing (enumerate data rows), scalar, threshold, and existence (row-backed data claims). The classification serves two roles. First, it selects a deterministic playbook (each recipe declares which claim classes it answers). Second, it feeds the row-level evidence gate that stops a draft from claiming live values it never fetched.
+
+Crucially, the gate does not re-derive the requirement from the query when a plan is present: it reads the plan's own contract first — a selected playbook stamps `evidence_required: row_level` and marks its data steps `require_row_level`, and the gate keys off that. The query-level claim classifier is only the fallback for runs with no playbook. So the evidence requirement flows from configuration (the playbook YAML) through the plan to the gate, and the regex claim classifier is a default, not the source of truth. A discovery question stays answerable from list and search results alone; deterministic consistency checks still compare draft numbers and threshold claims against the returned rows so a draft cannot assert values no row supports. Priority resources to name first in discovery answers come from configuration, never framework code.
+
+## 179. Structured Run Logging
+
+Every graph step, run boundary, routing decision, memory update, and follow-up reuse can be streamed asynchronously to Splunk HEC by a background sink with a bounded queue that drops rather than blocks. The run itself never waits on logging, and disabling the sink turns all of it into no-ops.
