@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 
+from config import MUTATIONS_DISABLED_MESSAGE, MUTATIONS_ENABLED
 from graph.context import STEP_RUNNERS, RunContext
 from graph.validators import plan_problems
 from integrations.domain import DomainUnavailableError
+from utils import CatalogLookupError
 from state.state import RunState, StepRun
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,16 @@ def route(state: RunState, context: RunContext) -> RunState:
             "llm_calls": selection.llm_calls,
         },
     )
+
+    if not MUTATIONS_ENABLED and _mutates(state, context):
+        # Decline before running anything, rather than retrieving candidates
+        # for an action that cannot happen. The routing decision is still
+        # recorded, so this stays visible in logs and evals.
+        log.info("declined mutating plan", extra={"plan": state.plan_name})
+        state.answer = MUTATIONS_DISABLED_MESSAGE
+        state.phase = "done"
+        return state
+
     state.phase = "executing"
     return state
 
@@ -127,6 +139,30 @@ def fail(state: RunState, context: RunContext) -> RunState:
             "I could not complete that request. " + "; ".join(state.errors[-2:])
         )
     return state
+
+
+def _mutates(state: RunState, context: RunContext) -> bool:
+    """Whether this plan would change the workspace.
+
+    Read from the mapping rather than a list of names here: the domain already
+    says which operations are destructive, and a new one added there must not
+    slip past this gate because the runtime never heard of it.
+    """
+    plan = context.playbooks.get_plan(state.playbook_id, state.plan_name)
+    for step in plan.steps:
+        if step.step != "direct_tool" or not step.operation:
+            continue
+        try:
+            mapping = context.operations.get_mapping(step.operation)
+        except CatalogLookupError:
+            return True  # unknown mapping on a direct_tool step: assume it acts
+        if mapping.destructive or mapping.requires_approval or _writes(step.operation):
+            return True
+    return False
+
+
+def _writes(operation: str) -> bool:
+    return operation.startswith(("create_", "update_", "delete_", "move_", "add_", "remove_"))
 
 
 def _just_approved(state: RunState) -> bool:

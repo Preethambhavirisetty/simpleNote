@@ -598,3 +598,8 @@ GOOD: Choosing LLM for the final pick is the right design, and this eval is the 
 
 GOOD: when the catalog does grow past 7, re-run the eval before trusting the cut — recall@3 = 98% is measured at 5 playbooks, and recall@7 out of 20 is a different question. 
 
+
+
+MY IDEA:
+integrate langgraph, keep playbook selector, executor, reviewer as nodes; executor simply takes the plan's steps and executes one by one and updates state accordingly, once the steps are completed, then it goes to summarizer(drafts the answer), then to reviewer(rules come from playbook again), if reviewer says ok true cool otherwise retriggers summarizer to improve the answer based on a reviewer feedback, if improved then streams the answer. here executor is dumb. may be in direct_tool route, we can add executor tool loops, right? what happens if user asks multiple questions in a singe question?
+

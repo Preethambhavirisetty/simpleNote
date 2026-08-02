@@ -45,3 +45,17 @@ MCP_SERVERS = {
     if name.strip() and url.strip()
 }
 MCP_TIMEOUT = float(require_env("MCP_TIMEOUT", "60"))
+
+# Off until a run can pause for approval and resume through the API. Routing
+# still selects the mutating playbook, so logs and evals stay honest; the plan
+# just declines instead of acting. Flip to "true" when resume exists.
+MUTATIONS_ENABLED = require_env("MUTATIONS_ENABLED", "false").lower() == "true"
+MUTATIONS_DISABLED_MESSAGE = require_env(
+    "MUTATIONS_DISABLED_MESSAGE",
+    "I can't change your notes yet - creating, editing, moving, deleting, and "
+    "tagging are still being built. For now I can find things and answer "
+    "questions from your notes.",
+)
+
+# Shared secret the orchestrator sends as X-API-Key. Empty disables the check.
+AGENT_API_KEY = require_env("AGENT_WORKFLOW_API_KEY", "")
