@@ -27,18 +27,24 @@ plans:
       Change a note's title, description, body, folder, pinned state, or
       memory-inclusion flag.
     steps:
+      - step: semantic_search
+        operation: locate_notes
       - step: direct_tool
         operation: update_note
 
   - name: move_note
     description: Move a note into a different folder.
     steps:
+      - step: semantic_search
+        operation: locate_notes
       - step: direct_tool
         operation: move_note
 
   - name: delete_note
     description: Delete a note from the workspace.
     steps:
+      - step: semantic_search
+        operation: locate_notes
       - step: direct_tool
         operation: delete_note
 
@@ -51,12 +57,16 @@ plans:
   - name: update_folder
     description: Rename a folder or change its pinned state.
     steps:
+      - step: execute_operation
+        operation: list_folders
       - step: direct_tool
         operation: update_folder
 
   - name: delete_folder
     description: Delete a folder and the indexing of the notes inside it.
     steps:
+      - step: execute_operation
+        operation: list_folders
       - step: direct_tool
         operation: delete_folder
 
@@ -69,23 +79,31 @@ plans:
   - name: update_tag
     description: Rename an existing tag.
     steps:
+      - step: execute_operation
+        operation: list_tags
       - step: direct_tool
         operation: update_tag
 
   - name: delete_tag
     description: Delete a tag from the workspace.
     steps:
+      - step: execute_operation
+        operation: list_tags
       - step: direct_tool
         operation: delete_tag
 
   - name: add_tag_to_note
     description: Attach an existing tag to a note.
     steps:
+      - step: semantic_search
+        operation: locate_notes
       - step: direct_tool
         operation: add_tag_to_note
 
   - name: remove_tag_from_note
     description: Remove a tag from a note.
     steps:
+      - step: semantic_search
+        operation: locate_notes
       - step: direct_tool
         operation: remove_tag_from_note

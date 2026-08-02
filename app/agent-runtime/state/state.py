@@ -41,6 +41,27 @@ class RuntimeContext(BaseModel):
         }
 
 
+class PendingApproval(BaseModel):
+    """A run paused for the user, either to confirm or to choose a target.
+
+    Two shapes, one pause. `call` set means everything is resolved and the user
+    is confirming a destructive action. `parameter` set means the operation
+    needs an id nobody has supplied, and `choices` are the candidates found so
+    far - the user picks rather than the runtime guessing, which is the whole
+    point on a delete.
+    """
+
+    operation: str
+    reason: str
+    call: ToolCall | None = None
+    parameter: str | None = None
+    choices: list[dict[str, Any]] = Field(default_factory=list)
+
+    @property
+    def needs_choice(self) -> bool:
+        return self.call is None
+
+
 class StepRun(BaseModel):
     """What one step of the plan did, kept so later steps can read it."""
 
@@ -49,6 +70,9 @@ class StepRun(BaseModel):
     call: ToolCall | None = None
     output: Any = None
     error: str | None = None
+    # A step that stopped to ask the user something did not fail; it will run
+    # again on resume, and must not be reported as an error of the run.
+    paused: bool = False
 
     @property
     def ok(self) -> bool:
@@ -71,14 +95,20 @@ class RunState(BaseModel):
     # Execution.
     filters: dict[str, Any] = Field(default_factory=dict)
     steps: list[StepRun] = Field(default_factory=list)
-    pending_approval: ToolCall | None = None
+    pending_approval: PendingApproval | None = None
+    # Index of the plan step to run next; a resumed run picks up here.
+    cursor: int = 0
 
     answer: str | None = None
+    # Records behind the answer, for a UI that shows notes rather than prose.
+    structured: list[Any] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # Set when the user approved an operation, so the resumed step may run it.
+    approved_operation: str | None = None
 
     def record(self, run: StepRun) -> None:
         self.steps.append(run)
-        if run.error:
+        if run.error and not run.paused:
             self.errors.append(f"{run.step}: {run.error}")
 
     def outputs(self, step: str) -> list[Any]:
