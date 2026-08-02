@@ -636,24 +636,24 @@ cd frontend && npm run dev
 
 - change embedding in agent-domain to use remote embeddings instead; - DONE
 - sentence transformers clean up - DONE
-- review ingestion pipeline; - INPROGRESS
-- Replace tiktoken with inference's tokenizer
-- move all under app folder
-- stream activity; tokens - 
-- multi questions; inference review;
-- error handling; UI + BE; predefined failure messages streamed
-- Perform tests with more notes
-- dev vs prod
-- evals, tests
+- review ingestion pipeline; - DONE
+- move all under app folder - DONE
+- error handling; UI + BE; predefined failure messages streamed - INPROGRESS
+- langgraph
 - @notename, talks about that only
 - memory management
 - citation
 - security + PII
-- langgraph
+- Perform tests with more notes
 - GHA piplines
+- evals, tests
+- dev vs prod
 
+- multi questions; inference review;
+- stream activity; tokens - 
 - improve chat UI styles
 - improve UI overall
+- Replace tiktoken with inference's tokenizer
 - change LLM model to qwen or llama bigger one?
 - setup db, vector store, redis monitoring; monitor chunks, runs e2e
 

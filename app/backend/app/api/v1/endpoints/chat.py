@@ -3,9 +3,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.core.config import AGENT_API_KEY, AGENT_INTERNAL_URL
+from app.exceptions.base import AppException
+from app.schema.base import ErrorCode
 from app.core.feature_flags import require_feature
 from app.deps.auth import get_current_user
-from app.logger import get_trace_id
+from app.logger import get_trace_id, logger
 from app.schema.conversation import ChatStreamRequest
 
 
@@ -20,6 +22,26 @@ def _agent_payload(payload: ChatStreamRequest, current_user) -> dict:
         "role": "admin" if role_values.intersection({"admin", "admin_user"}) else "user",
     })
     return agent_payload
+
+
+_UPSTREAM_FAILURES = {
+    401: ("Your session could not be verified. Please sign in again.", ErrorCode.UNAUTHORIZED),
+    403: ("Your session could not be verified. Please sign in again.", ErrorCode.UNAUTHORIZED),
+    422: ("That request could not be understood. Please rephrase and try again.", ErrorCode.VALIDATION_ERROR),
+    429: ("Too many requests at once. Please wait a few seconds and try again.", ErrorCode.RATE_LIMITED),
+    504: ("That took too long to answer. Please try again, or ask something narrower.", ErrorCode.MODEL_TIMEOUT),
+}
+
+
+def _upstream_failure(status: int) -> tuple[str, ErrorCode]:
+    if status in _UPSTREAM_FAILURES:
+        return _UPSTREAM_FAILURES[status]
+    if 500 <= status <= 599:
+        return (
+            "The assistant is not reachable right now. Please try again in a moment.",
+            ErrorCode.AGENT_UNAVAILABLE,
+        )
+    return ("Something went wrong on our end. Please try again.", ErrorCode.INTERNAL_ERROR)
 
 
 async def _proxy_agent_stream(agent_payload: dict) -> StreamingResponse:
@@ -39,16 +61,27 @@ async def _proxy_agent_stream(agent_payload: dict) -> StreamingResponse:
         response = await client.send(request, stream=True)
     except httpx.RequestError as exc:
         await client.aclose()
-        raise HTTPException(status_code=503, detail="Agent service unavailable") from exc
+        # AppException so this leaves through the same envelope as every other
+        # backend failure - the browser reads error.code, not prose.
+        raise AppException(
+            message="The assistant is not reachable right now. Please try again in a moment.",
+            status_code=503,
+            error_code=ErrorCode.AGENT_UNAVAILABLE,
+        ) from exc
 
     if response.is_error:
         detail = await response.aread()
+        status = response.status_code
         await response.aclose()
         await client.aclose()
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=detail.decode(errors="replace") or "Agent request failed",
+        # Upstream body is for the logs; the client gets a code it can switch
+        # on and copy it can show.
+        message, code = _upstream_failure(status)
+        logger.warning(
+            "agent_upstream_error", status_code=status,
+            detail=detail.decode(errors="replace")[:300],
         )
+        raise AppException(message=message, status_code=status, error_code=code)
 
     async def iter_events():
         try:

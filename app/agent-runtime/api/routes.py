@@ -20,8 +20,10 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+import failures
 from config import AGENT_API_KEY
 from graph import builder
+from graph.nodes import classify_state
 from graph.context import RunContext
 from integrations import observability as obs
 from integrations.domain import DomainUnavailableError, load_catalog
@@ -66,7 +68,10 @@ class RunRequest(BaseModel):
 
 def _authorise(api_key: str | None) -> None:
     if AGENT_API_KEY and api_key != AGENT_API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(
+            status_code=failures.AUTH_REQUIRED.http_status,
+            detail=failures.AUTH_REQUIRED.payload(),
+        )
 
 
 def _history(request: RunRequest) -> list[Message]:
@@ -116,9 +121,19 @@ def _summary(state: RunState) -> dict[str, Any]:
         "phase": state.phase,
     }
     if state.errors:
-        payload["error"] = "; ".join(state.errors)
+        # `error` stays a plain string for existing consumers; `failure` is the
+        # structured form the UI reads.
+        detail = "; ".join(state.errors)
+        payload["error"] = detail
+        payload["failure"] = failures.get(state.failure_code).payload(detail)
+    elif state.failure_code:
+        # A refusal is not an error - the run succeeded at deciding not to act -
+        # but the client still needs the code to render it as a refusal rather
+        # than as an ordinary answer.
+        payload["failure"] = failures.get(state.failure_code).payload()
     if state.pending_approval is not None:
         payload["pending_approval"] = state.pending_approval.model_dump()
+        payload["failure"] = failures.APPROVAL_REQUIRED.payload()
     return payload
 
 
@@ -135,7 +150,19 @@ def run_agent(
     try:
         state = _start(request)
     except DomainUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=failures.DOMAIN_UNAVAILABLE.http_status,
+            detail=failures.DOMAIN_UNAVAILABLE.payload(str(exc)),
+        ) from exc
+    except Exception as exc:
+        # Anything unhandled here used to leave as a bare 500 with an empty
+        # body, so the caller learned nothing. Classify it like the stream
+        # path does; the raw cause stays in the log and in `detail`.
+        failure = failures.classify(exc)
+        log.exception("run failed", extra={"failure_code": failure.code})
+        raise HTTPException(
+            status_code=failure.http_status, detail=failure.payload(str(exc))
+        ) from exc
     return _summary(state)
 
 
@@ -155,6 +182,18 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
+def _fail(failure: failures.Failure, exc: BaseException) -> Iterator[str]:
+    """Terminate a stream with one failure, in the shape every service uses.
+
+    Both events carry it: `error` is what a live client renders, and `done`
+    repeats it so a consumer that only reads the terminal event - or replays
+    the persisted message later - sees the same code and copy.
+    """
+    body = failure.payload(str(exc))
+    yield _sse("error", body)
+    yield _sse("done", {"answer": "", "error": failure.message, "failure": body})
+
+
 def _events(request: RunRequest) -> Iterator[str]:
     """Emit progress, then one terminal `done`.
 
@@ -166,13 +205,11 @@ def _events(request: RunRequest) -> Iterator[str]:
         state = _start(request)
     except DomainUnavailableError as exc:
         log.warning("domain unavailable", exc_info=True)
-        yield _sse("error", {"message": str(exc)})
-        yield _sse("done", {"answer": "", "error": str(exc)})
+        yield from _fail(failures.DOMAIN_UNAVAILABLE, exc)
         return
     except Exception as exc:  # a failed run must still close the stream
         log.exception("run failed")
-        yield _sse("error", {"message": str(exc)})
-        yield _sse("done", {"answer": "", "error": str(exc)})
+        yield from _fail(failures.classify(exc), exc)
         return
 
     yield _sse(
@@ -196,6 +233,7 @@ def _events(request: RunRequest) -> Iterator[str]:
             "approval_required",
             {
                 "tool": state.pending_approval.operation,
+                **failures.APPROVAL_REQUIRED.payload(),
                 **state.pending_approval.model_dump(),
             },
         )

@@ -103,6 +103,9 @@ class RunState(BaseModel):
     # Records behind the answer, for a UI that shows notes rather than prose.
     structured: list[Any] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+    # Set when the run ends on a catalogued failure or refusal, so the API can
+    # report the same code the UI switches on.
+    failure_code: str | None = None
     # Set when the user approved an operation, so the resumed step may run it.
     approved_operation: str | None = None
 

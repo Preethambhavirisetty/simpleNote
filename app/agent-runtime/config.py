@@ -2,6 +2,8 @@ import os
 
 from dotenv import load_dotenv
 
+import failures
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -17,7 +19,14 @@ def require_env(key: str, default:str=None) -> str:
     return value
 
 
-LLM_API_BASE = require_env("LLM_API_BASE")
+# One host serves the LLM (8001) and embeddings/reranking (8003), matching
+# orchestrator/app/core/config.py. Pinning a full URL here is how this service
+# ended up on a dead IP while the orchestrator had already moved.
+EC2_INFERENCE_BASE_IP = require_env("EC2_INFERENCE_BASE_IP", "")
+LLM_API_BASE = require_env(
+    "LLM_API_BASE",
+    f"http://{EC2_INFERENCE_BASE_IP}:8001/v1" if EC2_INFERENCE_BASE_IP else "",
+)
 LLM_API_KEY = require_env("LLM_API_KEY")
 LLM_SUMMARIZER_MODEL = require_env("LLM_SUMMARIZER_MODEL")
 
@@ -50,11 +59,10 @@ MCP_TIMEOUT = float(require_env("MCP_TIMEOUT", "60"))
 # still selects the mutating playbook, so logs and evals stay honest; the plan
 # just declines instead of acting. Flip to "true" when resume exists.
 MUTATIONS_ENABLED = require_env("MUTATIONS_ENABLED", "false").lower() == "true"
+# The refusal wording lives in the shared catalog so the runtime, the stream,
+# and the persisted message all say the same thing.
 MUTATIONS_DISABLED_MESSAGE = require_env(
-    "MUTATIONS_DISABLED_MESSAGE",
-    "I can't change your notes yet - creating, editing, moving, deleting, and "
-    "tagging are still being built. For now I can find things and answer "
-    "questions from your notes.",
+    "MUTATIONS_DISABLED_MESSAGE", failures.ACTION_NOT_SUPPORTED.message
 )
 
 # Shared secret the orchestrator sends as X-API-Key. Empty disables the check.

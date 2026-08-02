@@ -16,6 +16,7 @@ Three properties this must have, in order of importance:
 from __future__ import annotations
 
 import logging
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
@@ -159,13 +160,37 @@ def track(**values: Any) -> None:
 
 @contextmanager
 def timed(phase: str, message: str, **track_values: Any):
+    """Time a block. A failure in the timer must not disturb the block.
+
+    Enter and exit are handled explicitly rather than with a nested `with`:
+    wrapping the yield in try/except would catch exceptions raised by the
+    *body* and yield a second time, which a generator-based context manager
+    may not do - it surfaces as "generator didn't stop after throw()" and
+    hides the real error. The body's exception must pass straight through.
+    """
     run = current()
     try:
-        with run.timed(phase, message, **track_values) as handle:
-            yield handle
+        manager = run.timed(phase, message, **track_values)
+        handle = manager.__enter__()
     except Exception:
-        # A broken timer must not swallow or mask the work inside the block.
+        _log.debug("agentlog timer unavailable", exc_info=True)
         yield _NullTimed()
+        return
+
+    try:
+        yield handle
+    except BaseException:
+        # Let the timer record the failed span, then re-raise unchanged.
+        try:
+            manager.__exit__(*sys.exc_info())
+        except Exception:
+            _log.debug("agentlog timer exit failed", exc_info=True)
+        raise
+    else:
+        try:
+            manager.__exit__(None, None, None)
+        except Exception:
+            _log.debug("agentlog timer exit failed", exc_info=True)
 
 
 def preview(value: Any, limit: int = 400) -> Any:

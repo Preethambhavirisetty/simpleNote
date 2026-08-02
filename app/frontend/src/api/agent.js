@@ -19,7 +19,17 @@ export async function streamChat({ body, signal, endpoint = '/api/chat/stream', 
 
     if (!response.ok) {
       const payload = await response.json().catch(() => null)
-      throw new Error(payload?.message ?? payload?.detail ?? ('Chat request failed with ' + response.status))
+      // The backend envelope is {success, message, error: {code}}; keep the
+      // code so the UI can act on it instead of parsing the sentence.
+      const detail = payload?.detail
+      const failure = {
+        code: payload?.error?.code ?? detail?.code ?? statusCode(response.status),
+        message: payload?.message ?? detail?.message ?? 'Something went wrong. Please try again.',
+        retryable: detail?.retryable ?? response.status >= 500,
+      }
+      const error = new Error(failure.message)
+      error.failure = failure
+      throw error
     }
 
     if (!response.body) throw new Error('Chat response did not include a stream')
@@ -61,11 +71,24 @@ function handleEvent(part, handlers) {
     const payload = JSON.parse(data)
     if (event === 'meta') handlers.onMeta?.(payload)
     else if (event === 'delta') handlers.onDelta?.(payload.content ?? '')
-    else if (event === 'error') handlers.onError?.(new Error(payload.message))
+    else if (event === 'error') {
+      // Carries {code, message, retryable} from the shared catalog; the Error
+      // message stays human-readable for logs and for older handlers.
+      const error = new Error(payload.message ?? 'Something went wrong. Please try again.')
+      error.failure = payload
+      handlers.onError?.(error)
+    }
     else if (event === 'done') handlers.onDone?.(payload)
   } catch {
     // Ignore malformed SSE events and continue consuming the stream.
   }
+}
+
+function statusCode(status) {
+  if (status === 401 || status === 403) return 'AUTH_REQUIRED'
+  if (status === 429) return 'RATE_LIMITED'
+  if (status >= 500) return 'AGENT_UNAVAILABLE'
+  return 'UNKNOWN'
 }
 
 function isAbortError(error) {

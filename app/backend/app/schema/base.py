@@ -13,3 +13,16 @@ class ErrorCode(str, Enum):
     INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
     NOT_FOUND = "NOT_FOUND"
     DUPLICATE_ENTRY = "DUPLICATE_ENTRY"
+    # Agent/chat path. These mirror app/shared/failures.py so a failure keeps
+    # the same code whether it is raised here or streamed up from the
+    # orchestrator; app/shared/test_failures_in_sync.py checks they agree.
+    AGENT_UNAVAILABLE = "AGENT_UNAVAILABLE"
+    MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+    MODEL_TIMEOUT = "MODEL_TIMEOUT"
+    RATE_LIMITED = "RATE_LIMITED"
+    RETRIEVAL_UNAVAILABLE = "RETRIEVAL_UNAVAILABLE"
+    TOOL_UNAVAILABLE = "TOOL_UNAVAILABLE"
+    TOOL_FAILED = "TOOL_FAILED"
+    ACTION_NOT_SUPPORTED = "ACTION_NOT_SUPPORTED"
+    APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"

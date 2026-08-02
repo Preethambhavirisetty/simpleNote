@@ -4,6 +4,7 @@ import { conversationsApi } from '@/api/conversations'
 import { streamChat } from '@/api/agent'
 import { useAuthStore } from './authStore'
 import { useFeatureFlagStore } from './featureFlagStore'
+import { toFailure } from '../lib/failures'
 
 let activeStreamController = null
 let requestedConversationId = null
@@ -180,13 +181,18 @@ export const useChatStore = create(
           },
 
           onError: (err) => {
-            console.error('[chatStore] sendMessage failed:', err)
+            const failure = toFailure(err)
+            console.error('[chatStore] sendMessage failed:', failure.code, err)
             _updateLastMsg(set, {
-              content: _friendlyErrorMessage(err),
+              content: failure.message,
               isStreaming: false,
               isError: true,
+              // Kept so the UI can offer "try again" only when a retry could
+              // work, and prompt a sign-in when the session is the problem.
+              failureCode: failure.code,
+              retryable: failure.retryable,
             })
-            set({ isStreaming: false, error: err.message })
+            set({ isStreaming: false, error: failure.message, failureCode: failure.code })
           },
         })
         if (activeStreamController === streamController) activeStreamController = null
@@ -216,23 +222,16 @@ function _updateLastMsg(set, patch) {
   }))
 }
 
+/**
+ * The server already decided what the user should read; this only unwraps it.
+ *
+ * It used to substring-match raw exception text to guess a message, which
+ * meant any upstream rewording silently downgraded a precise failure to
+ * "Something went wrong". Services now send {code, message, retryable} from
+ * app/shared/failures.py.
+ */
 function _friendlyErrorMessage(err) {
-  const message = err?.message?.toLowerCase() ?? ''
-  if (message.includes('401') || message.includes('403')) {
-    return 'Your chat session could not be verified. Please sign in again.'
-  }
-  if (
-    message.includes('failed to fetch')
-    || message.includes('network')
-    || message.includes('chat request failed with 5')
-    || message.includes('temporarily unavailable')
-  ) {
-    return 'Something went wrong on our end. Please try again.'
-  }
-  if (message.includes('inference')) {
-    return 'The AI response service is not running. Start the full app and try again.'
-  }
-  return 'Something went wrong. Please try again.'
+  return toFailure(err).message
 }
 
 function _cancelActiveStream(set) {

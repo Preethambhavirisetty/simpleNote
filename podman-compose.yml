@@ -274,6 +274,7 @@ services:
       - ./app/agent-runtime/workflows:/app/workflows:ro
       - ./app/agent-runtime/prompts:/app/prompts:ro
       - ./app/agent-runtime/config.py:/app/config.py:ro
+      - ./app/agent-runtime/failures.py:/app/failures.py:ro
       - ./app/agent-runtime/utils.py:/app/utils.py:ro
     expose:
       - "8200"

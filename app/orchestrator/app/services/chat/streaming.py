@@ -7,6 +7,8 @@ from collections.abc import Iterator
 from typing import Any
 
 import httpx
+
+from app.shared import failures
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -172,8 +174,8 @@ class StreamingService:
                             elif event_name in {"approval_required", "pending_approval"}:
                                 pending_approval = payload
                                 events.append(f"agent_workflow.approval_required {payload.get('tool')}")
-                                error_message = "Agent workflow paused for tool approval."
-                                yield _sse("error", {"message": error_message})
+                                error_message = failures.APPROVAL_REQUIRED.message
+                                yield _sse("error", failures.APPROVAL_REQUIRED.payload())
                                 break
                             elif event_name == "done":
                                 answer = str(payload.get("answer") or "")
@@ -187,22 +189,39 @@ class StreamingService:
                                     pending_approval = payload["pending_approval"]
                                 thread_id = payload.get("thread_id") or thread_id
                                 if payload.get("error"):
-                                    error_message = str(payload.get("error"))
+                                    # The runtime already catalogued this; pass
+                                    # its code and copy through rather than
+                                    # re-deriving a vaguer one here.
+                                    upstream = payload.get("failure") or {}
+                                    error_message = str(
+                                        upstream.get("message") or payload.get("error")
+                                    )
+                                    if upstream:
+                                        yield _sse("error", upstream)
                                 break
             except GeneratorExit:
                 was_cancelled = True
                 events.append("client.disconnected")
                 raise
-            except httpx.HTTPError as exc:
-                error_message = str(exc)
-                events.append("agent_workflow.http_error")
+            except httpx.HTTPStatusError as exc:
+                failure = failures.from_status(exc.response.status_code)
+                error_message = failure.message
+                events.append(f"agent_workflow.http_error {exc.response.status_code}")
                 log.warning("agent workflow stream HTTP error", exc_info=True)
-                yield _sse("error", {"message": error_message})
+                yield _sse("error", failure.payload(str(exc)))
+            except httpx.HTTPError as exc:
+                # Connect/read failures never reached the runtime at all.
+                failure = failures.AGENT_UNAVAILABLE
+                error_message = failure.message
+                events.append("agent_workflow.unreachable")
+                log.warning("agent workflow unreachable", exc_info=True)
+                yield _sse("error", failure.payload(str(exc)))
             except Exception as exc:  # noqa: BLE001
-                error_message = str(exc)
+                failure = failures.classify(exc)
+                error_message = failure.message
                 events.append("agent_workflow.failed")
                 log.warning("agent workflow stream failed", exc_info=True)
-                yield _sse("error", {"message": error_message})
+                yield _sse("error", failure.payload(str(exc)))
             finally:
                 answer = "".join(answer_parts)
                 latency_ms = _elapsed_ms(started_at)

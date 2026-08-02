@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+import failures
 from config import MUTATIONS_DISABLED_MESSAGE, MUTATIONS_ENABLED
 from graph.context import STEP_RUNNERS, RunContext
 from graph.validators import plan_problems
@@ -81,8 +82,9 @@ def route(state: RunState, context: RunContext) -> RunState:
         obs.warn(
             "declined mutating plan (MUTATIONS_ENABLED=false)",
             phase="route",
-            track={"declined": True},
+            track={"declined": True, "failure_code": failures.ACTION_NOT_SUPPORTED.code},
         )
+        state.failure_code = failures.ACTION_NOT_SUPPORTED.code
         state.answer = MUTATIONS_DISABLED_MESSAGE
         state.phase = "done"
         return state
@@ -202,12 +204,44 @@ def answer(state: RunState, context: RunContext) -> RunState:
 
 
 def fail(state: RunState, context: RunContext) -> RunState:
-    obs.error("run failed", phase="run", data={"errors": state.errors})
+    failure = classify_state(state)
+    state.failure_code = failure.code
+    obs.error(
+        "run failed",
+        phase="run",
+        data={"errors": state.errors},
+        track={"failure_code": failure.code},
+    )
     if not state.answer:
-        state.answer = (
-            "I could not complete that request. " + "; ".join(state.errors[-2:])
-        )
+        # The catalogued message, not the internal errors. Those name hosts,
+        # ports, and exception classes - useless to the reader and a needless
+        # disclosure. They stay in the logs and in the `detail` field.
+        state.answer = failure.message
     return state
+
+
+def classify_state(state: RunState) -> failures.Failure:
+    """Which catalogued failure best explains how this run ended.
+
+    Read from the last step that actually broke: a run that reached the notes
+    and failed there is a retrieval problem, not a generic internal error, and
+    the user should be told the difference.
+    """
+    for run in reversed(state.steps):
+        if run.error and not run.paused:
+            error = run.error.lower()
+            if run.call is not None:
+                unreachable = ("connect" in error or "refused" in error
+                               or "name or service not known" in error)
+                return failures.TOOL_UNAVAILABLE if unreachable else failures.TOOL_FAILED
+            if "timed out" in error or "timeout" in error:
+                return failures.MODEL_TIMEOUT
+    joined = " ".join(state.errors).lower()
+    if "routing failed" in joined:
+        return failures.DOMAIN_UNAVAILABLE
+    if "not implemented by this runtime" in joined or "no tool mapping" in joined:
+        return failures.INTERNAL_ERROR
+    return failures.INTERNAL_ERROR
 
 
 def _mutates(state: RunState, context: RunContext) -> bool:
