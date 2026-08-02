@@ -76,9 +76,31 @@ def call_tool(call: ToolCall, *, approved: bool = False) -> Any:
     except McpError:
         raise
     except Exception as exc:  # transport, protocol, cancellation
-        raise McpError(f"{call.tool} on {call.server} failed: {exc}") from exc
+        raise McpError(
+            f"{call.tool} on {call.server} ({url}) failed: {_describe(exc)}"
+        ) from exc
 
     return _payload(call, result)
+
+
+def _describe(exc: BaseException) -> str:
+    """Unwrap an ExceptionGroup to the causes that actually explain the failure.
+
+    The SDK runs its transport in an anyio task group, so a refused connection
+    surfaces as "unhandled errors in a TaskGroup (1 sub-exception)" unless the
+    leaves are pulled out.
+    """
+    leaves: list[str] = []
+
+    def walk(error: BaseException) -> None:
+        if isinstance(error, BaseExceptionGroup):
+            for nested in error.exceptions:
+                walk(nested)
+        else:
+            leaves.append(f"{type(error).__name__}: {error}")
+
+    walk(exc)
+    return "; ".join(dict.fromkeys(leaves)) or f"{type(exc).__name__}: {exc}"
 
 
 async def _call(url: str, call: ToolCall):

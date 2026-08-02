@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from threading import Lock
 
 from fastapi import HTTPException
 
 from config import PLAYBOOK_CANDIDATE_LIMIT, PLAYBOOK_SEARCH_LIMIT
-from integrations.embedder import embed_texts
+from integrations.embedder import (
+    EmbeddingsUnavailableError,
+    embed_texts,
+    embeddings_available,
+)
 from schemas.playbook_schema import Playbook, PlaybookCandidates, PlaybookMatch
 from utils import (
     CATALOG_ROOT,
@@ -15,6 +20,9 @@ from utils import (
     list_child_dirs,
     read_yaml,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -87,6 +95,16 @@ class PlaybookService:
         if len(playbooks) <= PLAYBOOK_CANDIDATE_LIMIT:
             return PlaybookCandidates(selection_mode="all", playbooks=playbooks)
 
+        if not embeddings_available():
+            # Degrade rather than fail: a longer candidate list still routes
+            # correctly, whereas a 500 here would take down every request.
+            log.warning(
+                "catalog of %d exceeds the candidate limit but embeddings are "
+                "not installed; returning every playbook",
+                len(playbooks),
+            )
+            return PlaybookCandidates(selection_mode="all", playbooks=playbooks)
+
         matches = self.search_playbooks(query, PLAYBOOK_CANDIDATE_LIMIT)
         return PlaybookCandidates(
             selection_mode="semantic",
@@ -100,7 +118,10 @@ class PlaybookService:
         if not question:
             raise HTTPException(status_code=422, detail="Search query must not be empty")
 
-        index = self.initialize_embeddings()
+        try:
+            index = self.initialize_embeddings()
+        except EmbeddingsUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         question_vector = self._centre(embed_texts([question])[0], index.mean)
 
         ranked = sorted(

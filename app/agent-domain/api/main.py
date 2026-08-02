@@ -1,10 +1,14 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from api.routes import catalog_service, playbook_service, router
 
-from integrations.embedder import get_embedder
+from integrations.embedder import embeddings_available, get_embedder
+
+
+log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -15,8 +19,13 @@ async def lifespan(app: FastAPI):
     if problems:
         raise RuntimeError("Invalid domain catalog:\n" + "\n".join(problems))
 
-    get_embedder()
-    playbook_service.initialize_embeddings()
+    # Embeddings are optional: below the candidate limit nothing is embedded,
+    # so a deployment without them is valid. Warm them only when present.
+    if embeddings_available():
+        get_embedder()
+        playbook_service.initialize_embeddings()
+    else:
+        log.info("sentence-transformers not installed; semantic search disabled")
 
     yield
 

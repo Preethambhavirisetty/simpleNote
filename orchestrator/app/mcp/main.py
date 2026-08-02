@@ -1179,5 +1179,29 @@ def remove_tag_from_note(user_id: str, note_id: str, tag_id: str) -> dict[str, A
 
 if __name__ == "__main__":
     # export MCP_URL=http://127.0.0.1:8000/mcp
-    print("starting mcp...")
+    #
+    # FastMCP binds 127.0.0.1 by default, which is unreachable from another
+    # container. The default stays loopback for local runs; containers set
+    # MCP_HOST=0.0.0.0.
+    mcp.settings.host = os.getenv("MCP_HOST", "127.0.0.1")
+    mcp.settings.port = int(os.getenv("MCP_PORT", "8000"))
+
+    # The SDK's DNS-rebinding protection validates the Host header against
+    # localhost only, so a call to http://agent-mcp:8000/mcp from another
+    # container is rejected with 421. Name the hosts that may address this
+    # server; MCP_ALLOWED_HOSTS keeps that a deployment decision.
+    allowed = [
+        host.strip()
+        for host in os.getenv("MCP_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    ]
+    if allowed:
+        from mcp.server.transport_security import TransportSecuritySettings
+
+        mcp.settings.transport_security = TransportSecuritySettings(
+            allowed_hosts=allowed,
+            allowed_origins=allowed,
+        )
+
+    print(f"starting mcp on {mcp.settings.host}:{mcp.settings.port}...")
     mcp.run(transport="streamable-http")

@@ -1,0 +1,12 @@
+# Semantic playbook search. Optional: with a catalog at or below
+# PLAYBOOK_CANDIDATE_LIMIT every playbook is a candidate and nothing is
+# embedded, so the service runs fine without these. Install them before the
+# catalog outgrows that limit, or to use POST /playbooks/search.
+#
+#     pip install -r requirements-embeddings.txt
+#
+# CPU-only torch: the default PyPI wheel pulls the CUDA runtime (~3GB of
+# nvidia-* packages) which this service never uses.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+sentence-transformers==5.6.1

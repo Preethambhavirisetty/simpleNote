@@ -211,6 +211,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "app.mcp.main"]
     environment:
+      MCP_HOST:               0.0.0.0
+      MCP_ALLOWED_HOSTS:      agent-mcp:8000,agent-mcp,localhost:8000,127.0.0.1:8000
       LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
       HF_HOME:                /app/.cache/huggingface
       FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
