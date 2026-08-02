@@ -9,6 +9,7 @@ from integrations.llm import llm_call_general
 from schemas.playbook import PlaybookStep
 from state.state import RunState, StepRun
 from utils import load_prompt
+from integrations import observability as obs
 from workflows.steps.base import StepContext, collected_notes, failed
 
 
@@ -19,8 +20,18 @@ MAX_EVIDENCE_CHARS = 6000
 
 
 def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
+    records = _records(state)
     evidence = _evidence(state)
+    obs.debug(
+        "summarising from %d record(s)",
+        len(records),
+        phase="summarize",
+        data={"evidence_chars": len(evidence), "records": obs.preview(records)},
+        track={"evidence_records": len(records), "evidence_chars": len(evidence)},
+    )
     if not evidence:
+        obs.warn("no evidence gathered; refusing to answer from model knowledge",
+                 phase="summarize", track={"ungrounded_refusal": True})
         # Say so rather than letting the model fill the gap from its own
         # knowledge - an ungrounded answer here would look identical to a
         # grounded one.

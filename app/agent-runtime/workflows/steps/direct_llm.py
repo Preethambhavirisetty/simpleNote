@@ -5,6 +5,7 @@ from __future__ import annotations
 from integrations.llm import llm_call_general
 from schemas.playbook import PlaybookStep
 from state.state import RunState, StepRun
+from integrations import observability as obs
 from utils import load_prompt
 from workflows.steps.base import StepContext, failed
 
@@ -23,9 +24,11 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
     ]
     messages.append({"role": "user", "content": state.question})
 
-    answer = llm_call_general(
-        messages, max_tokens=MAX_TOKENS, temperature=TEMPERATURE
-    ).strip()
+    with obs.timed("direct_llm", "llm answer") as timer:
+        answer = llm_call_general(
+            messages, max_tokens=MAX_TOKENS, temperature=TEMPERATURE
+        ).strip()
+        timer.track(answer_chars=len(answer), history_turns=len(state.context.history))
     if not answer:
         return failed(step, "the model returned an empty answer")
 

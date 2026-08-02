@@ -12,6 +12,7 @@ import logging
 from config import MUTATIONS_DISABLED_MESSAGE, MUTATIONS_ENABLED
 from graph.context import STEP_RUNNERS, RunContext
 from graph.validators import plan_problems
+from integrations import observability as obs
 from integrations.domain import DomainUnavailableError
 from utils import CatalogLookupError
 from state.state import RunState, StepRun
@@ -21,9 +22,22 @@ log = logging.getLogger(__name__)
 
 def route(state: RunState, context: RunContext) -> RunState:
     """Choose the playbook and plan for the question."""
+    obs.info(
+        "routing question",
+        phase="route",
+        data={"question": state.question, "history_turns": len(state.context.history)},
+    )
     try:
-        selection = context.selector.select(state.question, state.context.history)
+        with obs.timed("route", "playbook selection") as timer:
+            selection = context.selector.select(state.question, state.context.history)
+            timer.track(
+                playbook=selection.playbook_id,
+                plan=selection.plan_name,
+                selection_mode=selection.selection_mode,
+                selector_llm_calls=selection.llm_calls,
+            )
     except DomainUnavailableError as exc:
+        obs.error("routing failed: %s", exc, phase="route")
         state.errors.append(f"routing failed: {exc}")
         state.phase = "failed"
         return state
@@ -32,8 +46,17 @@ def route(state: RunState, context: RunContext) -> RunState:
     state.plan_name = selection.plan_name
     state.selection_reason = selection.reason
 
+    obs.info(
+        "selected %s/%s",
+        selection.playbook_id,
+        selection.plan_name,
+        phase="route",
+        data={"reason": selection.reason, "mode": selection.selection_mode},
+    )
+
     problems = plan_problems(state, context)
     if problems:
+        obs.error("plan is not runnable", phase="route", data={"problems": problems})
         # The router picked something this runtime cannot run. Refusing beats
         # half-executing a plan and answering as if it had worked.
         state.errors += problems
@@ -55,6 +78,11 @@ def route(state: RunState, context: RunContext) -> RunState:
         # for an action that cannot happen. The routing decision is still
         # recorded, so this stays visible in logs and evals.
         log.info("declined mutating plan", extra={"plan": state.plan_name})
+        obs.warn(
+            "declined mutating plan (MUTATIONS_ENABLED=false)",
+            phase="route",
+            track={"declined": True},
+        )
         state.answer = MUTATIONS_DISABLED_MESSAGE
         state.phase = "done"
         return state
@@ -74,8 +102,33 @@ def execute(state: RunState, context: RunContext) -> RunState:
     runner = STEP_RUNNERS[step.step]
 
     approved = state.pending_approval is None and _just_approved(state)
-    result = runner(state, step, context.steps(approved=approved))
+    obs.debug(
+        "step %d/%d: %s",
+        state.cursor + 1,
+        len(plan.steps),
+        step.step,
+        phase=step.step,
+        data={"operation": step.operation, "filters": dict(state.filters)},
+    )
+    with obs.timed(step.step, f"step {step.step}") as timer:
+        result = runner(state, step, context.steps(approved=approved))
+        timer.track(step=step.step, step_ok=result.ok)
     state.record(result)
+
+    obs.log(
+        "DEBUG" if result.ok else ("INFO" if result.paused else "ERROR"),
+        "step %s %s",
+        step.step,
+        "ok" if result.ok else ("paused" if result.paused else "failed"),
+        phase=step.step,
+        data={
+            "operation": result.operation,
+            "tool": result.call.tool if result.call else None,
+            "arguments": obs.preview(result.call.arguments) if result.call else None,
+            "output": obs.preview(result.output),
+            "error": result.error,
+        },
+    )
 
     if state.phase == "awaiting_approval":
         # The step parked itself; do not advance, so resuming re-runs it.
@@ -113,6 +166,11 @@ def approve(state: RunState, context: RunContext, *, choice: str | None = None) 
 
 def answer(state: RunState, context: RunContext) -> RunState:
     """Make sure the run ends with something to say."""
+    obs.track(
+        steps_run=len(state.steps),
+        tool_calls=sum(1 for run in state.steps if run.call and run.ok),
+        step_errors=len(state.errors),
+    )
     if not state.answer:
         # No LLM step in this plan wrote prose, so report what happened rather
         # than inventing a narrative over it.
@@ -129,11 +187,17 @@ def answer(state: RunState, context: RunContext) -> RunState:
         else:
             state.answer = "I could not find anything matching that."
 
+    obs.info(
+        "answer ready",
+        phase="answer",
+        data={"answer": obs.preview(state.answer, 800), "records": len(state.structured)},
+    )
     state.phase = "done"
     return state
 
 
 def fail(state: RunState, context: RunContext) -> RunState:
+    obs.error("run failed", phase="run", data={"errors": state.errors})
     if not state.answer:
         state.answer = (
             "I could not complete that request. " + "; ".join(state.errors[-2:])

@@ -7,6 +7,7 @@ from typing import Any
 
 from schemas.playbook import PlaybookStep
 from state.state import RunState, StepRun
+from integrations import observability as obs
 from workflows.steps.base import StepContext, collected_notes
 
 
@@ -28,6 +29,14 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
     unknown = [item for item in dated if item[0] is None]
 
     ordered = [record for _, record in known] + [record for _, record in unknown]
+    obs.debug(
+        "sorted %d dated, %d undated",
+        len(known),
+        len(unknown),
+        phase="sort_by_date",
+        data={"order": [r.get("title") or r.get("note_id") for r in ordered[:8]]},
+        track={"undated_records": len(unknown)},
+    )
     return StepRun(
         step=step.step,
         output={

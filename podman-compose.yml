@@ -25,6 +25,7 @@ networks:
     driver: bridge
 
 volumes:
+  agentlog-data:
   postgres-data:
   qdrant-data:
   agent-model-cache:
@@ -236,6 +237,42 @@ services:
       - notelite-net
 
   # Standalone agent workflow orchestration service
+  # ── Observability: agent run tracker (observability/) ───────────────────────
+
+  agentlog-mysql:
+    image: docker.io/library/mysql:8.4
+    container_name: notelite-agentlog-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AGENTLOG_MYSQL_PASSWORD:-devroot}
+      MYSQL_DATABASE:      agentlog
+    volumes:
+      - agentlog-data:/var/lib/mysql
+    expose:
+      - "3306"
+    networks:
+      - notelite-net
+
+  # Port 8500, not the app default 8000: that collides with the backend.
+  agentlog-api:
+    build:
+      context: ./observability/backend
+      dockerfile: Dockerfile
+    container_name: notelite-agentlog-api
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST:     agentlog-mysql
+      MYSQL_PORT:     "3306"
+      MYSQL_USER:     root
+      MYSQL_PASSWORD: ${AGENTLOG_MYSQL_PASSWORD:-devroot}
+      MYSQL_DATABASE: agentlog
+    expose:
+      - "8000"
+    ports:
+      - "8500:8000"
+    networks:
+      - notelite-net
+
   # Agent Domain — declarative catalog: playbooks, operations, MCP mappings
   agent-domain:
     build:
@@ -274,6 +311,14 @@ services:
       # Writes stay off until a run can pause for approval and resume.
       MUTATIONS_ENABLED:      "false"
       PLAYBOOK_SELECTION_MODE: single
+      # Run logging into observability/. Harmless when the collector is down:
+      # every log call becomes a no-op rather than failing the request.
+      AGENTLOG_ENABLED:       "true"
+      AGENTLOG_ENDPOINT:      http://agentlog-api:8000
+      PYTHONPATH:             /app:/opt/agentlog
+    volumes:
+      # One copy of the SDK, mounted rather than vendored into the image.
+      - ./observability/sdk:/opt/agentlog:ro
     expose:
       - "8200"
     networks:

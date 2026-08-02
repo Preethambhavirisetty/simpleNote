@@ -10,6 +10,7 @@ from __future__ import annotations
 from schemas.playbook import PlaybookStep
 from state.state import RunState, StepRun
 from utils import CatalogLookupError, matches_declared_type
+from integrations import observability as obs
 from workflows.steps.base import StepContext
 
 
@@ -36,6 +37,12 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
         else:
             kept[name] = value
 
+    if dropped:
+        obs.warn("dropped %d filter(s) for %s", len(dropped), operation.name,
+                 phase="validate_filters", data={"dropped": dropped},
+                 track={"filters_dropped": len(dropped)})
+    obs.debug("filters valid for %s", operation.name, phase="validate_filters",
+              data={"kept": kept})
     state.filters = kept
     return StepRun(
         step=step.step,

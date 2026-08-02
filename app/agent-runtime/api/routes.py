@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from config import AGENT_API_KEY
 from graph import builder
 from graph.context import RunContext
+from integrations import observability as obs
 from integrations.domain import DomainUnavailableError, load_catalog
 from state.state import Message, RunState
 
@@ -78,13 +79,28 @@ def _history(request: RunRequest) -> list[Message]:
 
 
 def _start(request: RunRequest) -> RunState:
-    return builder.start(
+    """One request, one logged run - the unit the dashboard groups by."""
+    with obs.run_logger(
         request.query,
-        request.runtime_context.user_id,
-        run_context(),
-        history=_history(request),
+        request.runtime_context.conversation_id or request.session_id,
+        user_id=request.runtime_context.user_id,
         role=request.runtime_context.role,
-    )
+    ):
+        state = builder.start(
+            request.query,
+            request.runtime_context.user_id,
+            run_context(),
+            history=_history(request),
+            role=request.runtime_context.role,
+        )
+        obs.finish(
+            state.answer,
+            status="error" if state.phase == "failed" else "ok",
+            playbook=state.playbook_id,
+            plan=state.plan_name,
+            phase=state.phase,
+        )
+        return state
 
 
 def _summary(state: RunState) -> dict[str, Any]:

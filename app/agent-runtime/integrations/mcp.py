@@ -20,6 +20,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from config import MCP_SERVERS, MCP_TIMEOUT
+from integrations import observability as obs
 from schemas.catalog import ToolCall
 
 
@@ -71,16 +72,34 @@ def call_tool(call: ToolCall, *, approved: bool = False) -> Any:
         },
     )
 
+    obs.debug(
+        "calling %s on %s",
+        call.tool,
+        call.server,
+        phase="tool",
+        data={"url": url, "arguments": obs.preview(call.arguments), "destructive": call.destructive},
+    )
+
     try:
-        result = asyncio.run(_call(url, call))
+        with obs.timed("tool", f"mcp {call.tool}") as timer:
+            result = asyncio.run(_call(url, call))
+            timer.track(tool=call.tool, mcp_server=call.server, operation=call.operation)
     except McpError:
         raise
     except Exception as exc:  # transport, protocol, cancellation
-        raise McpError(
-            f"{call.tool} on {call.server} ({url}) failed: {_describe(exc)}"
-        ) from exc
+        detail = _describe(exc)
+        obs.error("%s failed: %s", call.tool, detail, phase="tool", track={"tool_error": call.tool})
+        raise McpError(f"{call.tool} on {call.server} ({url}) failed: {detail}") from exc
 
-    return _payload(call, result)
+    payload = _payload(call, result)
+    obs.debug(
+        "%s returned",
+        call.tool,
+        phase="tool",
+        data={"payload": obs.preview(payload)},
+        track={"tool_result_keys": sorted(payload)[:10] if isinstance(payload, dict) else None},
+    )
+    return payload
 
 
 def _describe(exc: BaseException) -> str:

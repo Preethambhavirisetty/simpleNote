@@ -59,3 +59,7 @@ MUTATIONS_DISABLED_MESSAGE = require_env(
 
 # Shared secret the orchestrator sends as X-API-Key. Empty disables the check.
 AGENT_API_KEY = require_env("AGENT_WORKFLOW_API_KEY", "")
+# Structured run logging into the agentlog service (observability/). Optional:
+# with the SDK absent or the collector down, every log call is a no-op.
+AGENTLOG_ENABLED = require_env("AGENTLOG_ENABLED", "true").lower() == "true"
+AGENTLOG_ENDPOINT = require_env("AGENTLOG_ENDPOINT", "http://agentlog-api:8000")

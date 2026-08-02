@@ -10,6 +10,7 @@ from schemas.catalog import Operation
 from schemas.playbook import PlaybookStep
 from state.state import PendingApproval, RunState, StepRun
 from utils import CatalogLookupError, OperationArgumentError
+from integrations import observability as obs
 from workflows.steps.base import StepContext, collected_notes, failed
 
 
@@ -104,6 +105,9 @@ def _ask_for_target(
     hit reads as helpful right up until it deletes the wrong note.
     """
     choices = _candidates(state, parameter)
+    obs.info("%s needs a %s; offering %d choice(s)", operation.name, parameter, len(choices),
+             phase="approval", data={"choices": choices},
+             track={"awaiting_choice": operation.name})
     if not choices:
         return failed(
             step,

@@ -14,6 +14,7 @@ import logging
 
 from graph import edges, nodes
 from graph.context import RunContext
+from integrations import observability as obs
 from state.state import Message, RunState, RuntimeContext
 
 log = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ def drive(state: RunState, context: RunContext) -> RunState:
         if name is None:
             return state
 
+        obs.debug("node %s", name, phase="graph", data={"phase_in": state.phase})
         state = NODES[name](state, context)
 
         if name in edges.TERMINAL_AFTER:

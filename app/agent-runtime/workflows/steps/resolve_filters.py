@@ -15,6 +15,7 @@ from typing import Any
 from integrations.llm import llm_call_general
 from schemas.playbook import PlaybookStep
 from state.state import RunState, StepRun
+from integrations import observability as obs
 from utils import load_prompt
 from workflows.steps.base import StepContext
 
@@ -37,6 +38,7 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
         temperature=TEMPERATURE,
     )
 
+    obs.debug("filter model said: %s", obs.preview(completion, 300), phase="resolve_filters")
     filters = _parse(completion)
     # Filters are an optimisation, never a requirement: an unparseable answer
     # means search the whole workspace, not fail the run.
@@ -44,6 +46,8 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
         log.info("no filters resolved", extra={"completion": completion[:200]})
         filters = {}
 
+    obs.info("resolved filters: %s", filters, phase="resolve_filters",
+             data={"filters": filters}, track={"filter_count": len(filters)})
     state.filters.update(filters)
     return StepRun(step=step.step, output={"filters": filters})
 

@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from config import PLAYBOOK_SELECTION_MODE
+from integrations import observability as obs
 from integrations.domain import fetch_candidates
 from integrations.llm import llm_call_general
 from loaders.playbook_loader import PlaybookLoader
@@ -71,7 +72,18 @@ class PlaybookSelector:
     def select(
         self, question: str, history: Sequence[Message] | None = None
     ) -> PlaybookSelection:
-        candidates = fetch_candidates(question)
+        with obs.timed("route", "fetch candidates") as timer:
+            candidates = fetch_candidates(question)
+            timer.track(
+                candidate_count=len(candidates.playbooks),
+                candidate_mode=candidates.selection_mode,
+            )
+        obs.debug(
+            "candidates: %s",
+            [p.playbook_id for p in candidates.playbooks],
+            phase="route",
+            data={"mode": candidates.selection_mode},
+        )
         chooser = self._select_split if self._mode == "split" else self._select_single
         return chooser(
             candidates.playbooks, candidates.selection_mode, question, history
@@ -194,10 +206,18 @@ class PlaybookSelector:
         fixes a swapped level or a missing field - cheaper than losing the
         decision to the fallback.
         """
+        obs.debug(
+            "selector prompt",
+            phase="route",
+            data={"chars": sum(len(m["content"]) for m in messages)},
+        )
         completion = self._complete(messages)
+        obs.debug("selector said: %s", obs.preview(completion, 300), phase="route")
         value, problem = parse(completion)
         if value is not None:
             return value, None, 1
+
+        obs.warn("selector answer unusable: %s", problem, phase="route")
 
         retry = messages + [
             {"role": "assistant", "content": completion},
@@ -212,7 +232,10 @@ class PlaybookSelector:
         value, problem = parse(retried)
         if value is not None:
             log.info("selector recovered on retry")
+            obs.info("selector recovered on retry", phase="route", track={"selector_retried": True})
         else:
+            obs.error("selector failed twice: %s", problem, phase="route",
+                      track={"selector_fallback": True})
             log.warning(
                 "selector failed twice",
                 extra={"problem": problem, "completion": retried[:200]},
