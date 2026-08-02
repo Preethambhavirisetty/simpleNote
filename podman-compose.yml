@@ -5,9 +5,6 @@
 #   podman-compose logs -f backend     # tail logs for one service
 #   podman-compose down                # stop and remove containers
 #
-# Inference: run natively on the host (uses Metal, loads models in ~30s):
-#   cd notelite_inference/build && ./inference_api
-#
 # Frontend: run on the host (Vite HMR doesn't work well in containers):
 #   cd frontend && npm install && npm run dev
 #
@@ -28,7 +25,6 @@ volumes:
   agentlog-data:
   postgres-data:
   qdrant-data:
-  agent-model-cache:
 
 services:
 
@@ -82,10 +78,10 @@ services:
     restart: unless-stopped
     volumes:
       - qdrant-data:/qdrant/storage
-    expose:
-      - "6333"
     networks:
       - notelite-net
+    ports:
+      - "127.0.0.1:6333:6333"
 
   # ── Observability ────────────────────────────────────────────────────────────
 
@@ -127,10 +123,6 @@ services:
     container_name: notelite-agent
     restart: unless-stopped
     environment:
-      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
-      HF_HOME:                /app/.cache/huggingface
-      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
-      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       QDRANT_URL:             http://qdrant:6333
       BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
@@ -142,7 +134,6 @@ services:
       AGENT_WORKFLOW_CONFIG_NAME: notelite
     volumes:
       - ./orchestrator/app:/app/app:ro
-      - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
       - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
@@ -163,10 +154,6 @@ services:
     environment:
       MCP_HOST:               0.0.0.0
       MCP_ALLOWED_HOSTS:      agent-mcp:8000,agent-mcp,localhost:8000,127.0.0.1:8000
-      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
-      HF_HOME:                /app/.cache/huggingface
-      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
-      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       QDRANT_URL:             http://qdrant:6333
       BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
@@ -176,7 +163,6 @@ services:
       RUN_MIGRATIONS:         "false"
     volumes:
       - ./orchestrator/app:/app/app:ro
-      - agent-model-cache:/app/.cache
       - ./feature_flags.json:/app/feature_flags.json:ro
       - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
@@ -308,10 +294,6 @@ services:
     command: ["python", "-m", "celery", "-A", "app.services.ingestion.workers.celery_app:celery_app", "worker",
               "--loglevel=info", "-Q", "ingestion,conversation", "-c", "2", "-n", "agent-celery@%h", "-B"]
     environment:
-      LLAMA_INDEX_CACHE_DIR:  /app/.cache/llama_index
-      HF_HOME:                /app/.cache/huggingface
-      FASTEMBED_CACHE_PATH:   /app/.cache/huggingface
-      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
       QDRANT_URL:             http://qdrant:6333
       BACKEND_INTERNAL_URL_BASE: http://backend:8000/api/conversations/internal
       MESSAGE_BROKER_URL:     *redis-url
@@ -322,7 +304,6 @@ services:
       RUN_MIGRATIONS:         "false"
     volumes:
       - ./orchestrator/app:/app/app:ro
-      - agent-model-cache:/app/.cache
       - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
       - ./feature_flags.json:/app/feature_flags.json:ro
     networks:

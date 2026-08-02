@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
@@ -217,8 +218,25 @@ class KeywordProcessor:
         )
         self.events.append(f"keyword candidates ranked: {len(keyword_candidates)}")
         self.events.append(f"entity candidates ranked: {len(entity_candidates)}")
-        top_keywords = self._deduplicate_candidates(keyword_candidates, kind="kw")
-        top_entities = self._deduplicate_candidates(entity_candidates, kind="ent")
+        # Two independent LLM calls that were running back to back. Keyword
+        # dedup never reads entity candidates and vice versa, so waiting for
+        # the first before starting the second just added its latency.
+        # Each thread writes into its own buffer: appending to self.events from
+        # two threads would interleave the trace differently on every run, and
+        # the merge below keeps it deterministic (keywords, then entities).
+        keyword_events: list[str] = []
+        entity_events: list[str] = []
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            keyword_future = executor.submit(
+                self._deduplicate_candidates, keyword_candidates, "kw", keyword_events
+            )
+            entity_future = executor.submit(
+                self._deduplicate_candidates, entity_candidates, "ent", entity_events
+            )
+            top_keywords = keyword_future.result()
+            top_entities = entity_future.result()
+        self.events.extend(keyword_events)
+        self.events.extend(entity_events)
 
         self.events.append(
             f"keywords completed: {len(top_keywords)} top keywords, {len(top_entities)} entities"
@@ -390,17 +408,32 @@ class KeywordProcessor:
         return self._deduplicate_candidates(candidates, kind)
 
     def _deduplicate_candidates(
-        self, candidates: Sequence[RankedCandidate], kind: TermKind
+        self,
+        candidates: Sequence[RankedCandidate],
+        kind: TermKind,
+        events: list[str] | None = None,
     ) -> list[str]:
+        """`events` collects this call's trace lines; defaults to the shared list.
+
+        Callers that run two dedups concurrently pass their own buffer.
+        """
+        sink = self.events if events is None else events
         ranked_terms = [candidate.term for candidate in candidates]
         if not self.use_llm_dedup:
-            self.events.append(f"{self._kind_label(kind)} dedup completed: local")
+            sink.append(f"{self._kind_label(kind)} dedup completed: local")
             selected = ranked_terms[: self.max_top_keywords]
-            return self._postprocess_entity_selection(selected, candidates) if kind == "ent" else selected
-        return self.deduplicate_keywords_llm(list(candidates), kind)
+            return (
+                self._postprocess_entity_selection(selected, candidates)
+                if kind == "ent"
+                else selected
+            )
+        return self.deduplicate_keywords_llm(list(candidates), kind, sink)
 
     def deduplicate_keywords_llm(
-        self, candidates: list[RankedCandidate], kind: TermKind
+        self,
+        candidates: list[RankedCandidate],
+        kind: TermKind,
+        events: list[str] | None = None,
     ) -> list[str]:
         if not candidates:
             return []
@@ -411,10 +444,13 @@ class KeywordProcessor:
             self._candidate_prompt_line(candidate, kind)
             for candidate in candidates
         )
+        sink = self.events if events is None else events
         try:
             label = self._kind_label(kind)
-            self.events.append(f"{label} dedup api call: {len(candidates)} ranked candidates")
-            self.api_calls += 1
+            sink.append(f"{label} dedup api call: {len(candidates)} ranked candidates")
+            # Only api_call_counts is authoritative: self.api_calls is recomputed
+            # from it once both dedups have finished, so a concurrent increment
+            # here would be both racy and pointless. Each kind owns its own key.
             self.api_call_counts[f"{label}_dedup"] += 1
             prompt = get_keyword_dedup_system_prompt() if kind == "kw" else get_entity_dedup_system_prompt()
             result = llm_call_general(build_llm_messages(prompt, keyword_text))
@@ -422,17 +458,21 @@ class KeywordProcessor:
             selected = parsed_keywords[: self.max_top_keywords]
             if kind == "ent":
                 selected = self._postprocess_entity_selection(selected, candidates)
-            self.events.append(
+            sink.append(
                 f"{label} dedup completed: llm selected={len(selected)} "
                 f"rejected={len(candidates) - len(selected)}"
             )
             return selected
         except Exception:
             log.warning("%s LLM dedup failed; using local dedup.", self._kind_label(kind), exc_info=True)
-            self.events.append(f"{self._kind_label(kind)} dedup failed: using local fallback")
+            sink.append(f"{self._kind_label(kind)} dedup failed: using local fallback")
 
         selected = ranked_terms[: self.max_top_keywords]
-        return self._postprocess_entity_selection(selected, candidates) if kind == "ent" else selected
+        return (
+            self._postprocess_entity_selection(selected, candidates)
+            if kind == "ent"
+            else selected
+        )
 
     @staticmethod
     def _postprocess_entity_selection(

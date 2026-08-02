@@ -11,7 +11,7 @@ from llama_index.core import Document as LlamaDocument
 from llama_index.core import Settings
 from qdrant_client import models
 
-from app.core.config import QDRANT_COLLECTION
+from app.core.config import EMBED_BATCH_SIZE, QDRANT_COLLECTION, QDRANT_UPSERT_BATCH_SIZE
 from app.services.ingestion.processors.ingest.models import IndexChunk, QuestionDocument, SummaryArtifacts, SummaryDocument
 from app.db.qdrant import QdrantClientManager
 from app.core.embeddings import (
@@ -41,16 +41,26 @@ PAYLOAD_INDEXES = (
 class QdrantVectorStore:
     """Small Qdrant wrapper for vector storage and retrieval."""
 
+    # Collections and payload indexes are immutable once created, so checking
+    # them on every ingestion spent ~15 Qdrant round trips per note confirming
+    # facts established at process start. Checked once per process; a recreated
+    # collection mid-flight is repaired by the next process start or by the
+    # upsert failing loudly.
+    _collections_verified: bool = False
+
     def __init__(self):
         self.client = QdrantClientManager.get_client()
         self.embedding_client = SharedEmbeddingClient()
         self.events = []
 
     def ensure_collections(self) -> None:
+        if QdrantVectorStore._collections_verified:
+            return
         for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION, QUESTIONS_COLLECTION):
             if not self._collection_exists(collection_name):
                 self._create_collection(collection_name)
             self._ensure_payload_indexes(collection_name)
+        QdrantVectorStore._collections_verified = True
 
     def validate_collection_dimensions(self) -> None:
         expected = self._embedding_dimension()
@@ -107,9 +117,18 @@ class QdrantVectorStore:
                     field_name=field_name,
                     field_schema=schema_type,
                 )
-            except Exception:
-                log.debug("Payload index already exists or could not be created: %s", field_name)
-                self.events.append(f"Payload index already exists or could not be created: {field_name}")
+            except Exception as exc:
+                # "already exists" is routine; anything else means queries on
+                # this field will silently fall back to full scans, which must
+                # not hide at debug level.
+                if "exist" in str(exc).lower():
+                    log.debug("payload index already exists: %s", field_name)
+                else:
+                    log.warning(
+                        "payload index creation failed: collection=%s field=%s",
+                        collection_name, field_name, exc_info=True,
+                    )
+                    self.events.append(f"payload index FAILED: {field_name}: {str(exc)[:80]}")
         self.events.append(
             f"payload indexes ensured: collection={collection_name} count={len(PAYLOAD_INDEXES)}"
         )
@@ -220,7 +239,11 @@ class QdrantVectorStore:
                     "text": chunk.content, "created_at": int(time.time()), "metadata": metadata,
                 },
             ))
-        self.client.upsert(collection_name=CHUNK_COLLECTION, points=points)
+        for start in range(0, len(points), QDRANT_UPSERT_BATCH_SIZE):
+            self.client.upsert(
+                collection_name=CHUNK_COLLECTION,
+                points=points[start : start + QDRANT_UPSERT_BATCH_SIZE],
+            )
         self.events.append(f"chunk vectors upserted: {len(points)}")
         skipped = len(chunks) - len(indexable)
         if skipped:
@@ -361,9 +384,21 @@ class QdrantVectorStore:
         return self._point_to_document(points[0])[0]
 
     def embed_texts(self, texts: Sequence[str]) -> EmbeddingBatch:
-        embeddings = self.embedding_client.embed_documents(texts)
+        """Embed in bounded batches.
+
+        One request per document made request size proportional to note
+        length: a 200-chunk note became a single giant POST racing the
+        timeout. Fixed-size batches keep every request the same shape no
+        matter the document.
+        """
+        dense: list[list[float]] = []
+        sparse: list = []
+        for start in range(0, len(texts), EMBED_BATCH_SIZE):
+            batch = self.embedding_client.embed_documents(texts[start : start + EMBED_BATCH_SIZE])
+            dense.extend(batch.dense)
+            sparse.extend(batch.sparse)
         self._drain_embedding_events()
-        return embeddings
+        return EmbeddingBatch(dense=dense, sparse=sparse)
 
     def embed_dense_texts(self, texts: Sequence[str]) -> list[list[float]]:
         embeddings = self.embedding_client.embed_dense_documents(texts)

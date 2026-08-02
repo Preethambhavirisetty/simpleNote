@@ -41,6 +41,14 @@ class IngestionOrchestrator:
         start = time.perf_counter()
         text = payload.get("text") or ""
         text_tokens = count_tokens(text)
+        # The completion log alone cannot tell a hung stage from a note that
+        # never arrived; a start line brackets the run.
+        logger.info(
+            "ingestion.started",
+            note_id=payload.get("note_id"),
+            version=payload.get("version"),
+            text_tokens=text_tokens,
+        )
         try:
             doc_id = self._doc_id(payload)
             events.append("document id created")

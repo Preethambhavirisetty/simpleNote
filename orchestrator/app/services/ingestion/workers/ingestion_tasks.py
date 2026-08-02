@@ -1,10 +1,14 @@
 import logging
+import random
+import time
 import uuid
 from functools import lru_cache
 from typing import Any
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from redis import Redis, RedisError
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.core import crypto
@@ -12,8 +16,9 @@ from app.core.config import INGESTION_TASK_STRING, MESSAGE_BROKER_URL
 from app.core.settings import init_llama_index_settings
 from app.db.postgres import DatabaseManager
 from app.logger import logger
-from app.shared.http import TransientHTTPError, is_transient_http_error
+from app.shared.http import TransientHTTPError, is_transient_http_error, retry_after_seconds
 from app.services.ingestion.orchestrator import IngestionOrchestrator
+from app.services.ingestion.validators.request_version_validator import NoteVersionUnavailable
 from app.services.ingestion.workers.celery_app import CONVERSATION_TASK, celery_app
 
 log = logging.getLogger(__name__)
@@ -124,6 +129,30 @@ def _bind_task_trace(trace_id: str | None) -> None:
     bind_contextvars(trace_id=trace_id or str(uuid.uuid4()))
 
 
+def _backoff(retries: int, floor: float = 0.0) -> float:
+    """Exponential, jittered, capped: 4-8-16-... seconds, at most 300.
+
+    Jitter matters here: when the shared inference host degrades, every
+    in-flight ingestion fails together, and identical delays would send them
+    all back together too.
+    """
+    delay = min(4 * (2 ** retries), 300)
+    return max(floor, delay + random.uniform(0, delay / 4))
+
+
+# Failures the task retries itself. DB blips (OperationalError, and the version
+# guard's NoteVersionUnavailable wrapper) are as transient as a dropped socket;
+# neither means the note cannot be ingested.
+_RETRYABLE_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+    TransientHTTPError,
+    OperationalError,
+    NoteVersionUnavailable,
+)
+
+
 @celery_app.task(
     name=INGESTION_TASK_STRING,
     acks_late=True,
@@ -131,6 +160,10 @@ def _bind_task_trace(trace_id: str | None) -> None:
     autoretry_for=(ConnectionError, TimeoutError, OSError),
     max_retries=5,
     retry_backoff=True,
+    # Bounded, jittered backoff: five ingestion tasks failing on one rate-limited
+    # inference host must not retry in lockstep.
+    retry_backoff_max=300,
+    retry_jitter=True,
 )
 def ingest_in_background(self, data=None, **kwargs):
     # trace_id rides in the payload (dict form or kwargs, depending on the
@@ -141,19 +174,53 @@ def ingest_in_background(self, data=None, **kwargs):
     _bind_task_trace(trace_id)
 
     init_llama_index_settings()
+    payload = IngestionOrchestrator._payload(data, **kwargs)
+    started = time.perf_counter()
+    # Logged before any work so a task that hangs or is killed is identifiable:
+    # a "received" with no matching completed/failed/timed-out line names the
+    # exact note that stalled.
+    logger.info(
+        "ingestion.task_started",
+        action=payload.get("action", "upsert"),
+        note_id=payload.get("note_id"),
+        coalesced=bool(payload.get("coalesced")),
+        retries=self.request.retries,
+    )
     try:
-        payload = IngestionOrchestrator._payload(data, **kwargs)
         if payload.get("coalesced"):
             payload = _latest_note_payload(payload)
         return IngestionOrchestrator().run(payload)
+    except SoftTimeLimitExceeded as exc:
+        # Usually a stalled call to the inference host, not a poisoned note, so
+        # a bounded retry chain is right. acks_late covers the hard-limit kill.
+        logger.error(
+            "ingestion.timed_out",
+            action=payload.get("action", "upsert"),
+            note_id=payload.get("note_id"),
+            elapsed_s=round(time.perf_counter() - started, 1),
+            retries=self.request.retries,
+        )
+        # A stall means the host is struggling; give it a real breather.
+        raise self.retry(exc=exc, countdown=_backoff(self.request.retries, floor=60)) from exc
     except Exception as exc:
-        if is_transient_http_error(exc):
-            raise self.retry(exc=exc) from exc
-        payload = IngestionOrchestrator._payload(data, **kwargs)
+        if is_transient_http_error(exc) or isinstance(exc, _RETRYABLE_ERRORS):
+            logger.warning(
+                "ingestion.retrying",
+                action=payload.get("action", "upsert"),
+                note_id=payload.get("note_id"),
+                error=str(exc)[:200],
+                retries=self.request.retries,
+            )
+            # Manual retry() does not apply the decorator's retry_backoff (that
+            # only covers autoretry_for), so compute the backoff here. A 429's
+            # Retry-After wins when the server asked for a longer wait.
+            countdown = max(_backoff(self.request.retries), retry_after_seconds(exc))
+            raise self.retry(exc=exc, countdown=countdown) from exc
         logger.exception(
             "ingestion.failed",
             action=payload.get("action", "upsert"),
             note_id=payload.get("note_id"),
+            elapsed_s=round(time.perf_counter() - started, 1),
         )
         raise
 
@@ -187,7 +254,11 @@ def persist_message(self, data: dict):
             error_message=data.get("error_message"),
         )
     except Exception as exc:
-        if is_transient_http_error(exc):
-            raise self.retry(exc=exc) from exc
+        # The client surfaces backend 5xx/invalid responses as RuntimeError.
+        # The update is idempotent (keyed by message_id), so retrying broadly
+        # is safe and loses fewer assistant messages than failing fast;
+        # max_retries=3 bounds it.
+        if is_transient_http_error(exc) or isinstance(exc, RuntimeError):
+            raise self.retry(exc=exc, countdown=_backoff(self.request.retries)) from exc
         raise
     return {"message": f"persisted message {data['message_id']}"}

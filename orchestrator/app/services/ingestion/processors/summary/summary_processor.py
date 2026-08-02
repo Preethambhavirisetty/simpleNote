@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Sequence
 
 from app.shared.prompts.prompt import get_final_summary_system_prompt, get_group_summary_system_prompt
 from app.services.ingestion.processors.chunking import TextChunk
 from app.services.ingestion.processors.chunking.chunk_types import ChunkType
+from app.core.config import SUMMARY_GROUP_CONCURRENCY
 from app.services.ingestion.processors.summary.summary_helpers import (
     DIRECT_SUMMARY_THRESHOLD,
     FINAL_SUMMARY_MAX_TOKENS,
@@ -130,29 +132,47 @@ class SummaryProcessor:
         api_calls = 0
 
         group_prompt = get_group_summary_system_prompt()
-        for index, group in enumerate(groups, start=1):
+
+        def summarize_group(index: int, group) -> tuple[int, str | None, list[str]]:
+            """One group -> (index, usable summary or None, its event lines)."""
             text = "\n\n".join(chunk_text(chunk) for chunk in group)
             prompt_tokens = estimate_summary_request_tokens(group_prompt, text)
+            group_events = [
+                f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}, "
+                f"max output tokens: {GROUP_SUMMARY_MAX_TOKENS}"
+            ]
             try:
-                events.append(
-                    f"summary api call: group {index}, estimated prompt tokens: {prompt_tokens}, "
-                    f"max output tokens: {GROUP_SUMMARY_MAX_TOKENS}"
-                )
                 summary = llm_call_general(
                     build_llm_messages(group_prompt, text),
                     max_tokens=GROUP_SUMMARY_MAX_TOKENS,
                 )
-                api_calls += 1
-                if summary.strip() == "SKIP":
-                    events.append(f"summary skipped: group {index}")
-                    continue
             except Exception as exc:
-                log.warning("summary group failed", exc_info=True)
-                api_calls += 1
-                events.append(f"summary failed: group {index} ({self._failure_label(exc)})")
-                continue
+                log.warning("summary group %d failed", index, exc_info=True)
+                group_events.append(f"summary failed: group {index} ({self._failure_label(exc)})")
+                return index, None, group_events
+            if summary.strip() == "SKIP":
+                group_events.append(f"summary skipped: group {index}")
+                return index, None, group_events
+            return index, valid_summary(summary), group_events
 
-            summary = valid_summary(summary)
+        # Groups are independent LLM calls, so run a few at once. Results are
+        # merged in group order: the final summary reads the document top to
+        # bottom regardless of which call returned first.
+        if len(groups) == 1:
+            outcomes = [summarize_group(1, groups[0])]
+        else:
+            with ThreadPoolExecutor(
+                max_workers=min(SUMMARY_GROUP_CONCURRENCY, len(groups))
+            ) as executor:
+                futures = [
+                    executor.submit(summarize_group, index, group)
+                    for index, group in enumerate(groups, start=1)
+                ]
+                outcomes = sorted(future.result() for future in futures)
+
+        for _, summary, group_events in outcomes:
+            api_calls += 1
+            events.extend(group_events)
             if summary:
                 summaries.append(summary)
 

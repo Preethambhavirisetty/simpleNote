@@ -78,11 +78,31 @@ BREAKPOINT_PERCENTILE = int(require_env("BREAKPOINT_PERCENTILE"))
 KEYWORD_MIN_CHUNK_TOKENS = int(require_env("KEYWORD_MIN_CHUNK_TOKENS", "5"))
 KEYWORD_EXTRACTION_MAX_CHUNKS = int(require_env("KEYWORD_EXTRACTION_MAX_CHUNKS", "10"))
 KEYWORD_EXTRACTION_MAX_TOKENS = int(require_env("KEYWORD_EXTRACTION_MAX_TOKENS", "3000"))
-KEYWORD_EXTRACTION_CONCURRENCY = int(require_env("KEYWORD_EXTRACTION_CONCURRENCY", "1"))
+# 3, not 1: keyword batches are independent LLM calls and the pipeline is
+# I/O-bound end to end - running them concurrently cuts the longest stage of a
+# multi-chunk note roughly in half. The batcher caps the pool at 3 regardless.
+KEYWORD_EXTRACTION_CONCURRENCY = int(require_env("KEYWORD_EXTRACTION_CONCURRENCY", "3"))
 INDEX_CODE_CHUNKS = require_env("INDEX_CODE_CHUNKS", "false").lower() == "true"
 INDEX_JSON_CHUNKS = require_env("INDEX_JSON_CHUNKS", "false").lower() == "true"
 MIN_INDEXABLE_TOKENS = int(require_env("MIN_INDEXABLE_TOKENS", "10"))
 MIN_SUMMARY_CHUNK_TOKENS = int(require_env("MIN_SUMMARY_CHUNK_TOKENS", "10"))
+
+# Hierarchical summaries: group calls are independent, so run a few at once.
+SUMMARY_GROUP_CONCURRENCY = int(require_env("SUMMARY_GROUP_CONCURRENCY", "3"))
+
+# Upper bounds on one ingestion task. Every stage is a blocking HTTP call, so
+# without these a single hung socket holds a worker slot forever - with -c 2,
+# two hung tasks stop ingestion entirely and log nothing. Soft limit raises
+# SoftTimeLimitExceeded inside the task (logged, retried); the hard limit
+# SIGKILLs the worker process as a backstop.
+INGEST_SOFT_TIME_LIMIT = int(require_env("INGEST_SOFT_TIME_LIMIT", "300"))
+INGEST_TIME_LIMIT = int(require_env("INGEST_TIME_LIMIT", "360"))
+
+# Embedding requests are batched: one giant POST for a long note is a timeout
+# waiting to happen, and the remote host prefers steady mid-sized batches.
+EMBED_BATCH_SIZE = int(require_env("EMBED_BATCH_SIZE", "64"))
+# Qdrant upserts are chunked for the same reason.
+QDRANT_UPSERT_BATCH_SIZE = int(require_env("QDRANT_UPSERT_BATCH_SIZE", "128"))
 
 EC2_INFERENCE_BASE_IP = require_env("EC2_INFERENCE_BASE_IP")
 

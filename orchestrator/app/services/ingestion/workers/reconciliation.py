@@ -135,8 +135,12 @@ def reconcile_index(limit: int | None = None) -> dict[str, int]:
         orphan_documents = find_orphan_documents(session, batch_limit)
 
     for row in stale_notes:
+        logger.info(
+            "reconciliation.reingest", note_id=row["note_id"], version=row["version"]
+        )
         ingest_in_background.delay(upsert_payload(row, trace_id))
     for row in orphan_documents:
+        logger.info("reconciliation.delete", note_id=row["note_id"])
         ingest_in_background.delay(delete_payload(row, trace_id))
 
     result = {"reingest_enqueued": len(stale_notes), "delete_enqueued": len(orphan_documents)}
