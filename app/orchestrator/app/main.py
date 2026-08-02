@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
-from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -22,7 +22,6 @@ from app.shared.api_models import HealthData
 from app.shared.routes import router as shared_router
 from app.shared.schema import ApiResponse
 from app.logger import logger, setup_logging
-from app.metrics import REQUEST_COUNT, REQUEST_LATENCY, render_metrics
 
 
 setup_logging(service="agent")
@@ -121,12 +120,6 @@ async def request_middleware(request: Request, call_next):
 
     duration_ms = round((time.monotonic() - start) * 1000, 2)
 
-    # Metrics: label by the matched route template (not the raw path) to bound cardinality.
-    route = request.scope.get("route")
-    path_label = getattr(route, "path", None) or "unmatched"
-    if request.url.path != "/metrics":
-        REQUEST_LATENCY.labels(request.method, path_label).observe((time.monotonic() - start))
-        REQUEST_COUNT.labels(request.method, path_label, str(response.status_code)).inc()
 
     # Expose the correlation id so callers (and error reports) can be tied back to logs.
     response.headers["X-Trace-Id"] = trace_id
@@ -155,12 +148,6 @@ def health():
     """Return a lightweight agent liveness response."""
     return ApiResponse.ok({"status": "ok"})
 
-
-@app.get("/metrics", include_in_schema=False)
-def metrics() -> Response:
-    """Prometheus scrape endpoint."""
-    payload, content_type = render_metrics()
-    return Response(content=payload, media_type=content_type)
 
 
 app.include_router(ingestion_router)

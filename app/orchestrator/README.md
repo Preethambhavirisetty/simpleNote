@@ -634,21 +634,29 @@ cd backend && AGENT_INTERNAL_URL=http://127.0.0.1:8002 \
 cd frontend && npm run dev
 
 
-- setup db, vector store, redis monitoring; monitor chunks, runs e2e
+- change embedding in agent-domain to use remote embeddings instead; - DONE
+- sentence transformers clean up - DONE
+- review ingestion pipeline; - INPROGRESS
+- Replace tiktoken with inference's tokenizer
+- move all under app folder
+- stream activity; tokens - 
 - multi questions; inference review;
-- stream activity; tokens
-- change LLM model
-- improve chat styles
-- improve UI
-- review ingestion pipeline; 
-- change embedding in agent-domain to use remote embeddings instead;
 - error handling; UI + BE; predefined failure messages streamed
-- test with more notes
+- Perform tests with more notes
 - dev vs prod
 - evals, tests
-- move all under app folder
 - @notename, talks about that only
 - memory management
 - citation
 - security + PII
 - langgraph
+- GHA piplines
+
+- improve chat UI styles
+- improve UI overall
+- change LLM model to qwen or llama bigger one?
+- setup db, vector store, redis monitoring; monitor chunks, runs e2e
+
+Test cases for:
+- ingestion all processors
+- 

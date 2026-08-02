@@ -6,7 +6,7 @@
 #   podman-compose down                # stop and remove containers
 #
 # Frontend: run on the host (Vite HMR doesn't work well in containers):
-#   cd frontend && npm install && npm run dev
+#   cd app/frontend && npm install && npm run dev
 #
 # NOTE: depends_on is intentionally omitted — podman-compose blocks forever
 # waiting for service_started/service_healthy conditions. Services use
@@ -32,7 +32,7 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      context: ./app/frontend
       dockerfile: Dockerfile
     container_name: notelite-frontend
     restart: unless-stopped
@@ -87,9 +87,9 @@ services:
 
   backend:
     env_file:
-      - ./backend/.env
+      - ./app/backend/.env
     build:
-      context: ./backend
+      context: ./app/backend
       dockerfile: Dockerfile
     container_name: notelite-backend
     restart: unless-stopped
@@ -103,7 +103,7 @@ services:
       AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
       AGENT_WORKFLOW_CONFIG_NAME: notelite
       # Auth cookies only over HTTPS — the containerized stack is served via nginx TLS.
-      # `environment:` overrides env_file, so a stale backend/.env cannot disable this.
+      # `environment:` overrides env_file, so a stale app/backend/.env cannot disable this.
       COOKIE_SECURE:          "true"
     volumes:
       - ./feature_flags.json:/app/feature_flags.json:ro
@@ -116,9 +116,9 @@ services:
 
   agent:
     env_file:
-      - ./orchestrator/.env
+      - ./app/orchestrator/.env
     build:
-      context: ./orchestrator
+      context: ./app/orchestrator
       dockerfile: Dockerfile
     container_name: notelite-agent
     restart: unless-stopped
@@ -133,9 +133,9 @@ services:
       AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
       AGENT_WORKFLOW_CONFIG_NAME: notelite
     volumes:
-      - ./orchestrator/app:/app/app:ro
+      - ./app/orchestrator/app:/app/app:ro
       - ./feature_flags.json:/app/feature_flags.json:ro
-      - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./app/orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
       - "8000"
     networks:
@@ -144,9 +144,9 @@ services:
   # Notelite MCP tool server — read-only tools exposed to agent-workflow
   agent-mcp:
     env_file:
-      - ./orchestrator/.env
+      - ./app/orchestrator/.env
     build:
-      context: ./orchestrator
+      context: ./app/orchestrator
       dockerfile: Dockerfile
     container_name: notelite-agent-mcp
     restart: unless-stopped
@@ -162,16 +162,16 @@ services:
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
       RUN_MIGRATIONS:         "false"
     volumes:
-      - ./orchestrator/app:/app/app:ro
+      - ./app/orchestrator/app:/app/app:ro
       - ./feature_flags.json:/app/feature_flags.json:ro
-      - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./app/orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
     expose:
       - "8000"
     networks:
       - notelite-net
 
   # Standalone agent workflow orchestration service
-  # ── Observability: agent run tracker (observability/) ───────────────────────
+  # ── Observability: agent run tracker (app/observability/) ───────────────────
 
   agentlog-mysql:
     image: docker.io/library/mysql:8.4
@@ -190,7 +190,7 @@ services:
   # Port 8500, not the app default 8000: that collides with the backend.
   agentlog-api:
     build:
-      context: ./observability/backend
+      context: ./app/observability/backend
       dockerfile: Dockerfile
     container_name: notelite-agentlog-api
     restart: unless-stopped
@@ -203,7 +203,7 @@ services:
       AGENTLOG_STATIC_DIR: /app/static
     volumes:
       # The built dashboard, served by the API itself: one port, no proxy.
-      - ./observability/frontend/dist:/app/static:ro
+      - ./app/observability/frontend/dist:/app/static:ro
     expose:
       - "8000"
     ports:
@@ -254,14 +254,14 @@ services:
       # Writes stay off until a run can pause for approval and resume.
       MUTATIONS_ENABLED:      "false"
       PLAYBOOK_SELECTION_MODE: single
-      # Run logging into observability/. Harmless when the collector is down:
+      # Run logging into app/observability/. Harmless when the collector is down:
       # every log call becomes a no-op rather than failing the request.
       AGENTLOG_ENABLED:       "true"
       AGENTLOG_ENDPOINT:      http://agentlog-api:8000
       PYTHONPATH:             /app:/opt/agentlog
     volumes:
       # One copy of the SDK, mounted rather than vendored into the image.
-      - ./observability/sdk:/opt/agentlog:ro
+      - ./app/observability/sdk:/opt/agentlog:ro
       # Source mounted read-only, as the agent service does: a code change
       # needs a restart, not an image rebuild.
       - ./app/agent-runtime/api:/app/api:ro
@@ -283,9 +283,9 @@ services:
   # Agent Celery worker — ingestion + conversation queues
   agent-celery:
     env_file:
-      - ./orchestrator/.env
+      - ./app/orchestrator/.env
     build:
-      context: ./orchestrator
+      context: ./app/orchestrator
       dockerfile: Dockerfile
     container_name: notelite-agent-celery
     restart: unless-stopped
@@ -303,8 +303,8 @@ services:
       # Migrations run only in the agent API container; the worker must not race it.
       RUN_MIGRATIONS:         "false"
     volumes:
-      - ./orchestrator/app:/app/app:ro
-      - ./orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
+      - ./app/orchestrator/app:/app/app:ro
+      - ./app/orchestrator/app/shared/prompts:/app/app/shared/prompts:ro
       - ./feature_flags.json:/app/feature_flags.json:ro
     networks:
       - notelite-net
