@@ -233,13 +233,12 @@ services:
     container_name: notelite-agent-domain
     restart: unless-stopped
     environment:
-      EMBEDDING_MODEL:        sentence-transformers/all-MiniLM-L6-v2
-      EMBEDDING_DEVICE:       cpu
+      # Ranking is served by the inference host, same as the orchestrator.
+      EC2_INFERENCE_BASE_IP:  ${EC2_INFERENCE_BASE_IP}
+      EMBEDDING_MODEL:        ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      EMBEDDING_API_KEY:      ${EMBEDDING_API_KEY}
       PLAYBOOK_CANDIDATE_LIMIT: "7"
-      HF_HOME:                /app/.cache/huggingface
-      SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
     volumes:
-      - agent-model-cache:/app/.cache
       # The catalog is data, not code: mount it so editing a playbook takes
       # effect on restart instead of needing an image rebuild.
       - ./app/agent-domain/playbooks:/app/playbooks:ro

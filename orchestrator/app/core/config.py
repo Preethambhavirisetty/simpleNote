@@ -84,9 +84,10 @@ INDEX_JSON_CHUNKS = require_env("INDEX_JSON_CHUNKS", "false").lower() == "true"
 MIN_INDEXABLE_TOKENS = int(require_env("MIN_INDEXABLE_TOKENS", "10"))
 MIN_SUMMARY_CHUNK_TOKENS = int(require_env("MIN_SUMMARY_CHUNK_TOKENS", "10"))
 
+EC2_INFERENCE_BASE_IP = require_env("EC2_INFERENCE_BASE_IP")
 
 # Embeddings — always served remotely from RunPod (no local GPU on EC2)
-EMBEDDING_MODEL_BASE = require_env("EMBEDDING_MODEL_BASE", "").rstrip("/")
+EMBEDDING_MODEL_BASE = f"http://{EC2_INFERENCE_BASE_IP}:8003" # require_env("EMBEDDING_MODEL_BASE", "").rstrip("/")
 EMBEDDING_MODEL = require_env("EMBEDDING_MODEL")
 EMBEDDING_API_KEY = require_env("EMBEDDING_API_KEY", "")
 EMBEDDING_TIMEOUT = float(require_env("EMBEDDING_TIMEOUT", "120"))
@@ -100,7 +101,7 @@ QDRANT_COLLECTION = require_env("QDRANT_COLLECTION")
 
 
 # LLM — served remotely from RunPod
-LLM_API_BASE = require_env("LLM_API_BASE")
+LLM_API_BASE = f"http://{EC2_INFERENCE_BASE_IP}:8001/v1" # require_env("LLM_API_BASE")
 LLM_API_KEY = require_env("LLM_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL")  # Legacy fallback for existing deployments.
 LLM_REASONER_MODEL = require_env("LLM_REASONER_MODEL", LLM_MODEL)
@@ -139,7 +140,7 @@ POSTGRES_DB_URL = require_env("POSTGRES_DB_URL")
 
 # Reranker — optional remote cross-encoder (Cohere-compatible API).
 # Leave empty to skip reranking and rely on RRF scores from Qdrant.
-RERANKER_API_BASE = os.getenv("RERANKER_API_BASE", "").rstrip("/")
+RERANKER_API_BASE = f"http://{EC2_INFERENCE_BASE_IP}:8003" # os.getenv("RERANKER_API_BASE", "").rstrip("/")
 RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
 RERANKER_MIN_RELEVANCE_SCORE = float(
     require_env("RERANKER_MIN_RELEVANCE_SCORE", "0.0")

@@ -6,12 +6,18 @@ from threading import Lock
 
 from fastapi import HTTPException
 
-from config import PLAYBOOK_CANDIDATE_LIMIT, PLAYBOOK_SEARCH_LIMIT
+from config import (
+    PLAYBOOK_CANDIDATE_LIMIT,
+    PLAYBOOK_RERANK_ENABLED,
+    PLAYBOOK_SEARCH_LIMIT,
+    RERANK_POOL_LIMIT,
+)
 from integrations.embedder import (
     EmbeddingsUnavailableError,
     embed_texts,
     embeddings_available,
 )
+from integrations.reranker import RerankerUnavailableError, rerank, reranker_available
 from schemas.playbook_schema import Playbook, PlaybookCandidates, PlaybookMatch
 from utils import (
     CATALOG_ROOT,
@@ -23,7 +29,6 @@ from utils import (
 
 
 log = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True)
 class PlaybookIndex:
@@ -114,17 +119,55 @@ class PlaybookService:
     def search_playbooks(
         self, query: str, limit: int = PLAYBOOK_SEARCH_LIMIT
     ) -> list[PlaybookMatch]:
+        """Rank playbooks against a question.
+
+        Embeddings rank by default. A cross-encoder reranker is wired in and
+        can be switched on with PLAYBOOK_RERANK_ENABLED, but it measured worse
+        here (67% top-1 / 87% recall@3 versus 83% / 100%) because ms-marco
+        judges whether a passage answers a query, and a playbook description
+        answers nothing - see tests/rank_eval.py.
+        """
         question = query.strip()
         if not question:
             raise HTTPException(status_code=422, detail="Search query must not be empty")
 
+        playbooks = {playbook.playbook_id: playbook for playbook in self.list_playbooks()}
+        pool = list(playbooks)
+
+        if len(pool) > RERANK_POOL_LIMIT and embeddings_available():
+            pool = [playbook_id for playbook_id, _ in self._by_embedding(question, RERANK_POOL_LIMIT)]
+            log.info("shortlisted %d playbooks by embedding", len(pool))
+
+        if PLAYBOOK_RERANK_ENABLED and reranker_available():
+            try:
+                documents = [self._rerank_text(playbooks[playbook_id]) for playbook_id in pool]
+                ranked = [
+                    (pool[item.index], item.score)
+                    for item in rerank(question, documents, top_n=limit)
+                ][:limit]
+                return [
+                    PlaybookMatch(playbook=playbooks[playbook_id], score=score)
+                    for playbook_id, score in ranked
+                ]
+            except RerankerUnavailableError as exc:
+                # Fall through to embeddings: a degraded ranking beats no
+                # routing at all, and the selector LLM decides either way.
+                log.warning("reranker unavailable, falling back to embeddings: %s", exc)
+
         try:
-            index = self.initialize_embeddings()
+            ranked = self._by_embedding(question, limit)
         except EmbeddingsUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        question_vector = self._centre(embed_texts([question])[0], index.mean)
 
-        ranked = sorted(
+        return [
+            PlaybookMatch(playbook=playbooks[playbook_id], score=score)
+            for playbook_id, score in ranked
+        ]
+
+    def _by_embedding(self, question: str, limit: int) -> list[tuple[str, float]]:
+        index = self.initialize_embeddings()
+        question_vector = self._centre(embed_texts([question])[0], index.mean)
+        return sorted(
             (
                 (playbook_id, self._best_similarity(question_vector, vectors))
                 for playbook_id, vectors in index.vectors.items()
@@ -132,10 +175,21 @@ class PlaybookService:
             key=lambda item: (-item[1], item[0]),
         )[:limit]
 
-        return [
-            PlaybookMatch(playbook=self.get_playbook(playbook_id), score=score)
-            for playbook_id, score in ranked
-        ]
+    @staticmethod
+    def _rerank_text(playbook: Playbook) -> str:
+        """What the cross-encoder reads for one playbook.
+
+        Purpose first, then the plans: the plan names carry the intent signal
+        ("find_notes" vs "answer_from_notes") that separates near-identical
+        descriptions.
+        """
+        plans = "; ".join(
+            f"{plan.name}: {' '.join(plan.description.split())}" for plan in playbook.plans
+        )
+        return (
+            f"{playbook.name}. {' '.join(playbook.description.split())} "
+            f"Plans: {plans}"
+        )
 
     def initialize_embeddings(self) -> PlaybookIndex:
         """Embed every playbook once, at startup or on the first search."""

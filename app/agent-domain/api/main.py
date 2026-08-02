@@ -5,7 +5,8 @@ from fastapi import FastAPI
 
 from api.routes import catalog_service, playbook_service, router
 
-from integrations.embedder import embeddings_available, get_embedder
+from integrations.embedder import embeddings_available
+from integrations.reranker import reranker_available
 
 
 log = logging.getLogger(__name__)
@@ -19,13 +20,14 @@ async def lifespan(app: FastAPI):
     if problems:
         raise RuntimeError("Invalid domain catalog:\n" + "\n".join(problems))
 
-    # Embeddings are optional: below the candidate limit nothing is embedded,
-    # so a deployment without them is valid. Warm them only when present.
-    if embeddings_available():
-        get_embedder()
-        playbook_service.initialize_embeddings()
-    else:
-        log.info("sentence-transformers not installed; semantic search disabled")
+    # Ranking is served remotely, so there is no model to warm here. Just say
+    # which paths are usable, so a misconfigured host is obvious at boot rather
+    # than on the first search.
+    log.info(
+        "ranking: reranker=%s embeddings=%s",
+        "on" if reranker_available() else "off",
+        "on" if embeddings_available() else "off",
+    )
 
     yield
 
