@@ -1,5 +1,9 @@
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.v1 import fields, ingest, logs, runs, stats
@@ -34,3 +38,12 @@ def health() -> dict:
     with get_engine().connect() as conn:
         conn.execute(text("SELECT 1"))
     return {"status": "ok", "database": settings.mysql_database}
+
+
+# Serve the built dashboard from this same app when a build is present, so a
+# remote deployment needs one port and no proxy. Local `make dev` is unchanged:
+# without a dist/ directory this mounts nothing and Vite still serves the UI.
+_STATIC = Path(os.getenv("AGENTLOG_STATIC_DIR", "/app/static"))
+if (_STATIC / "index.html").is_file():
+    # Mounted last so every /api/v1 and /health route already claimed its path.
+    app.mount("/", StaticFiles(directory=_STATIC, html=True), name="dashboard")

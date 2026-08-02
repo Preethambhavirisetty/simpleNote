@@ -48,6 +48,9 @@ CASES: list[Case] = [
     # Relabelled when `list_tags` moved out of direct_tool: listing is a read.
     Case("What tags do I have set up?", "search_notes", ("browse_tags",)),
     Case("Open the note called Sprint Retro and read it to me.", "search_notes", ("open_note", "find_notes")),
+    # From production traffic: routed to notes_qa, which answers in prose when
+    # the user plainly asked for the notes themselves.
+    Case("find me the notes where i wrote about food", "search_notes", ("find_notes",)),
 
     # ── note_timeline: anchored to a period ─────────────────────────────────
     Case("What notes did I create in the last three days?", "note_timeline", ("recent_notes",)),

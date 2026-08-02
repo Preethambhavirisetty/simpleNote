@@ -15,8 +15,9 @@ examples:
 plans:
   - name: recent_notes
     description: >-
-      List the notes in the requested time window, newest first. Use when the
-      user wants to see the notes rather than a narrative.
+      List the notes in the requested time window, newest first. The answer is
+      the list itself - titles and dates. Use for "what did I write/add/touch"
+      and "show me my notes from X", where naming the notes answers it.
     steps:
       - step: resolve_filters
       - step: validate_filters
@@ -27,9 +28,11 @@ plans:
 
   - name: timeline_digest
     description: >-
-      Order the notes in the requested window by date and describe the activity
-      as a narrative timeline. Use when the user asks what happened or what they
-      worked on over a period.
+      Order the notes in the window by date and write a narrative account of
+      the activity. Use when the user wants prose about the period rather than
+      a list - "summarize my week", "walk me through", "what was I working on",
+      "give me the history". If a bare list of note titles would answer the
+      request, use recent_notes instead.
     steps:
       - step: resolve_filters
       - step: validate_filters

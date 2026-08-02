@@ -8,6 +8,7 @@ import httpx
 from llama_index.core.llms import ChatMessage
 
 from config import LLM_API_BASE, LLM_API_KEY, LLM_SUMMARIZER_MODEL
+from integrations import observability as obs
 
 
 log = logging.getLogger(__name__)
@@ -48,15 +49,37 @@ def llm_call_general(
         "stream": False,
     }
 
-    response = _http_client().post(
-        _chat_completions_url(),
-        headers=_headers(),
-        json=body,
-        timeout=timeout,
+    obs.debug(
+        "llm call: %s",
+        model,
+        phase="llm",
+        data={
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [
+                {"role": m["role"], "content": obs.preview(m["content"], 600)}
+                for m in body["messages"]
+            ],
+        },
     )
-    response.raise_for_status()
 
-    data = response.json()
+    with obs.timed("llm", f"llm {model}") as timer:
+        response = _http_client().post(
+            _chat_completions_url(),
+            headers=_headers(),
+            json=body,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        _usage = data.get("usage") or {}
+        timer.track(
+            model=model,
+            input_tokens=_usage.get("prompt_tokens"),
+            output_tokens=_usage.get("completion_tokens"),
+            total_tokens=_usage.get("total_tokens"),
+        )
 
     usage = data.get("usage") or {}
     choices = data.get("choices") or []
@@ -84,6 +107,14 @@ def llm_call_general(
     content = _extract_message_content(data)
     if not content:
         log.warning("LLM returned empty content", extra={"response": data})
+        obs.warn("llm returned empty content", phase="llm", data={"response": obs.preview(data)})
+
+    obs.debug(
+        "llm replied (%d chars)",
+        len(content),
+        phase="llm",
+        data={"finish_reason": finish_reason, "content": obs.preview(content, 800)},
+    )
     return content
 
 

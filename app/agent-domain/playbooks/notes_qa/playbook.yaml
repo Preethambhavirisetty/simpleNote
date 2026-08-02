@@ -3,12 +3,16 @@ name: Notes Q&A
 description: >-
   Answer a question using the user's own notes as the evidence. Use this
   playbook when the request asks what the notes say about a topic, needs facts
-  the user wrote down, or expects prose grounded in stored content. The result
-  is an answer, not a list of notes.
+  the user wrote down, or expects prose grounded in stored content.
+
+  The result is an answer written in prose, not a list of notes. If the user
+  asked to find, locate, list, show, or pull up notes - anything where the
+  notes themselves are what they want back - that is the search playbook, even
+  though answering it would also require reading their notes.
 examples:
   - What did I decide about the pricing model?
   - What do my notes say about the vendor migration?
-  - Do I have anything written about the Q3 roadmap?
+  - What does my Q3 roadmap note actually commit us to?
   - What were the action items from the design review?
   - Explain my notes on retrieval evaluation.
   - Give me an overview of everything I have on onboarding.

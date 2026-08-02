@@ -62,8 +62,17 @@ def drive(state: RunState, context: RunContext) -> RunState:
         if name is None:
             return state
 
-        obs.debug("node %s", name, phase="graph", data={"phase_in": state.phase})
+        obs.debug(
+            "-> node %s", name, phase="graph", data={"state": state.snapshot()}
+        )
         state = NODES[name](state, context)
+        obs.debug(
+            "<- node %s (phase now %s)",
+            name,
+            state.phase,
+            phase="graph",
+            data={"state": state.snapshot()},
+        )
 
         if name in edges.TERMINAL_AFTER:
             return state

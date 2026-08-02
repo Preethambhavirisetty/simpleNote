@@ -57,6 +57,13 @@ class PostgresArtifactStore:
                 # such rows stay eligible for reconciliation re-ingest.
                 indexed_version=int(payload.get("version") or -1),
             ))
+            # The child tables reference agent_documents only through a database
+            # foreign key - there is no ORM relationship() for the unit of work
+            # to order by - so the parent has to be on disk before its children
+            # are inserted. Without this the flush order is arbitrary, and it
+            # only bites when a document actually has dates to write.
+            session.flush()
+
             session.execute(delete(ChunkDateRecord).where(ChunkDateRecord.doc_id == doc_id))
             session.execute(delete(SkippedChunkRecord).where(SkippedChunkRecord.doc_id == doc_id))
             session.add_all(ChunkDateRecord(doc_id=doc_id, **date) for date in dates)

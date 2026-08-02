@@ -117,7 +117,9 @@ def run_logger(question: str, conversation_id: str | None, **metadata: Any):
 def finish(answer: str | None, status: str = "ok", **track: Any) -> None:
     run = current()
     if track:
-        _safely(run.track, **track)
+        # Attach the tracked values to a real line so they carry a phase; a
+        # bare track() shows up in the stream with phase "None".
+        _safely(run.info, "run finished", phase="run", track=track)
     _safely(run.finish, final_answer=answer, status=status)
 
 

@@ -5,6 +5,16 @@ description: >-
   playbook when the user wants to locate notes, browse a folder, or see which
   notes mention something, and the expected result is a list of notes with
   where they live.
+
+  Verbs decide it against the question-answering playbook: find, locate,
+  search, list, show me, pull up, which notes, where did I write, do I have a
+  note about. All of these want notes back, so they belong here rather than
+  with question answering - including when the request names a topic, as in
+  "find me the notes where I wrote about X".
+
+  They do not decide it against the timeline playbook. A request anchored to a
+  period - last week, in January, since Monday, recently - belongs there even
+  when it opens with one of these verbs.
 examples:
   - Find my notes about the vendor migration.
   - Which notes mention Postgres?

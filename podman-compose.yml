@@ -29,9 +29,6 @@ volumes:
   postgres-data:
   qdrant-data:
   agent-model-cache:
-  loki-data:
-  grafana-data:
-  prometheus-data:
 
 services:
 
@@ -92,52 +89,6 @@ services:
 
   # ── Observability ────────────────────────────────────────────────────────────
 
-  loki:
-    image: docker.io/grafana/loki:2.9.0
-    container_name: notelite-loki
-    restart: unless-stopped
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - ./logging/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
-      - loki-data:/loki
-    expose:
-      - "3100"
-    networks:
-      - notelite-net
-
-  grafana:
-    image: docker.io/grafana/grafana:10.2.0
-    container_name: notelite-grafana
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_AUTH_ANONYMOUS_ENABLED: "false"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./logging/grafana/provisioning:/etc/grafana/provisioning:ro
-    expose:
-      - "3000"
-    networks:
-      - notelite-net
-
-  prometheus:
-    image: docker.io/prom/prometheus:v2.54.1
-    container_name: notelite-prometheus
-    restart: unless-stopped
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-    volumes:
-      - ./logging/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    expose:
-      - "9090"
-    networks:
-      - notelite-net
-
-  # ── Backend (FastAPI) ────────────────────────────────────────────────────────
-
   backend:
     env_file:
       - ./backend/.env
@@ -151,7 +102,6 @@ services:
       MESSAGE_BROKER_URL:     *redis-url
       CELERY_RESULT_BACKEND:  *redis-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://loki:3100
       AGENT_INTERNAL_URL:     http://agent:8000
       AGENT_WORKFLOW_INTERNAL_URL: http://agent-runtime:8200
       AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
@@ -187,7 +137,6 @@ services:
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://loki:3100
       AGENT_WORKFLOW_INTERNAL_URL: http://agent-runtime:8200
       AGENT_WORKFLOW_API_KEY:  ${AGENT_API_KEY}
       AGENT_WORKFLOW_CONFIG_NAME: notelite
@@ -224,7 +173,6 @@ services:
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://loki:3100
       RUN_MIGRATIONS:         "false"
     volumes:
       - ./orchestrator/app:/app/app:ro
@@ -266,6 +214,10 @@ services:
       MYSQL_USER:     root
       MYSQL_PASSWORD: ${AGENTLOG_MYSQL_PASSWORD:-devroot}
       MYSQL_DATABASE: agentlog
+      AGENTLOG_STATIC_DIR: /app/static
+    volumes:
+      # The built dashboard, served by the API itself: one port, no proxy.
+      - ./observability/frontend/dist:/app/static:ro
     expose:
       - "8000"
     ports:
@@ -288,6 +240,12 @@ services:
       SENTENCE_TRANSFORMERS_HOME: /app/.cache/sentence-transformers
     volumes:
       - agent-model-cache:/app/.cache
+      # The catalog is data, not code: mount it so editing a playbook takes
+      # effect on restart instead of needing an image rebuild.
+      - ./app/agent-domain/playbooks:/app/playbooks:ro
+      - ./app/agent-domain/operations.yaml:/app/operations.yaml:ro
+      - ./app/agent-domain/mappings.yaml:/app/mappings.yaml:ro
+      - ./app/agent-domain/steps.yaml:/app/steps.yaml:ro
     expose:
       - "8100"
     networks:
@@ -319,6 +277,19 @@ services:
     volumes:
       # One copy of the SDK, mounted rather than vendored into the image.
       - ./observability/sdk:/opt/agentlog:ro
+      # Source mounted read-only, as the agent service does: a code change
+      # needs a restart, not an image rebuild.
+      - ./app/agent-runtime/api:/app/api:ro
+      - ./app/agent-runtime/graph:/app/graph:ro
+      - ./app/agent-runtime/integrations:/app/integrations:ro
+      - ./app/agent-runtime/loaders:/app/loaders:ro
+      - ./app/agent-runtime/routing:/app/routing:ro
+      - ./app/agent-runtime/schemas:/app/schemas:ro
+      - ./app/agent-runtime/state:/app/state:ro
+      - ./app/agent-runtime/workflows:/app/workflows:ro
+      - ./app/agent-runtime/prompts:/app/prompts:ro
+      - ./app/agent-runtime/config.py:/app/config.py:ro
+      - ./app/agent-runtime/utils.py:/app/utils.py:ro
     expose:
       - "8200"
     networks:
@@ -348,7 +319,6 @@ services:
       CELERY_RESULT_BACKEND:  *redis-url
       POSTGRES_DB_URL:        *pg-url
       FEATURE_FLAGS_PATH:     /app/feature_flags.json
-      LOKI_URL:               http://loki:3100
       # Migrations run only in the agent API container; the worker must not race it.
       RUN_MIGRATIONS:         "false"
     volumes:

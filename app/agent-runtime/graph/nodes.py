@@ -166,10 +166,15 @@ def approve(state: RunState, context: RunContext, *, choice: str | None = None) 
 
 def answer(state: RunState, context: RunContext) -> RunState:
     """Make sure the run ends with something to say."""
-    obs.track(
-        steps_run=len(state.steps),
-        tool_calls=sum(1 for run in state.steps if run.call and run.ok),
-        step_errors=len(state.errors),
+    obs.info(
+        "run summary",
+        phase="answer",
+        data={"state": state.snapshot()},
+        track={
+            "steps_run": len(state.steps),
+            "tool_calls": sum(1 for run in state.steps if run.call and run.ok),
+            "step_errors": len(state.errors),
+        },
     )
     if not state.answer:
         # No LLM step in this plan wrote prose, so report what happened rather

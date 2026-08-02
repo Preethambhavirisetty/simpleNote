@@ -603,3 +603,52 @@ GOOD: when the catalog does grow past 7, re-run the eval before trusting the cut
 MY IDEA:
 integrate langgraph, keep playbook selector, executor, reviewer as nodes; executor simply takes the plan's steps and executes one by one and updates state accordingly, once the steps are completed, then it goes to summarizer(drafts the answer), then to reviewer(rules come from playbook again), if reviewer says ok true cool otherwise retriggers summarizer to improve the answer based on a reviewer feedback, if improved then streams the answer. here executor is dumb. may be in direct_tool route, we can add executor tool loops, right? what happens if user asks multiple questions in a singe question?
 
+
+
+# ── infra (podman) ────────────────────────────────────────────────
+podman run -d --name redis -p 6379:6379 redis:7-alpine redis-server --requirepass "$REDIS_PASSWORD"
+podman run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" -e POSTGRES_DB=notelite postgres:16
+podman run -d --name qdrant   -p 6333:6333 qdrant/qdrant
+
+# ── agent-domain :8100 ────────────────────────────────────────────
+cd app/agent-domain && .venv/bin/uvicorn api.main:app --port 8100
+
+# ── agent-mcp :8001 ───────────────────────────────────────────────
+cd orchestrator && MCP_PORT=8001 .venv/bin/python -m app.mcp.main
+
+# ── agent-runtime :8200 ───────────────────────────────────────────
+cd app/agent-runtime && DOMAIN_API_BASE=http://127.0.0.1:8100 \
+  MCP_SERVERS=notelite=http://127.0.0.1:8001/mcp \
+  AGENT_WORKFLOW_API_KEY="$AGENT_API_KEY" \
+  .venv/bin/uvicorn api.main:app --port 8200
+
+# ── orchestrator :8002 ────────────────────────────────────────────
+cd orchestrator && AGENT_WORKFLOW_INTERNAL_URL=http://127.0.0.1:8200 \
+  .venv/bin/uvicorn app.main:app --port 8002
+
+# ── backend :8000 ─────────────────────────────────────────────────
+cd backend && AGENT_INTERNAL_URL=http://127.0.0.1:8002 \
+  .venv/bin/uvicorn app.main:app --port 8000
+
+# ── frontend :5173 ────────────────────────────────────────────────
+cd frontend && npm run dev
+
+
+- setup db, vector store, redis monitoring; monitor chunks, runs e2e
+- multi questions; inference review;
+- stream activity; tokens
+- change LLM model
+- improve chat styles
+- improve UI
+- review ingestion pipeline; 
+- change embedding in agent-domain to use remote embeddings instead;
+- error handling; UI + BE; predefined failure messages streamed
+- test with more notes
+- dev vs prod
+- evals, tests
+- move all under app folder
+- @notename, talks about that only
+- memory management
+- citation
+- security + PII
+- langgraph

@@ -119,3 +119,50 @@ class RunState(BaseModel):
     def evidence(self) -> list[Any]:
         """Everything the tool-calling steps returned, in order."""
         return [run.output for run in self.steps if run.call is not None and run.ok]
+
+    def snapshot(self) -> dict[str, Any]:
+        """The run state as it stands, for a log line at a node boundary.
+
+        Deliberately the whole shape rather than a chosen few fields: when a
+        run goes wrong the useful question is usually "what did state look like
+        here", and a snapshot answers it without another deploy.
+        """
+        return {
+            "phase": self.phase,
+            "cursor": self.cursor,
+            "playbook": self.playbook_id,
+            "plan": self.plan_name,
+            "filters": dict(self.filters),
+            "steps": [
+                {
+                    "step": run.step,
+                    "operation": run.operation,
+                    "tool": run.call.tool if run.call else None,
+                    "ok": run.ok,
+                    "paused": run.paused,
+                    "error": run.error,
+                    "output_shape": _shape(run.output),
+                }
+                for run in self.steps
+            ],
+            "answer_chars": len(self.answer or ""),
+            "records": len(self.structured),
+            "errors": list(self.errors),
+            "pending_approval": (
+                self.pending_approval.operation if self.pending_approval else None
+            ),
+        }
+
+
+def _shape(value: Any) -> Any:
+    """What a step returned, described rather than reproduced."""
+    if isinstance(value, dict):
+        return {
+            key: (f"list[{len(item)}]" if isinstance(item, list) else type(item).__name__)
+            for key, item in list(value.items())[:10]
+        }
+    if isinstance(value, list):
+        return f"list[{len(value)}]"
+    if isinstance(value, str):
+        return f"str[{len(value)}]"
+    return type(value).__name__ if value is not None else None
