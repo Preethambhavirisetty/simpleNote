@@ -80,6 +80,11 @@ class RetrievalResult:
     diagnostics: dict[str, Any]
     bounded_history: list[dict[str, str]]
     events: list[str] = field(default_factory=list)
+    # Every reranked match, not just the few that fit the answer's context
+    # budget. Chat wants the best two chunks; a question like "how many notes
+    # mention X" wants all of them, and reading `references` for that silently
+    # caps the count at RETRIEVAL_CONTEXT_SEED_LIMIT.
+    ranked_references: list[dict[str, Any]] = field(default_factory=list)
 
 
 def contextualize_query(
@@ -352,6 +357,8 @@ def run_retrieval(
         artifact_store,
         seeds,
     )
+    # Built from every seed, before the context budget trims them.
+    ranked_references = _references(seeds, [document for document, _ in seeds])
     events.append(
         f"retrieval context completed: chunks={len(context_texts)} sources={len(references)}"
     )
@@ -360,6 +367,7 @@ def run_retrieval(
     return RetrievalResult(
         context_texts=context_texts,
         references=references,
+        ranked_references=ranked_references,
         bounded_history=_bounded_history(history),
         events=events,
         diagnostics={

@@ -69,7 +69,16 @@ def test_reranker_accepts_relevance_score_field(monkeypatch):
     ]
 
 
-def test_reranker_falls_back_to_rrf_when_all_results_are_below_threshold(monkeypatch):
+def test_reranker_keeps_its_order_when_every_score_is_below_threshold(monkeypatch):
+    """All-negative scores are normal for this model, not a signal of failure.
+
+    ms-marco returns negative logits for correct matches - measured against the
+    deployed model, the query "sourdough" scores its own starter log at -11.0
+    and still ranks it first, and "baking" tops its list at -2.66. This test
+    previously asserted a fallback to RRF order in that case, which threw away
+    a correct ranking on every such query. The threshold may trim a tail, but
+    it must never discard the reranker's ordering.
+    """
     monkeypatch.setattr(reranker, "RERANKER_API_BASE", "http://reranker")
     monkeypatch.setattr(reranker, "RERANKER_MIN_RELEVANCE_SCORE", 0.0)
     monkeypatch.setattr(
@@ -83,4 +92,22 @@ def test_reranker_falls_back_to_rrf_when_all_results_are_below_threshold(monkeyp
 
     ranked = reranker.rerank("query", chunks(), top_k=2)
 
-    assert [document.text for document, _score in ranked] == ["first", "second"]
+    assert [document.text for document, _score in ranked] == ["third", "second"]
+
+
+def test_reranker_still_trims_a_tail_when_something_clears_the_threshold(monkeypatch):
+    """The threshold keeps working when at least one candidate passes it."""
+    monkeypatch.setattr(reranker, "RERANKER_API_BASE", "http://reranker")
+    monkeypatch.setattr(reranker, "RERANKER_MIN_RELEVANCE_SCORE", 0.0)
+    monkeypatch.setattr(
+        reranker,
+        "_http_client",
+        lambda: FakePoolClient([
+            {"index": 2, "score": 1.5},
+            {"index": 1, "score": -8.0},
+        ]),
+    )
+
+    ranked = reranker.rerank("query", chunks(), top_k=2)
+
+    assert [document.text for document, _score in ranked] == ["third"]

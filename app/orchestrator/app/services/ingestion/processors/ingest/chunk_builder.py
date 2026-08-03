@@ -64,6 +64,15 @@ class ChunkBuilder:
         )
 
     def _embedding_text(self, chunk: ChunkKeywordResult, metadata: dict[str, Any]) -> str:
+        """Text that gets embedded and reranked - not necessarily what is shown.
+
+        The note title is prepended because it is frequently the only place a
+        topic is named. "Sourdough Starter Log" has a body reading "Fed the
+        starter with 50g flour", so before this a search for "sourdough"
+        matched nothing in it and the reranker scored the correct note -11.
+        Short notes are the common case and they suffer most: their bodies
+        assume the title as context, exactly as the writer intended.
+        """
         content = self._normalize_whitespace(chunk.content)
         heading = str(metadata.get("heading_context") or "").strip()
         if chunk.chunk_type == ChunkType.TABLE.value:
@@ -78,8 +87,17 @@ class ChunkBuilder:
         }:
             return content
         if content.startswith("#") or not heading or not metadata.get("has_heading_context"):
-            return content
-        return self._normalize_whitespace(f"{heading}\n\n{content}")
+            return self._with_title(content, metadata)
+        return self._with_title(
+            self._normalize_whitespace(f"{heading}\n\n{content}"), metadata
+        )
+
+    def _with_title(self, text: str, metadata: dict[str, Any]) -> str:
+        """Prefix the note title, unless the text already leads with it."""
+        title = str(metadata.get("note_title") or "").strip()
+        if not title or title.casefold() in text[: len(title) + 40].casefold():
+            return text
+        return self._normalize_whitespace(f"{title}\n\n{text}")
 
     @staticmethod
     def _skip_reason(chunk_type: str, metadata: dict[str, Any], embed_text: str) -> str:

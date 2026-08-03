@@ -686,3 +686,5 @@ out of scope:
 
 Imp Note:
 Containers don't pick up .env changes on restart. Podman bakes env_file values in at creation time, so even the containers whose files you'd already fixed were still running with the dead IP. They needed podman rm -f + recreate, not restart. That's the same trap that bit the agent-runtime container earlier this session — worth remembering, since editing .env and restarting looks like it should work and silently doesn't.
+
+I marked all 18 documents indexed_version = -1, which makes them look stale to the existing reconciler, then ran one reconcile_index() sweep. That re-ingested everything through the normal production task path — same version guards, same retries, same logging — rather than a bespoke script that would bypass the code you actually ship. Two SQL/Python lines, no manual editing.

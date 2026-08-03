@@ -579,23 +579,60 @@ _TOOL_CATALOG.extend(
 )
 
 # A retriever returns its k best passages whether or not any of them are about
-# the question, so "did I ever mention X" is always yes unless something
-# rejects weak matches. Measured on this corpus: genuine topics score 1.3-5.7
-# and unrelated ones 0.06-0.07, so a floor below the gap separates them.
+# the question, so "did I ever mention X" is yes every time unless something
+# rejects weak matches.
+# Relevance is a MARGIN, not an absolute score. These are cross-encoder logits
+# and they are not comparable across queries: measured against the deployed
+# model, a correct match scores +3.36 for "picnic" and -11.0 for "sourdough".
+# Any fixed floor either admits everything or rejects correct answers, and both
+# were observed in production.
 #
-# Calibrate with `MENTION_MIN_RELEVANCE` rather than editing this: the scores
-# are cross-encoder logits whose scale depends on the reranker model, and the
-# gap was measured on a small corpus.
-MENTION_MIN_RELEVANCE = float(os.getenv("MENTION_MIN_RELEVANCE", "0.5"))
+# What does separate signal from noise is the gap between the best match and
+# the field the retriever also considered:
+#
+#     picnic     +3.36 against a field at -10      -> separated
+#     baking     -2.66 against a field at -10.5    -> separated
+#     scuba      everything within 0.2 of the best -> nothing is about it
+MENTION_MIN_MARGIN = float(os.getenv("MENTION_MIN_MARGIN", "2.0"))
+MENTION_MARGIN_TOLERANCE = float(os.getenv("MENTION_MARGIN_TOLERANCE", "6.0"))
+
+
+def _all_matches(result: Any) -> Sequence[Mapping[str, Any]]:
+    """Every reranked match, not the handful kept for the answer's context.
+
+    `references` is trimmed to RETRIEVAL_CONTEXT_SEED_LIMIT (2) because that is
+    what fits a chat answer. Counting from it silently caps every count at two,
+    however many notes actually matched.
+    """
+    return getattr(result, "ranked_references", None) or result.references
 
 
 def _split_by_relevance(
     notes: Sequence[Mapping[str, Any]], min_relevance: float | None = None
 ) -> tuple[list[dict[str, Any]], int]:
-    """Split notes into confident matches and a count of the weak ones."""
-    floor = MENTION_MIN_RELEVANCE if min_relevance is None else float(min_relevance)
-    confident = [note for note in notes if (note.get("best_score") or 0.0) >= floor]
-    return list(confident), len(notes) - len(confident)
+    """Split notes into confident matches and a count of the weak ones.
+
+    `min_relevance` overrides the required margin, not the scale - it is still
+    a distance from the field, never an absolute score.
+    """
+    scored = [note for note in notes if note.get("best_score") is not None]
+    if not scored:
+        return [], len(notes)
+
+    margin = MENTION_MIN_MARGIN if min_relevance is None else float(min_relevance)
+    ordered = sorted(scored, key=lambda note: note["best_score"], reverse=True)
+    best = ordered[0]["best_score"]
+    # The baseline is the weakest thing the retriever surfaced: what it looked
+    # at and did not prefer. A real topic pulls clear of that field.
+    baseline = ordered[-1]["best_score"]
+
+    if len(ordered) > 1 and (best - baseline) < margin:
+        return [], len(notes)
+
+    confident = [
+        note for note in ordered if (best - note["best_score"]) <= MENTION_MARGIN_TOLERANCE
+    ]
+    return confident, len(notes) - len(confident)
 
 # A cross-encoder scores the whole query against the passage, so interrogative
 # scaffolding drowns the topic: measured on this corpus, "food" scores 5.68
@@ -1395,7 +1432,7 @@ def count_note_mentions(
         query=topic, user_id=scope, k=_bounded_k(k, 50), role=role, history=None
     )
 
-    ranked = [_note_location(reference) for reference in result.references]
+    ranked = [_note_location(reference) for reference in _all_matches(result)]
     notes, weak = _split_by_relevance(ranked, min_relevance)
     mention_count = sum(note["match_count"] for note in notes)
     indexed = analysis.indexed_note_count(scope)
@@ -1503,7 +1540,7 @@ def last_mention(query: str, user_id: str, role: str = "user") -> dict[str, Any]
         query=topic, user_id=scope, k=10, role=role, history=None
     )
     notes, weak = _split_by_relevance(
-        [_note_location(reference) for reference in result.references]
+        [_note_location(reference) for reference in _all_matches(result)]
     )
     if not notes:
         return {
@@ -1578,7 +1615,7 @@ def related_notes(
         query=topic, user_id=scope, k=limit, role=role, history=None
     )
     seed_notes, _weak_seeds = _split_by_relevance(
-        [_note_location(reference) for reference in seeds.references]
+        [_note_location(reference) for reference in _all_matches(seeds)]
     )
     if not seed_notes:
         return {
@@ -1610,7 +1647,7 @@ def related_notes(
     )
     related = [
         _note_location(reference)
-        for reference in neighbours.references
+        for reference in _all_matches(neighbours)
         if reference.get("note_id") not in seed_ids
     ][:limit]
 
@@ -1659,7 +1696,7 @@ def recent_mentions(
         query=topic, user_id=scope, k=_bounded_k(k, 20), role=role, history=None
     )
     notes, _weak = _split_by_relevance(
-        [_note_location(reference) for reference in result.references]
+        [_note_location(reference) for reference in _all_matches(result)]
     )
     doc_ids = [f"{scope}-{note['note_id']}" for note in notes]
     stamps = analysis.document_timestamps(scope, doc_ids)
