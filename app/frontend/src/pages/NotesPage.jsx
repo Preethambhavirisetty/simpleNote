@@ -185,17 +185,17 @@ function NoteCard({ note, index, active, onSelect, onDelete, onPin }) {
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold truncate workspace-primary">{note.title || 'Untitled note'}</h2>
-          <p className="mt-2 text-xs leading-5 workspace-muted line-clamp-2">{preview}</p>
+          <p className="note-card-preview workspace-muted">{preview}</p>
         </div>
         <span className={`note-card-dot ${note.is_pinned ? 'note-card-dot-pinned' : ''}`} />
       </div>
       {note.tags?.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-1.5">
           {note.tags.slice(0, 3).map((tag) => <span key={tag.id} className="note-tag">#{tag.name}</span>)}
         </div>
       )}
-      <div className="flex items-center justify-between mt-4">
-        <span className="workspace-faint text-xs">{relativeTime(note.updated_at ?? note.created_at)}</span>
+      <div className="note-card-footer">
+        <span className="workspace-faint text-xs">Edited {relativeTime(note.updated_at ?? note.created_at)}</span>
         <div className="note-card-actions">
           <button onClick={(event) => { event.stopPropagation(); onPin(note) }} className={note.is_pinned ? 'text-[var(--accent)]' : ''} title={note.is_pinned ? 'Unpin note' : 'Pin note'}><Icon name="pin" className="h-3.5 w-3.5" /></button>
           <button onClick={(event) => { event.stopPropagation(); onDelete(note.id) }} className="hover:text-red-500" title="Delete note"><Icon name="trash" className="h-3.5 w-3.5" /></button>
@@ -208,6 +208,7 @@ function NoteCard({ note, index, active, onSelect, onDelete, onPin }) {
 function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTag, onAddTag, onRemoveTag }) {
   const [title, setTitle] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [isTitleFocused, setIsTitleFocused] = useState(false)
   const timerRef = useRef(null)
   const noteIdRef = useRef(note?.id)
   const titleRef = useRef('')
@@ -271,6 +272,8 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTa
 
   if (!note) return <EditorWelcome />
 
+  const titleValue = !isTitleFocused && title.length > 30 ? `${title.slice(0, 30)}…` : title
+
   return (
     <section className="note-editor-panel">
       <div className="note-editor-topbar">
@@ -287,7 +290,7 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTa
       <div className="flex-1 min-h-0 overflow-y-auto workspace-scroll">
         <div className="note-page">
           <TagEditor note={note} tags={tags} onCreate={onCreateTag} onAdd={onAddTag} onRemove={onRemoveTag} />
-          <input value={title} onChange={handleTitle} placeholder="Untitled note" className="note-title-input" />
+          <input value={titleValue} onFocus={() => setIsTitleFocused(true)} onBlur={() => setIsTitleFocused(false)} onChange={handleTitle} placeholder="Untitled note" className="note-title-input" title={title} />
           <div className="workspace-faint mb-9 mt-3 flex items-center gap-2 text-xs">
             <span>Last edited {relativeTime(note.updated_at)}</span><span>•</span><span>Autosaved</span>
           </div>
@@ -359,8 +362,8 @@ function EditorWelcome() {
     <section className="items-center justify-center text-center note-editor-panel">
       <div className="editor-welcome-icon">✦</div>
       <p className="workspace-faint mt-6 text-xs font-semibold uppercase tracking-[0.18em]">A quiet place to think</p>
-      <h2 className="workspace-primary mt-3 text-3xl font-semibold tracking-[-0.04em]">Pick a note and start writing.</h2>
-      <p className="max-w-sm mt-3 text-sm leading-6 workspace-muted">Select a card from the left or create a new note. Changes save automatically as you write.</p>
+      <h2 className="workspace-primary mt-3 text-2xl font-semibold tracking-[-0.04em]">Pick a note and start writing.</h2>
+      <p className="max-w-sm mt-3 text-sm leading-7 workspace-muted">Select a card from the left or create a new note. Changes save automatically as you write.</p>
     </section>
   )
 }

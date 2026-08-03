@@ -24,6 +24,7 @@ import failures
 from config import AGENT_API_KEY
 from graph import builder
 from graph.nodes import classify_state
+from workflows.steps.base import collected_facts
 from graph.context import RunContext
 from integrations import observability as obs
 from integrations.domain import DomainUnavailableError, load_catalog
@@ -119,6 +120,10 @@ def _summary(state: RunState) -> dict[str, Any]:
         "artifact_count": len(state.structured),
         "records": state.structured,
         "phase": state.phase,
+        # The measured scalars behind the answer. Exposed so a caller - and
+        # the answer eval - can check the prose against what the tools
+        # actually returned rather than taking the number on trust.
+        "facts": collected_facts(state),
     }
     if state.errors:
         # `error` stays a plain string for existing consumers; `failure` is the

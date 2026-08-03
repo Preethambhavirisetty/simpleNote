@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import noteliteIcon from '@/assets/notelite_icon.png'
+import { AppTitle } from '@/components/AppTitle'
 
 const features = [
   {
@@ -26,9 +26,8 @@ export default function HomePage() {
       <div className="landing-glow landing-glow-two" />
 
       <header className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-6 py-6 lg:px-10">
-        <Link to="/" className="flex items-center gap-2.5">
-          <img src={noteliteIcon} alt="" className="h-10 w-10 rounded-xl" />
-          <span className="text-lg font-semibold tracking-tight">NoteLite</span>
+        <Link to="/" aria-label="NoteLite home">
+          <AppTitle size="lg" />
         </Link>
 
         <nav className="hidden items-center gap-8 text-sm text-[#667061] md:flex">
@@ -107,9 +106,8 @@ function WorkspacePreview() {
       <div className="relative overflow-hidden rounded-[30px] border border-black/10 bg-white/80 p-3 shadow-[0_30px_80px_rgba(46,58,38,0.16)]">
         <div className="flex min-h-[480px] overflow-hidden rounded-[22px] border border-black/[0.07] bg-white">
           <div className="hidden w-36 shrink-0 border-r border-black/[0.07] bg-[#f2f5ef] p-3 sm:block">
-            <div className="mb-8 flex items-center gap-2 text-xs font-semibold">
-              <div className="h-5 w-5 rounded-lg bg-[#b8ff67]" />
-              NoteLite
+            <div className="mb-8">
+              <AppTitle size="sm" />
             </div>
             <div className="rounded-lg bg-[#9ed858] px-3 py-2 text-xs font-semibold text-[#17220e]">+ New chat</div>
             <div className="mt-6 space-y-3 text-xs text-[#7b8476]">

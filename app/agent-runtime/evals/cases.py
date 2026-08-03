@@ -78,6 +78,21 @@ CASES: list[Case] = [
     Case("Create a tag called urgent.", "direct_tool", ("create_tag",)),
     Case("Rename the tag research to reading.", "direct_tool", ("update_tag",)),
 
+    # ── note_insights: the answer is a number, a date, or a yes/no ──────────
+    Case("How many times did I mention the picnic?", "note_insights", ("count_mentions",)),
+    Case("How often do my notes talk about sourdough?", "note_insights", ("count_mentions",)),
+    Case("Did I ever write about visiting Boston?", "note_insights", ("count_mentions",)),
+    Case("Have I written anything about my dentist?", "note_insights", ("count_mentions",)),
+    Case("When did I last write about baking?", "note_insights", ("when_last_mentioned",)),
+    Case("When was the last time I mentioned the sprint?", "note_insights", ("when_last_mentioned",)),
+    Case("What notes are connected to the ones about sourdough?", "note_insights", ("find_related",)),
+    Case("What else relates to my picnic notes?", "note_insights", ("find_related",)),
+
+    # ── note_timeline: a named period, or a topic plus vague recency ────────
+    Case("What did I write in January 2027?", "note_timeline", ("notes_in_period",)),
+    Case("Show me the notes from last March.", "note_timeline", ("notes_in_period", "recent_notes")),
+    Case("What have I been cooking lately?", "note_timeline", ("recent_topic", "timeline_digest")),
+
     # ── direct_llm: nothing to do with the user's notes ─────────────────────
     Case("Can you make this email sound friendlier?", "direct_llm", ("generic_answer",)),
     Case("What is the difference between a mutex and a semaphore?", "direct_llm", ("generic_answer",)),

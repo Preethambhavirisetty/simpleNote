@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import noteliteIcon from '@/assets/notelite_icon.png'
+import { AppTitle } from '@/components/AppTitle'
 import { useAuthStore } from '@/stores/authStore'
 
 export default function RegisterPage() {
@@ -31,8 +31,7 @@ export default function RegisterPage() {
 
       <header className="auth-header">
         <Link to="/" className="auth-brand" aria-label="NoteLite home">
-          <img src={noteliteIcon} alt="" />
-          <span>NoteLite</span>
+          <AppTitle size="lg" />
         </Link>
 
         <Link to="/" className="auth-home-link">

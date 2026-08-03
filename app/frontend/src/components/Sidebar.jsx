@@ -6,7 +6,7 @@ import { useFolderStore } from '@/stores/folderStore'
 import { useNoteStore } from '@/stores/noteStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useFeatureFlagStore } from '@/stores/featureFlagStore'
-import noteliteIcon from '@/assets/notelite_icon.png'
+import { AppTitle } from '@/components/AppTitle'
 import ProfileAvatar from '@/components/ProfileAvatar'
 
 const icons = {
@@ -50,6 +50,7 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [editingFolderId, setEditingFolderId] = useState(null)
   const [editingFolderName, setEditingFolderName] = useState('')
+  const [openConversationMenuId, setOpenConversationMenuId] = useState(null)
 
   const isChatPage = location.pathname.startsWith('/chat')
   const activeConversationId = isChatPage ? location.pathname.split('/')[2] : null
@@ -93,16 +94,14 @@ export default function Sidebar() {
   const handleDeleteConversation = async (event, id) => {
     event.stopPropagation()
     await deleteConversation(id)
+    setOpenConversationMenuId(null)
     if (activeConversationId === String(id)) navigate('/chat')
   }
 
   return (
     <aside className={`workspace-sidebar ${isCollapsed ? 'workspace-sidebar-collapsed' : ''}`}>
       <div className={`flex items-center pb-5 pt-4 ${isCollapsed ? 'flex-col gap-3 px-2' : 'justify-between px-4'}`}>
-        <div className="flex items-center gap-2.5">
-          <img src={noteliteIcon} alt="" className="h-9 w-9 rounded-xl" />
-          {!isCollapsed && <span className="text-base font-semibold tracking-tight workspace-primary">NoteLite</span>}
-        </div>
+        <AppTitle size={isCollapsed ? 'icon' : 'md'} showText={!isCollapsed} />
         <button
           onClick={() => setIsCollapsed((value) => !value)}
           className="workspace-icon-button"
@@ -126,24 +125,49 @@ export default function Sidebar() {
             {!isCollapsed && <SectionHeader label="Recent conversations" />}
             <div className={`workspace-scroll flex-1 overflow-y-auto ${isCollapsed ? 'px-2' : 'px-2'}`}>
               {!isCollapsed && conversations.length === 0 && <p className="px-3 py-3 text-sm workspace-faint">Your conversations will appear here.</p>}
-              {conversations.map((conversation) => (
-                <button
-                  key={conversation.id}
-                  onClick={() => navigate(`/chat/${conversation.id}`)}
-                  title={conversation.title || 'Untitled conversation'}
-                  className={`conversation-row group ${isCollapsed ? 'conversation-row-collapsed' : ''} ${String(conversation.id) === activeConversationId ? 'conversation-row-active' : ''}`}
-                >
-                  <Icon name="chat" className="w-4 h-4 shrink-0" />
-                  {!isCollapsed && (
-                    <>
-                      <span className="flex-1 truncate">{conversation.title || 'Untitled conversation'}</span>
-                      <span role="button" tabIndex={0} onClick={(event) => handleDeleteConversation(event, conversation.id)} className="opacity-0 group-hover:opacity-100 hover:text-red-400">
-                        <Icon name="trash" className="h-3.5 w-3.5" />
+              {conversations.map((conversation) => {
+                const isMenuOpen = openConversationMenuId === conversation.id
+                return (
+                  <div
+                    key={conversation.id}
+                    className={`conversation-row group ${isCollapsed ? 'conversation-row-collapsed' : ''} ${String(conversation.id) === activeConversationId ? 'conversation-row-active' : ''}`}
+                  >
+                    <button
+                      onClick={() => navigate(`/chat/${conversation.id}`)}
+                      title={conversation.title || 'Untitled conversation'}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <Icon name="chat" className="w-4 h-4 shrink-0" />
+                      {!isCollapsed && <span className="flex-1 truncate">{conversation.title || 'Untitled conversation'}</span>}
+                    </button>
+                    {!isCollapsed && (
+                      <span className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setOpenConversationMenuId((current) => current === conversation.id ? null : conversation.id)
+                          }}
+                          className="conversation-menu-button"
+                          aria-label={`Conversation options for ${conversation.title || 'Untitled conversation'}`}
+                          title="Conversation options"
+                        >
+                          •••
+                        </button>
+                        {isMenuOpen && (
+                          <button
+                            type="button"
+                            onClick={(event) => handleDeleteConversation(event, conversation.id)}
+                            className="conversation-menu-popover"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </span>
-                    </>
-                  )}
-                </button>
-              ))}
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </>
         ) : (

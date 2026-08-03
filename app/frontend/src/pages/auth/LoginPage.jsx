@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import noteliteIcon from '@/assets/notelite_icon.png'
 import { useAuthStore } from '@/stores/authStore'
+import { AppTitle } from '@/components/AppTitle'
 
 export default function LoginPage() {
   const [form, setForm] = useState({ email: '', password: '' })
@@ -31,8 +31,7 @@ export default function LoginPage() {
 
       <header className="auth-header">
         <Link to="/" className="auth-brand" aria-label="NoteLite home">
-          <img src={noteliteIcon} alt="" />
-          <span>NoteLite</span>
+          <AppTitle size="lg" />
         </Link>
 
         <Link to="/" className="auth-home-link">

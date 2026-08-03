@@ -23,7 +23,6 @@ export default function ChatPage() {
   const fetchConversations = useChatStore((s) => s.fetchConversations);
   const selectConversation = useChatStore((s) => s.selectConversation);
   const newConversation = useChatStore((s) => s.newConversation);
-  const deleteConversation = useChatStore((s) => s.deleteConversation);
   const sendMessage = useChatStore((s) => s.sendMessage);
   const cancelStream = useChatStore((s) => s.cancelStream);
   const retryLastMessage = useChatStore((s) => s.retryLastMessage);
@@ -86,12 +85,6 @@ export default function ChatPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!activeConvId || !window.confirm("Delete this conversation?")) return;
-    await deleteConversation(activeConvId);
-    navigate("/chat", { replace: true });
-  };
-
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden chat-workspace">
       <header className="workspace-border flex h-[74px] shrink-0 items-center justify-between border-b px-6 lg:px-8">
@@ -110,15 +103,6 @@ export default function ChatPage() {
           </button>
           <button onClick={handleCopyLink} className="chat-new-button">
             {linkCopied ? "Copied" : "Copy link"}
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={!activeConvId}
-            className="chat-header-icon disabled:opacity-30"
-            aria-label="Delete conversation"
-            title="Delete conversation"
-          >
-            <TrashIcon />
           </button>
         </div>
       </header>
@@ -170,7 +154,7 @@ function EmptyState({ user, onPrompt }) {
       <p className="text-xs font-medium uppercase tracking-[0.17em] text-[#66a41f]">
         Your knowledge workspace
       </p>
-      <h2 className="workspace-primary mt-3 text-3xl font-medium tracking-[-0.035em] sm:text-4xl">
+      <h2 className="workspace-primary mt-3 text-2xl font-medium tracking-[-0.035em] sm:text-3xl">
         What are we thinking about{firstName ? `, ${firstName}` : ""}?
       </h2>
       <p className="max-w-lg mt-3 text-sm leading-6 workspace-muted">
@@ -400,7 +384,7 @@ function Composer({
   };
 
   return (
-    <div className="chat-composer pointer-events-auto mx-auto flex w-full max-w-4xl items-end gap-2 rounded-[24px] bg-white p-3 shadow-2xl">
+    <div className="chat-composer pointer-events-auto mx-auto flex w-full max-w-4xl items-end gap-2 rounded-2xl p-2">
       <textarea
         ref={textareaRef}
         value={input}
@@ -409,18 +393,18 @@ function Composer({
         rows={1}
         placeholder="Ask anything about your notes..."
         className="
-      max-h-40 min-h-[44px] flex-1 resize-none overflow-y-auto
-      bg-transparent px-2 py-2 text-sm leading-6
+      max-h-32 min-h-[36px] flex-1 resize-none overflow-y-auto
+      bg-transparent px-2 py-1.5 text-sm leading-5
       text-zinc-900 outline-none
       placeholder:text-zinc-500
     "
       />
 
-      <div className="flex h-[44px] items-center gap-1">
+      <div className="flex h-9 items-center gap-1">
         <button
           type="button"
           onClick={onPrompt}
-          className="flex items-center justify-center transition h-9 w-9 text-zinc-500 hover:text-zinc-900"
+          className="flex h-8 w-8 items-center justify-center text-zinc-500 transition hover:text-zinc-900"
           aria-label="Voice input"
         >
           <Mic className="w-4 h-4" />
@@ -431,7 +415,7 @@ function Composer({
           onClick={isStreaming ? onCancel : onSend}
           disabled={!isStreaming && !input.trim()}
           className={`
-  flex h-9 w-9 items-center justify-center rounded-full
+  flex h-8 w-8 items-center justify-center rounded-full
   transition-all duration-200
   ${
     isStreaming
@@ -465,25 +449,6 @@ function PlusIcon() {
       aria-hidden="true"
     >
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg
-      className="h-3.5 w-3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M19 7l-.9 12.1a2 2 0 01-2 1.9H7.9a2 2 0 01-2-1.9L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-      />
     </svg>
   );
 }

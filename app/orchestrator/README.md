@@ -639,7 +639,7 @@ cd frontend && npm run dev
 - review ingestion pipeline; - DONE
 - move all under app folder - DONE
 - error handling; UI + BE; predefined failure messages streamed - DONE
-- 
+- Tools added for multiple cases
 
 - langgraph
 - @notename, talks about that only
@@ -679,3 +679,10 @@ Use Cases:
 out of scope:
 - action on a note: create, update, move, delete
 - actions like create/delete/update tags
+
+
+- how should I properly evaluate retrieval for my app?
+
+
+Imp Note:
+Containers don't pick up .env changes on restart. Podman bakes env_file values in at creation time, so even the containers whose files you'd already fixed were still running with the dead IP. They needed podman rm -f + recreate, not restart. That's the same trap that bit the agent-runtime container earlier this session — worth remembering, since editing .env and restarting looks like it should work and silently doesn't.
