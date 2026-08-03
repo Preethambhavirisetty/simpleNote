@@ -6,6 +6,7 @@ import math
 import re
 import sys
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,8 @@ FastMCP = _load_fastmcp()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
+from app.mcp import analysis
 
 mcp = FastMCP("Notelite Tools")
 
@@ -458,6 +461,191 @@ _TOOL_CATALOG.extend(
     ]
 )
 
+_TOOL_CATALOG.extend(
+    [
+        {
+            "name": "count_note_mentions",
+            "title": "Count Mentions",
+            "description": (
+                "Count how many notes and passages mention a topic, and whether it "
+                "appears at all. Use for 'how many times did I mention X' and "
+                "'did I ever write about X' - questions a top-k search cannot answer, "
+                "because it returns k results whether or not they are relevant."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Topic to count."},
+                    "user_id": {"type": "string"},
+                    "k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 50},
+                    "role": {"type": "string", "enum": ["user", "admin"], "default": "user"},
+                },
+                "required": ["query", "user_id"],
+            },
+            "annotations": {"title": "Count Mentions", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["count", "how many", "times", "mention", "ever", "did i", "frequency"],
+        },
+        {
+            "name": "notes_in_period",
+            "title": "Notes In Period",
+            "description": (
+                "List notes from a date range, either by when they were written or by "
+                "dates their text refers to. Use for 'what did I write in January 2025'. "
+                "The two bases differ: a note written in January can be about March."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string"},
+                    "start_date": {"type": "string", "description": "ISO date, inclusive."},
+                    "end_date": {"type": "string", "description": "ISO date, inclusive."},
+                    "basis": {
+                        "type": "string",
+                        "enum": ["written", "about", "either"],
+                        "default": "written",
+                    },
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+                },
+                "required": ["user_id", "start_date", "end_date"],
+            },
+            "annotations": {"title": "Notes In Period", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["date", "range", "month", "year", "january", "period", "between", "wrote"],
+        },
+        {
+            "name": "last_mention",
+            "title": "Last Mention",
+            "description": (
+                "When a topic was most recently written about, and in which note. Use "
+                "for 'when did I last write about X'. Reports both the note's last edit "
+                "and the latest date the text refers to."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "user_id": {"type": "string"},
+                    "role": {"type": "string", "enum": ["user", "admin"], "default": "user"},
+                },
+                "required": ["query", "user_id"],
+            },
+            "annotations": {"title": "Last Mention", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["when", "last", "recent", "latest", "most recently", "date"],
+        },
+        {
+            "name": "related_notes",
+            "title": "Related Notes",
+            "description": (
+                "Notes related to the notes about a topic - a second hop that searches "
+                "using the seed notes' own vocabulary, surfacing neighbours that never "
+                "use the original word. Use for 'notes related to the ones about X'."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "user_id": {"type": "string"},
+                    "k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                    "role": {"type": "string", "enum": ["user", "admin"], "default": "user"},
+                },
+                "required": ["query", "user_id"],
+            },
+            "annotations": {"title": "Related Notes", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["related", "similar", "connected", "like", "associated", "neighbours"],
+        },
+        {
+            "name": "recent_mentions",
+            "title": "Recent Mentions",
+            "description": (
+                "A topic restricted to a recent time window, newest first. Use for "
+                "'what food did I eat recently' or 'where did I go recently'. Reports "
+                "how many matches fell outside the window, so 'nothing recently' can be "
+                "distinguished from 'nothing at all'."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "user_id": {"type": "string"},
+                    "days": {"type": "integer", "minimum": 1, "maximum": 365, "default": 30},
+                    "k": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                    "role": {"type": "string", "enum": ["user", "admin"], "default": "user"},
+                },
+                "required": ["query", "user_id"],
+            },
+            "annotations": {"title": "Recent Mentions", "readOnlyHint": True, "openWorldHint": False},
+            "keywords": ["recently", "lately", "past week", "last month", "recent", "these days"],
+        },
+    ]
+)
+
+# A retriever returns its k best passages whether or not any of them are about
+# the question, so "did I ever mention X" is always yes unless something
+# rejects weak matches. Measured on this corpus: genuine topics score 1.3-5.7
+# and unrelated ones 0.06-0.07, so a floor below the gap separates them.
+#
+# Calibrate with `MENTION_MIN_RELEVANCE` rather than editing this: the scores
+# are cross-encoder logits whose scale depends on the reranker model, and the
+# gap was measured on a small corpus.
+MENTION_MIN_RELEVANCE = float(os.getenv("MENTION_MIN_RELEVANCE", "0.5"))
+
+
+def _split_by_relevance(
+    notes: Sequence[Mapping[str, Any]], min_relevance: float | None = None
+) -> tuple[list[dict[str, Any]], int]:
+    """Split notes into confident matches and a count of the weak ones."""
+    floor = MENTION_MIN_RELEVANCE if min_relevance is None else float(min_relevance)
+    confident = [note for note in notes if (note.get("best_score") or 0.0) >= floor]
+    return list(confident), len(notes) - len(confident)
+
+# A cross-encoder scores the whole query against the passage, so interrogative
+# scaffolding drowns the topic: measured on this corpus, "food" scores 5.68
+# against the food note and "how many times did I mention food" scores 0.05.
+# These tools are invoked with the user's literal question, so the scaffolding
+# is stripped before searching. Purely lexical - no model call, and the
+# original question is still reported back.
+_QUESTION_PREFIXES = re.compile(
+    r"""^\s*(?:
+        how\s+(?:many\s+times|often)\s+(?:did|have|do)\s+i(?:\s+ever)?
+      | did\s+i\s+ever | have\s+i(?:\s+ever)?
+      | when\s+did\s+i(?:\s+last)? | when\s+was\s+the\s+last\s+time\s+i
+      | what\s+notes?\s+did\s+i | which\s+notes?\s+did\s+i
+      | get\s+me\s+(?:all\s+)?notes?\s+related\s+to\s+the\s+ones?(?:\s+that)?\s+i
+      | (?:get|show|give)\s+me(?:\s+all)? | tell\s+me
+      | what | where | when | who
+    )\b""",
+    re.IGNORECASE | re.VERBOSE,
+)
+# Verbs of writing/mentioning carry no topic signal of their own.
+_QUESTION_VERBS = re.compile(
+    r"^\s*(?:did\s+i\s+)?(?:ever\s+)?"
+    r"(?:mention(?:ed)?|write|wrote|written|talk(?:ed)?|say|said|note[ds]?)"
+    r"(?:\s+about)?\b",
+    re.IGNORECASE,
+)
+_LEADING_FILLER = re.compile(r"^\s*(?:about|regarding|related\s+to|any|the)\b", re.IGNORECASE)
+
+
+def topic_from_question(question: str) -> str:
+    """The searchable topic inside a question, or the question if none is found.
+
+    "how many times did I mention going to a picnic" -> "going to a picnic"
+    "when did I last write about books"              -> "books"
+
+    Never returns empty: a question that is entirely scaffolding falls back to
+    the original text rather than searching for nothing.
+    """
+    text = str(question or "").strip().rstrip("?").strip()
+    if not text:
+        return ""
+
+    previous = None
+    while previous != text:
+        previous = text
+        for pattern in (_QUESTION_PREFIXES, _QUESTION_VERBS, _LEADING_FILLER):
+            text = pattern.sub("", text, count=1).strip()
+
+    return text or str(question or "").strip().rstrip("?").strip()
+
 
 def _require_query(query: str) -> str:
     value = str(query or "").strip()
@@ -836,7 +1024,8 @@ def semantic_tool_search(query: str, limit: int = 8) -> dict[str, Any]:
         key=lambda item: item["score"],
         reverse=True,
     )
-    return {"ok": True, "query": search_query, "tools": scored[:max_results]}
+    return {"ok": True, "query": search_query,
+        "searched_for": topic, "tools": scored[:max_results]}
 
 
 @mcp.tool()
@@ -1175,6 +1364,352 @@ def remove_tag_from_note(user_id: str, note_id: str, tag_id: str) -> dict[str, A
         f"/notes/internal/{str(note_id).strip()}/tags/{str(tag_id).strip()}",
         user_id=user_id,
     )
+
+
+# ── Analytical tools ─────────────────────────────────────────────────────────
+#
+# Ranked retrieval answers "what is most relevant"; these answer "how many",
+# "when", "did I ever", and "what else is like this". A top-k search cannot
+# answer any of them honestly - asked for a count it returns k, and asked
+# "did I ever" it always has a best guess.
+
+
+@mcp.tool()
+def count_note_mentions(
+    query: str,
+    user_id: str,
+    k: int = 50,
+    role: str = "user",
+    min_relevance: float | None = None,
+) -> dict[str, Any]:
+    """Count how often a topic appears across notes, and whether it appears at all.
+
+    Answers "how many times did I mention X" and "did I ever mention X".
+    Returns note-level and passage-level counts plus the notes themselves, so
+    the caller can state a number and cite it.
+    """
+    search_query = _require_query(query)
+    topic = topic_from_question(search_query) or search_query
+    scope = _require_user_id(user_id)
+    result = _run_note_retrieval(
+        query=topic, user_id=scope, k=_bounded_k(k, 50), role=role, history=None
+    )
+
+    ranked = [_note_location(reference) for reference in result.references]
+    notes, weak = _split_by_relevance(ranked, min_relevance)
+    mention_count = sum(note["match_count"] for note in notes)
+    indexed = analysis.indexed_note_count(scope)
+
+    return {
+        "ok": True,
+        "query": search_query,
+        "searched_for": topic,
+        "found": bool(notes),
+        "note_count": len(notes),
+        "mention_count": mention_count,
+        # Retrieval returned these but they scored below the relevance floor.
+        # Reported rather than hidden: a caller seeing 0 confident and 3 weak
+        # can say "nothing clearly about that" instead of a flat "never".
+        "weak_matches_excluded": weak,
+        "min_relevance": MENTION_MIN_RELEVANCE if min_relevance is None else min_relevance,
+        # Without this, "0 mentions" is indistinguishable from "nothing is
+        # indexed yet", and the assistant would tell the user they never wrote
+        # something they did write.
+        "indexed_note_count": indexed,
+        "searched_everything": len(notes) < _bounded_k(k, 50),
+        "notes": [
+            {
+                "note_id": note["note_id"],
+                "title": note["title"],
+                "folder": note["folder"],
+                "mentions": note["match_count"],
+                "snippets": note["snippets"][:2],
+            }
+            for note in notes
+        ],
+    }
+
+
+@mcp.tool()
+def notes_in_period(
+    user_id: str,
+    start_date: str,
+    end_date: str,
+    basis: str = "written",
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List notes from a date range, by when they were written or what they are about.
+
+    Answers "what notes did I write in January 2025". Dates are ISO
+    (YYYY-MM-DD); `end_date` is inclusive of that whole day.
+
+    `basis` picks which date is meant, and they are genuinely different:
+      written - the note was created or edited in the range
+      about   - the note's text refers to a date in the range, whenever it was
+                written ("we fly to Boston on March 3rd")
+      either  - either of the above
+    """
+    scope = _require_user_id(user_id)
+    try:
+        start, end = _parse_period(start_date, end_date)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    if basis not in ("written", "about", "either"):
+        return {"ok": False, "error": "basis must be written, about, or either"}
+
+    rows = analysis.notes_written_between(
+        scope, start, end, basis=basis, limit=_clamped_limit(limit)
+    )
+    referenced = analysis.referenced_dates(scope, [row["doc_id"] for row in rows])
+    dates_by_doc: dict[str, list[dict[str, Any]]] = {}
+    for entry in referenced:
+        dates_by_doc.setdefault(entry["doc_id"], []).append(
+            {"date": analysis.iso(entry["date_value"]), "phrase": entry["date_text"]}
+        )
+
+    return {
+        "ok": True,
+        "start_date": analysis.iso(start),
+        "end_date": analysis.iso(end),
+        "basis": basis,
+        "note_count": len(rows),
+        "indexed_note_count": analysis.indexed_note_count(scope),
+        "notes": [
+            {
+                "note_id": row["note_id"],
+                "folder_id": row["folder_id"],
+                "summary": _chunk_preview(row["summary"] or "", 400),
+                "created_at": analysis.iso(row["created_at"]),
+                "updated_at": analysis.iso(row["updated_at"]),
+                "dates_mentioned": dates_by_doc.get(row["doc_id"], [])[:5],
+            }
+            for row in rows
+        ],
+    }
+
+
+@mcp.tool()
+def last_mention(query: str, user_id: str, role: str = "user") -> dict[str, Any]:
+    """When a topic was most recently written about, and in which note.
+
+    Answers "when did I last write about books". Reports both dates that apply:
+    when the note was last edited, and the latest date its text refers to.
+    """
+    search_query = _require_query(query)
+    topic = topic_from_question(search_query) or search_query
+    scope = _require_user_id(user_id)
+    result = _run_note_retrieval(
+        query=topic, user_id=scope, k=10, role=role, history=None
+    )
+    notes, weak = _split_by_relevance(
+        [_note_location(reference) for reference in result.references]
+    )
+    if not notes:
+        return {
+            "ok": True,
+            "query": search_query,
+        "searched_for": topic,
+            "found": False,
+            "weak_matches_excluded": weak,
+            "indexed_note_count": analysis.indexed_note_count(scope),
+        }
+
+    doc_ids = [f"{scope}-{note['note_id']}" for note in notes]
+    stamps = analysis.document_timestamps(scope, doc_ids)
+    referenced = analysis.referenced_dates(scope, doc_ids, limit=20)
+
+    dated = [
+        (stamps[doc_id]["updated_at"], note)
+        for doc_id, note in zip(doc_ids, notes)
+        if doc_id in stamps and stamps[doc_id].get("updated_at")
+    ]
+    dated.sort(key=lambda item: item[0], reverse=True)
+    latest_written, latest_note = dated[0] if dated else (None, notes[0])
+
+    return {
+        "ok": True,
+        "query": search_query,
+        "searched_for": topic,
+        "found": True,
+        "last_written_at": analysis.iso(latest_written),
+        "note": {
+            "note_id": latest_note["note_id"],
+            "title": latest_note["title"],
+            "folder": latest_note["folder"],
+            "snippets": latest_note["snippets"][:2],
+        },
+        # The most recent date the matching notes talk about, which can differ
+        # from when they were written.
+        "latest_date_mentioned": (
+            {
+                "date": analysis.iso(referenced[0]["date_value"]),
+                "phrase": referenced[0]["date_text"],
+            }
+            if referenced
+            else None
+        ),
+        "other_notes": [
+            {"note_id": note["note_id"], "title": note["title"]} for _, note in dated[1:5]
+        ],
+    }
+
+
+@mcp.tool()
+def related_notes(
+    query: str,
+    user_id: str,
+    k: int = 10,
+    role: str = "user",
+) -> dict[str, Any]:
+    """Find notes related to the notes about a topic - a second hop outward.
+
+    Answers "get me all notes related to the ones I wrote about fun". The first
+    hop finds seed notes for the topic; the second searches using what those
+    notes are actually about (their summaries and keywords), which surfaces
+    neighbours that never use the original word.
+    """
+    search_query = _require_query(query)
+    topic = topic_from_question(search_query) or search_query
+    scope = _require_user_id(user_id)
+    limit = _bounded_k(k, 10)
+
+    seeds = _run_note_retrieval(
+        query=topic, user_id=scope, k=limit, role=role, history=None
+    )
+    seed_notes, _weak_seeds = _split_by_relevance(
+        [_note_location(reference) for reference in seeds.references]
+    )
+    if not seed_notes:
+        return {
+            "ok": True,
+            "query": search_query,
+        "searched_for": topic,
+            "seed_notes": [],
+            "related_notes": [],
+            "indexed_note_count": analysis.indexed_note_count(scope),
+        }
+
+    seed_ids = {note["note_id"] for note in seed_notes}
+    # The second query is built from the seeds' own vocabulary rather than the
+    # user's words, which is what makes this a different hop and not a rerun.
+    expansion = " ".join(
+        dict.fromkeys(
+            [note["title"] for note in seed_notes]
+            + [term for note in seed_notes for term in note["keywords"][:6]]
+            + [term for note in seed_notes for term in note["entities"][:4]]
+        )
+    ).strip()
+
+    neighbours = _run_note_retrieval(
+        query=expansion or topic,
+        user_id=scope,
+        k=limit * 2,
+        role=role,
+        history=None,
+    )
+    related = [
+        _note_location(reference)
+        for reference in neighbours.references
+        if reference.get("note_id") not in seed_ids
+    ][:limit]
+
+    return {
+        "ok": True,
+        "query": search_query,
+        "searched_for": topic,
+        "expansion_terms": expansion[:300],
+        "seed_notes": [
+            {"note_id": note["note_id"], "title": note["title"], "folder": note["folder"]}
+            for note in seed_notes
+        ],
+        "related_notes": [
+            {
+                "note_id": note["note_id"],
+                "title": note["title"],
+                "folder": note["folder"],
+                "score": note["best_score"],
+                "snippets": note["snippets"][:1],
+            }
+            for note in related
+        ],
+    }
+
+
+@mcp.tool()
+def recent_mentions(
+    query: str,
+    user_id: str,
+    days: int = 30,
+    k: int = 20,
+    role: str = "user",
+) -> dict[str, Any]:
+    """What a topic looked like recently - matches restricted to a time window.
+
+    Answers "what food did I eat recently" and "where did I go recently":
+    a topic search whose results are filtered to notes written in the window
+    and ordered newest first, rather than by relevance alone.
+    """
+    search_query = _require_query(query)
+    topic = topic_from_question(search_query) or search_query
+    scope = _require_user_id(user_id)
+    start, end = analysis.window_from_days(days)
+
+    result = _run_note_retrieval(
+        query=topic, user_id=scope, k=_bounded_k(k, 20), role=role, history=None
+    )
+    notes, _weak = _split_by_relevance(
+        [_note_location(reference) for reference in result.references]
+    )
+    doc_ids = [f"{scope}-{note['note_id']}" for note in notes]
+    stamps = analysis.document_timestamps(scope, doc_ids)
+
+    within = []
+    for doc_id, note in zip(doc_ids, notes):
+        stamp = stamps.get(doc_id)
+        updated = stamp.get("updated_at") if stamp else None
+        if updated is None:
+            continue
+        # Compare in UTC: stored timestamps may be naive.
+        moment = updated if updated.tzinfo else updated.replace(tzinfo=timezone.utc)
+        if start <= moment <= end:
+            within.append((moment, note))
+    within.sort(key=lambda item: item[0], reverse=True)
+
+    return {
+        "ok": True,
+        "query": search_query,
+        "searched_for": topic,
+        "days": days,
+        "since": analysis.iso(start),
+        "note_count": len(within),
+        # Distinguishing these two lets the caller say "nothing in the last 30
+        # days, though you wrote about it before" instead of "nothing found".
+        "matched_before_window": len(notes) - len(within),
+        "notes": [
+            {
+                "note_id": note["note_id"],
+                "title": note["title"],
+                "folder": note["folder"],
+                "updated_at": analysis.iso(moment),
+                "snippets": note["snippets"][:2],
+            }
+            for moment, note in within
+        ],
+    }
+
+
+def _parse_period(start_date: str, end_date: str) -> tuple[datetime, datetime]:
+    """Parse an inclusive ISO date range into a half-open UTC window."""
+    try:
+        start = datetime.fromisoformat(str(start_date).strip()).replace(tzinfo=timezone.utc)
+        end = datetime.fromisoformat(str(end_date).strip()).replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ValueError("start_date and end_date must be ISO dates (YYYY-MM-DD)") from exc
+    if end < start:
+        raise ValueError("end_date must not be before start_date")
+    # Callers mean "through the end of that day".
+    return start, end + timedelta(days=1)
 
 
 if __name__ == "__main__":

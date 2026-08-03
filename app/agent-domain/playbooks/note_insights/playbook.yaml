@@ -1,0 +1,55 @@
+playbook_id: note_insights
+name: Note Insights
+description: >-
+  The answer is a NUMBER, a DATE, a YES/NO, or a set of connections - never a
+  passage and never a list of search results.
+
+  Pick this playbook from the question's opening words:
+    "how many times / how often ..."   -> a number
+    "did I ever / have I ever ..."     -> yes or no
+    "when did I last ..."              -> a date
+    "what is related to ..."           -> connections
+
+  These are counted and dated over every note, which is why they are here and
+  not in the search or question-answering playbooks. Those return the best few
+  matching passages, so asked for a count they report however many were
+  requested, and asked "did I ever" they answer yes every time.
+examples:
+  - How many times did I mention the picnic?
+  - Did I ever write about visiting Boston?
+  - When did I last write about books?
+  - Have I written anything about interviews?
+  - What notes are connected to the ones about cooking?
+  - How often do my notes talk about deadlines?
+plans:
+  - name: count_mentions
+    description: >-
+      Count how many notes and passages mention a topic, and answer whether it
+      appears at all. Use for "how many times", "how often", and any "did I
+      ever / have I ever" question, where a confident no matters as much as a
+      yes.
+    steps:
+      - step: execute_operation
+        operation: count_note_mentions
+      - step: summarize
+
+  - name: when_last_mentioned
+    description: >-
+      Find when a topic was most recently written about. Use for "when did I
+      last write about X" and "how long ago did I mention X", where the answer
+      is a date rather than the note's contents.
+    steps:
+      - step: execute_operation
+        operation: last_mention
+      - step: summarize
+
+  - name: find_related
+    description: >-
+      Find the notes connected to the notes about a topic - a second hop that
+      surfaces neighbours which never use the original word. Use for "what else
+      is related to X" and "notes connected to the ones about X".
+    steps:
+      - step: execute_operation
+        operation: related_notes
+      - step: aggregation
+      - step: summarize

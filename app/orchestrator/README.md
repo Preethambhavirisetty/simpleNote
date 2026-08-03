@@ -638,7 +638,9 @@ cd frontend && npm run dev
 - sentence transformers clean up - DONE
 - review ingestion pipeline; - DONE
 - move all under app folder - DONE
-- error handling; UI + BE; predefined failure messages streamed - INPROGRESS
+- error handling; UI + BE; predefined failure messages streamed - DONE
+- 
+
 - langgraph
 - @notename, talks about that only
 - memory management
@@ -657,6 +659,23 @@ cd frontend && npm run dev
 - change LLM model to qwen or llama bigger one?
 - setup db, vector store, redis monitoring; monitor chunks, runs e2e
 
+- Add date and time + morning or afternoon + evening
+- 
+
 Test cases for:
 - ingestion all processors
 - 
+
+
+Use Cases:
+- "how many times did I mention about going to picknic"
+- "what notes did I write in January 2025?"
+- "when did I last write about books"
+- "get me all notes related to the ones that I wrote about fun"
+- "did I ever mention about going to trip to boston?"
+- "what food did I eat recently?" or "where did I go recently"
+
+
+out of scope:
+- action on a note: create, update, move, delete
+- actions like create/delete/update tags

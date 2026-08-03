@@ -12,6 +12,9 @@ examples:
   - What have I worked on since Monday?
   - Give me a timeline of my project notes.
   - Which notes did I update yesterday?
+  - What did I write in January 2025?
+  - What food did I eat recently?
+  - Where did I go recently?
 plans:
   - name: recent_notes
     description: >-
@@ -38,5 +41,28 @@ plans:
       - step: validate_filters
       - step: semantic_search
         operation: locate_notes
+      - step: sort_by_date
+      - step: summarize
+
+  - name: notes_in_period
+    description: >-
+      List the notes from a named calendar period - "January 2025", "last
+      March", "in 2024". Use when the request names a period that can be turned
+      into start and end dates, rather than a vague "recently".
+    steps:
+      - step: resolve_filters
+      - step: execute_operation
+        operation: notes_in_period
+      - step: aggregation
+      - step: summarize
+
+  - name: recent_topic
+    description: >-
+      What a topic looked like recently - "what food did I eat recently",
+      "where did I go lately". Use when the request pairs a topic with a vague
+      recency word rather than a specific date range.
+    steps:
+      - step: execute_operation
+        operation: recent_mentions
       - step: sort_by_date
       - step: summarize

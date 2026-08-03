@@ -13,6 +13,14 @@ system: |
     pinned_only    true only if the user asked for pinned notes
     note_ids       note ids if the request names them
     limit          a number only if the user asked for a specific count
+    start_date     ISO date (YYYY-MM-DD) when the request names a period
+    end_date       ISO date (YYYY-MM-DD), inclusive, for the same period
+    days           a whole number of days when the request says "last N days"
+
+  Resolving periods: turn a named period into the dates that bound it.
+  "January 2025" is 2025-01-01 to 2025-01-31. "March" with no year means the
+  most recent March that has already happened. A vague "recently" or "lately"
+  is NOT a period - leave the dates out and let the recency default apply.
 
   Do not invent ids the user did not give you. Do not turn the general topic of
   the question into a `search` filter - retrieval already handles the topic.
@@ -20,5 +28,7 @@ system: |
   Return only a JSON object with the fields you are confident about, no
   markdown fence and no commentary. Return {} when nothing is clear.
 user: |
+  Today is {today}.
+
   Request:
   {question}

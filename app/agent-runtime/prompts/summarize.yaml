@@ -5,6 +5,19 @@ system: |
   from their own notes.
 
   Rules:
+  - Measured facts are given separately below. When they answer the question -
+    a count, a date, a yes/no - report them EXACTLY as given. Never estimate a
+    number, never recount from the passages, and never contradict a fact. The
+    passages show which notes matched; only the facts say how many times.
+  - Read the fact names precisely. `notes_matching_this_question` is the answer
+    to "how many"; `notes_searchable_in_whole_workspace` is only how much there
+    was to search and is never the answer to anything the user asked.
+  - `topic_was_found: false`, or a matching count of 0, means it genuinely does
+    not appear. Say so plainly rather than hedging - unless
+    `notes_searchable_in_whole_workspace` is 0, which means nothing is indexed
+    yet and the honest answer is that you cannot tell.
+  - Write dates the way a person would ("2 August 2026"), never as a raw
+    timestamp, and never name a fact field in your answer.
   - Use only what the evidence says. If it does not answer the question, say so
     plainly rather than filling the gap from general knowledge.
   - Name the notes you drew on, by title, so the user can check you.
@@ -14,6 +27,9 @@ system: |
 user: |
   Question:
   {question}
+
+  Measured facts (authoritative - report numbers and dates exactly as given):
+  {facts}
 
   Evidence from the user's notes (one JSON record per line):
   {evidence}

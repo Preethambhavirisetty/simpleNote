@@ -10,7 +10,7 @@ from schemas.playbook import PlaybookStep
 from state.state import RunState, StepRun
 from utils import load_prompt
 from integrations import observability as obs
-from workflows.steps.base import StepContext, collected_notes, failed
+from workflows.steps.base import StepContext, collected_facts, collected_notes, failed
 
 
 MAX_TOKENS = 900
@@ -21,15 +21,20 @@ MAX_EVIDENCE_CHARS = 6000
 
 def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
     records = _records(state)
+    facts = collected_facts(state)
     evidence = _evidence(state)
     obs.debug(
         "summarising from %d record(s)",
         len(records),
         phase="summarize",
-        data={"evidence_chars": len(evidence), "records": obs.preview(records)},
+        data={
+            "evidence_chars": len(evidence),
+            "records": obs.preview(records),
+            "facts": facts,
+        },
         track={"evidence_records": len(records), "evidence_chars": len(evidence)},
     )
-    if not evidence:
+    if not evidence and not facts:
         obs.warn("no evidence gathered; refusing to answer from model knowledge",
                  phase="summarize", track={"ungrounded_refusal": True})
         # Say so rather than letting the model fill the gap from its own
@@ -47,7 +52,9 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
             {
                 "role": "user",
                 "content": prompt["user"].format(
-                    question=state.question, evidence=evidence
+                    question=state.question,
+                    evidence=evidence or "(no passages)",
+                    facts=json.dumps(facts, default=str) if facts else "(none)",
                 ),
             },
         ],

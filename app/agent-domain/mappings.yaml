@@ -210,3 +210,51 @@ mappings:
       note_id: param.note_id
       tag_id: param.tag_id
       user_id: context.user_id
+
+  # ── Analysis ────────────────────────────────────────────────────────────────
+
+  - operation: count_note_mentions
+    server: notelite
+    tool: count_note_mentions
+    arguments:
+      query: param.query
+      k: param.k
+      user_id: context.user_id
+      role: context.role
+
+  - operation: notes_in_period
+    server: notelite
+    tool: notes_in_period
+    arguments:
+      start_date: param.start_date
+      end_date: param.end_date
+      basis: param.basis
+      limit: param.limit
+      user_id: context.user_id
+
+  - operation: last_mention
+    server: notelite
+    tool: last_mention
+    arguments:
+      query: param.query
+      user_id: context.user_id
+      role: context.role
+
+  - operation: related_notes
+    server: notelite
+    tool: related_notes
+    arguments:
+      query: param.query
+      k: param.k
+      user_id: context.user_id
+      role: context.role
+
+  - operation: recent_mentions
+    server: notelite
+    tool: recent_mentions
+    arguments:
+      query: param.query
+      days: param.days
+      k: param.k
+      user_id: context.user_id
+      role: context.role

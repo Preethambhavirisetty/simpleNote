@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
 from typing import Any
 
 from integrations.llm import llm_call_general
@@ -32,7 +33,14 @@ def run(state: RunState, step: PlaybookStep, context: StepContext) -> StepRun:
     completion = llm_call_general(
         [
             {"role": "system", "content": prompt["system"]},
-            {"role": "user", "content": prompt["user"].format(question=state.question)},
+            {
+                "role": "user",
+                "content": prompt["user"].format(
+                    question=state.question,
+                    # A period like "last March" cannot be resolved without it.
+                    today=date.today().isoformat(),
+                ),
+            },
         ],
         max_tokens=MAX_TOKENS,
         temperature=TEMPERATURE,

@@ -313,3 +313,99 @@ operations:
         description: Id of the tag to remove.
         required: true
     returns: Deletion confirmation.
+
+  # ── Analysis ────────────────────────────────────────────────────────────────
+  # These answer questions ranked retrieval cannot: a count over everything, a
+  # date range, a single "when", a yes/no. Search returns the best k passages,
+  # which is the wrong shape for all of them.
+
+  count_note_mentions:
+    description: >-
+      Count how many notes and passages mention a topic, and whether it appears
+      at all. Use for "how many times did I mention X" and "did I ever write
+      about X". Weak matches below a relevance floor are excluded and reported
+      separately, so a confident "no" is possible.
+    parameters:
+      query:
+        type: string
+        description: The topic to count.
+        required: true
+      k:
+        type: integer
+        description: Maximum notes to consider.
+        default: 50
+    returns: Note and mention counts, whether found, and the matching notes.
+
+  notes_in_period:
+    description: >-
+      List notes from a date range, either by when they were written or by
+      dates their text refers to. Use for "what did I write in January 2025".
+    parameters:
+      start_date:
+        type: string
+        description: ISO date (YYYY-MM-DD), inclusive.
+        required: true
+      end_date:
+        type: string
+        description: ISO date (YYYY-MM-DD), inclusive.
+        required: true
+      basis:
+        type: string
+        description: >-
+          "written" for when the note was created or edited, "about" for dates
+          the text refers to, "either" for both. A note written in January can
+          be about March, so these differ.
+        default: written
+        enum: [written, about, either]
+      limit:
+        type: integer
+        description: Maximum notes to return.
+        default: 50
+    returns: Notes in the range with their timestamps and any dates they mention.
+
+  last_mention:
+    description: >-
+      When a topic was most recently written about, and in which note. Use for
+      "when did I last write about X".
+    parameters:
+      query:
+        type: string
+        description: The topic to locate in time.
+        required: true
+    returns: The most recent write date, the note, and the latest date mentioned.
+
+  related_notes:
+    description: >-
+      Notes related to the notes about a topic - a second hop that searches
+      using the seed notes' own vocabulary, surfacing neighbours that never use
+      the original word. Use for "notes related to the ones about X".
+    parameters:
+      query:
+        type: string
+        description: The topic whose neighbours are wanted.
+        required: true
+      k:
+        type: integer
+        description: Maximum related notes to return.
+        default: 10
+    returns: The seed notes and the related notes found from them.
+
+  recent_mentions:
+    description: >-
+      A topic restricted to a recent time window, newest first. Use for "what
+      food did I eat recently" or "where did I go recently". Reports how many
+      matches fell outside the window.
+    parameters:
+      query:
+        type: string
+        description: The topic to look for.
+        required: true
+      days:
+        type: integer
+        description: How far back the window reaches.
+        default: 30
+      k:
+        type: integer
+        description: Maximum notes to consider.
+        default: 20
+    returns: Matching notes inside the window, newest first.

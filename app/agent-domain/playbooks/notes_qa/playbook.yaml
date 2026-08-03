@@ -5,6 +5,11 @@ description: >-
   playbook when the request asks what the notes say about a topic, needs facts
   the user wrote down, or expects prose grounded in stored content.
 
+  The answer is prose drawn from what the notes say. If instead the answer
+  would be a number ("how many times"), a date ("when did I last"), or a yes/no
+  ("did I ever"), that is the insights playbook, not this one - those are
+  counted over every note rather than read out of the best few.
+
   The result is an answer written in prose, not a list of notes. If the user
   asked to find, locate, list, show, or pull up notes - anything where the
   notes themselves are what they want back - that is the search playbook, even
