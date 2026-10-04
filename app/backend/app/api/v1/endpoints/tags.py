@@ -1,14 +1,14 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
-
-from app.schema.responses import ApiResponse, TagData
 
 from app.db.postgres.models.tag import Tag
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
+from app.deps.internal import verify_internal_user_id
 from app.exceptions.handlers import success_response
+from app.schema.responses import ApiResponse, TagData
 from app.schema.tag import TagCreate, TagUpdate
 from app.services.tags import TagService
 
@@ -30,12 +30,14 @@ def _tag_dict(tag: Tag) -> dict:
 
 @router.get("/", response_model=ApiResponse[list[TagData]], summary="List tags")
 def list_tags(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
     current_user=Depends(get_current_user),
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
     """List tags owned by the authenticated user."""
-    tags = service.list(db, current_user.id)
+    tags = service.list(db, current_user.id, skip=skip, limit=limit)
     return success_response([_tag_dict(t) for t in tags], "Tags retrieved")
 
 
@@ -53,22 +55,18 @@ def create_tag(
 
 # -- Internal service routes (Agent -> Backend) ------------------------------
 
-def _internal_user_id(x_internal_key: str, x_user_id: str) -> UUID:
-    from app.deps.internal import verify_internal_key
-
-    verify_internal_key(x_internal_key)
-    return UUID(x_user_id)
-
 
 @router.get("/internal/", response_model=ApiResponse[list[TagData]], summary="List tags internally")
 def internal_list_tags(
     x_internal_key: str = Header(...),
     x_user_id: str = Header(...),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
-    tags = service.list(db, user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
+    tags = service.list(db, user_id, skip=skip, limit=limit)
     return success_response([_tag_dict(t) for t in tags], "Tags retrieved")
 
 
@@ -80,7 +78,7 @@ def internal_create_tag(
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     tag = service.create(db, user_id, payload)
     return success_response(_tag_dict(tag), "Tag created")
 
@@ -93,7 +91,7 @@ def internal_get_tag(
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     tag = service.get(db, tag_id, user_id)
     return success_response(_tag_dict(tag), "Tag retrieved")
 
@@ -107,7 +105,7 @@ def internal_update_tag(
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     tag = service.update(db, tag_id, user_id, payload)
     return success_response(_tag_dict(tag), "Tag updated")
 
@@ -120,7 +118,7 @@ def internal_delete_tag(
     db: Session = Depends(get_postgres_session),
     service: TagService = Depends(get_tag_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     service.delete(db, tag_id, user_id)
     return success_response(None, "Tag deleted")
 

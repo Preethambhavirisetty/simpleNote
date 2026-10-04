@@ -1,7 +1,7 @@
 import os
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -10,26 +10,28 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
-def require_env(key: str, default:str=None) -> str:
+def require_env(key: str, default: str | None = None) -> str:
     value = os.getenv(key, default)
-    if value is None:
+    if value is None or not value.strip():
         raise RuntimeError(f"Missing required environment variable: {key}")
     return value
 
 
-# Inference host: one IP serves the LLM (8001), embeddings and reranking
-# (8003), matching orchestrator/app/core/config.py so both services move
-# together when the box is replaced.
-EC2_INFERENCE_BASE_IP = require_env("EC2_INFERENCE_BASE_IP", "")
+def require_https_url(key: str) -> str:
+    value = require_env(key).rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RuntimeError(f"{key} must be a valid https:// URL")
+    return value
+
+
+DOMAIN_API_KEY = require_env("DOMAIN_API_KEY")
 
 # Embeddings are served remotely. Nothing is embedded locally, so this service
 # carries no model, no torch, and no GPU expectation.
-EMBEDDING_MODEL_BASE = require_env(
-    "EMBEDDING_MODEL_BASE",
-    f"http://{EC2_INFERENCE_BASE_IP}:8003" if EC2_INFERENCE_BASE_IP else "",
-).rstrip("/")
+EMBEDDING_MODEL_BASE = require_https_url("EMBEDDING_MODEL_BASE")
 EMBEDDING_MODEL = require_env("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-EMBEDDING_API_KEY = require_env("EMBEDDING_API_KEY", "")
+EMBEDDING_API_KEY = require_env("EMBEDDING_API_KEY")
 EMBEDDING_TIMEOUT = float(require_env("EMBEDDING_TIMEOUT", "30"))
 
 # Reranking. Off for playbook routing by measurement, not by preference: on the
@@ -38,10 +40,7 @@ EMBEDDING_TIMEOUT = float(require_env("EMBEDDING_TIMEOUT", "30"))
 # judge whether a passage answers a query, and a playbook description is not a
 # passage - it ranked search_notes first for "Thanks!". Kept configurable
 # because it is the right tool for ranking note chunks, just not routing.
-RERANKER_API_BASE = require_env(
-    "RERANKER_API_BASE",
-    f"http://{EC2_INFERENCE_BASE_IP}:8003" if EC2_INFERENCE_BASE_IP else "",
-).rstrip("/")
+RERANKER_API_BASE = require_https_url("RERANKER_API_BASE")
 RERANKER_API_KEY = require_env("RERANKER_API_KEY", EMBEDDING_API_KEY)
 RERANKER_TIMEOUT = float(require_env("RERANKER_TIMEOUT", "30"))
 PLAYBOOK_RERANK_ENABLED = require_env("PLAYBOOK_RERANK_ENABLED", "false").lower() == "true"

@@ -14,6 +14,8 @@ export const useFolderStore = create(
       folders: [],
       isLoading: false,
 
+      reset: () => set({ folders: [], isLoading: false }),
+
       fetchFolders: async () => {
         if (get().isLoading) return
         set({ isLoading: true })
@@ -60,6 +62,6 @@ export const useFolderStore = create(
         }
       },
     }),
-    { name: 'folder-store' },
+    { name: 'folder-store', enabled: import.meta.env.DEV },
   ),
 )

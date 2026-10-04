@@ -95,8 +95,9 @@ def list_runs(
     if q_text:
         # LIKE rather than MATCH: short agent phrases and partial words are
         # exactly what people type here, and FULLTEXT drops both
-        where.append("(r.question LIKE :qtext OR r.final_answer LIKE :qtext)")
-        params["qtext"] = f"%{q_text}%"
+        where.append("(r.question LIKE :qtext ESCAPE '!' OR r.final_answer LIKE :qtext ESCAPE '!')")
+        escaped = q_text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        params["qtext"] = f"%{escaped}%"
     if phase:
         where.append(
             "EXISTS (SELECT 1 FROM logs lp WHERE lp.run_id = r.id AND lp.phase = :phase)"

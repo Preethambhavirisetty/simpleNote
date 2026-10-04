@@ -1062,7 +1062,7 @@ def semantic_tool_search(query: str, limit: int = 8) -> dict[str, Any]:
         reverse=True,
     )
     return {"ok": True, "query": search_query,
-        "searched_for": topic, "tools": scored[:max_results]}
+        "searched_for": search_query, "tools": scored[:max_results]}
 
 
 @mcp.tool()
@@ -1448,7 +1448,7 @@ def count_note_mentions(
         # Reported rather than hidden: a caller seeing 0 confident and 3 weak
         # can say "nothing clearly about that" instead of a flat "never".
         "weak_matches_excluded": weak,
-        "min_relevance": MENTION_MIN_RELEVANCE if min_relevance is None else min_relevance,
+        "min_relevance": MENTION_MIN_MARGIN if min_relevance is None else min_relevance,
         # Without this, "0 mentions" is indistinguishable from "nothing is
         # indexed yet", and the assistant would tell the user they never wrote
         # something they did write.

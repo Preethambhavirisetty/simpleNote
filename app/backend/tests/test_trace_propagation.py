@@ -47,22 +47,22 @@ class TestMiddlewareTraceTrust:
 
 class TestDispatchTracePropagation:
     def test_ingest_dispatch_includes_bound_trace_id(self):
-        from app.services import notes
+        from app.services import ingestion_dispatch
 
         bind_contextvars(trace_id="trace-note-save")
-        with patch.object(notes, "celery_app") as celery_app:
-            notes._dispatch_ingest({"note_id": "n"})
+        with patch.object(ingestion_dispatch, "celery_app") as celery_app:
+            ingestion_dispatch.dispatch_upsert({"note_id": "n"})
 
         kwargs = celery_app.send_task.call_args.kwargs["kwargs"]
         assert kwargs["trace_id"] == "trace-note-save"
         assert kwargs["action"] == "upsert"
 
     def test_delete_dispatch_includes_bound_trace_id(self):
-        from app.services import notes
+        from app.services import ingestion_dispatch
 
         bind_contextvars(trace_id="trace-note-delete")
-        with patch.object(notes, "celery_app") as celery_app:
-            notes._dispatch_delete({"note_id": "n"})
+        with patch.object(ingestion_dispatch, "celery_app") as celery_app:
+            ingestion_dispatch.dispatch_delete({"note_id": "n"})
 
         kwargs = celery_app.send_task.call_args.kwargs["kwargs"]
         assert kwargs["trace_id"] == "trace-note-delete"

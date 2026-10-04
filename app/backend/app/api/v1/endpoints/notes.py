@@ -4,15 +4,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
-from app.schema.responses import ApiResponse, NoteData
-
 from app.core import pii
 from app.core.feature_flags import is_enabled
 from app.db.postgres.models.note import Note
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
+from app.deps.internal import verify_internal_user_id
 from app.exceptions.handlers import success_response
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
+from app.schema.responses import ApiResponse, NoteData
 from app.services.notes import NoteService
 
 router = APIRouter(prefix="/notes", tags=["notes"])
@@ -79,12 +79,6 @@ def create_note(
 # These mirror the cookie-auth note routes, but authenticate service-to-service
 # calls with X-Internal-Key and scope every operation to X-User-Id.
 
-def _internal_user_id(x_internal_key: str, x_user_id: str) -> UUID:
-    from app.deps.internal import verify_internal_key
-
-    verify_internal_key(x_internal_key)
-    return UUID(x_user_id)
-
 
 @router.get("/internal/", response_model=ApiResponse[list[NoteData]], summary="List notes internally")
 def internal_list_notes(
@@ -98,7 +92,7 @@ def internal_list_notes(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     notes = service.list(
         db,
         user_id,
@@ -119,7 +113,7 @@ def internal_create_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     note = service.create(db, user_id, payload, ["user"])
     return success_response(_note_dict(note), "Note created")
 
@@ -132,7 +126,7 @@ def internal_get_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     note = service.get(db, note_id, user_id)
     return success_response(_note_dict(note), "Note retrieved")
 
@@ -146,7 +140,7 @@ def internal_update_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     note = service.update(db, note_id, user_id, payload, ["user"])
     return success_response(_note_dict(note), "Note updated")
 
@@ -160,7 +154,7 @@ def internal_move_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     note = service.move(db, note_id, user_id, payload, ["user"])
     return success_response(_note_dict(note), "Note moved")
 
@@ -173,12 +167,16 @@ def internal_delete_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     service.delete(db, note_id, user_id, ["user"])
     return success_response(None, "Note deleted")
 
 
-@router.post("/internal/{note_id}/tags/{tag_id}", response_model=ApiResponse[None], summary="Add a tag to a note internally")
+@router.post(
+    "/internal/{note_id}/tags/{tag_id}",
+    response_model=ApiResponse[None],
+    summary="Add a tag to a note internally",
+)
 def internal_add_tag_to_note(
     note_id: UUID,
     tag_id: UUID,
@@ -187,12 +185,16 @@ def internal_add_tag_to_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     service.add_tag(db, note_id, tag_id, user_id)
     return success_response(None, "Tag added to note")
 
 
-@router.delete("/internal/{note_id}/tags/{tag_id}", response_model=ApiResponse[None], summary="Remove a tag from a note internally")
+@router.delete(
+    "/internal/{note_id}/tags/{tag_id}",
+    response_model=ApiResponse[None],
+    summary="Remove a tag from a note internally",
+)
 def internal_remove_tag_from_note(
     note_id: UUID,
     tag_id: UUID,
@@ -201,7 +203,7 @@ def internal_remove_tag_from_note(
     db: Session = Depends(get_postgres_session),
     service: NoteService = Depends(get_note_service),
 ):
-    user_id = _internal_user_id(x_internal_key, x_user_id)
+    user_id = verify_internal_user_id(x_internal_key, x_user_id)
     service.remove_tag(db, note_id, tag_id, user_id)
     return success_response(None, "Tag removed from note")
 

@@ -8,6 +8,7 @@ import { toFailure } from '../lib/failures'
 
 let activeStreamController = null
 let requestedConversationId = null
+const CONVERSATION_PAGE_SIZE = 50
 
 export const useChatStore = create(
   devtools(
@@ -18,21 +19,48 @@ export const useChatStore = create(
       isStreaming: false,
       isLoadingConvs: false,
       isLoadingMessages: false,
+      hasMoreConversations: true,
       error: null,
       lastQuery: null,
 
+      reset: () => {
+        _cancelActiveStream(set)
+        requestedConversationId = null
+        set({
+          conversations: [],
+          activeConvId: null,
+          messages: [],
+          isStreaming: false,
+          isLoadingConvs: false,
+          isLoadingMessages: false,
+          hasMoreConversations: true,
+          error: null,
+          lastQuery: null,
+        })
+      },
+
       // ── Conversation list ──────────────────────────────────────────
 
-      fetchConversations: async () => {
+      fetchConversations: async (append = false) => {
         if (get().isLoadingConvs) return
         set({ isLoadingConvs: true })
         try {
-          const list = await conversationsApi.list({ limit: 100 })
-          set({ conversations: list, isLoadingConvs: false })
+          const skip = append ? get().conversations.length : 0
+          const list = await conversationsApi.list({ skip, limit: CONVERSATION_PAGE_SIZE })
+          set((state) => ({
+            conversations: append ? [...state.conversations, ...list] : list,
+            hasMoreConversations: list.length === CONVERSATION_PAGE_SIZE,
+            isLoadingConvs: false,
+          }))
         } catch (err) {
           console.error('[chatStore] fetchConversations failed:', err)
           set({ isLoadingConvs: false })
         }
+      },
+
+      loadMoreConversations: async () => {
+        if (!get().hasMoreConversations) return
+        await get().fetchConversations(true)
       },
 
       selectConversation: async (convId) => {
@@ -104,7 +132,7 @@ export const useChatStore = create(
           query,
           k: 5,
           conversation_id: activeConvId || undefined,
-          conversation_title: !activeConvId && messages.length === 0 ? query.slice(0, 100) : undefined,
+          conversation_title: !activeConvId && messages.length === 0 ? 'New conversation' : undefined,
         }
 
         const streamController = new AbortController()
@@ -146,7 +174,7 @@ export const useChatStore = create(
               if (exists) return {}
               return {
                 conversations: [
-                  { id: convId, title: body.conversation_title || query.slice(0, 100), updated_at: new Date().toISOString() },
+                  { id: convId, title: body.conversation_title || 'New conversation', updated_at: new Date().toISOString() },
                   ...s.conversations,
                 ],
               }
@@ -204,7 +232,7 @@ export const useChatStore = create(
         await get().sendMessage(lastQuery)
       },
     }),
-    { name: 'chat-store' },
+    { name: 'chat-store', enabled: import.meta.env.DEV },
   ),
 )
 

@@ -15,17 +15,25 @@ from app.services.ingestion.orchestrator import IngestionOrchestrator
 class FakeVectorStore:
     def __init__(self):
         self.deleted = []
+        self.deleted_folders = []
 
     def delete_document(self, doc_id):
         self.deleted.append(doc_id)
+
+    def delete_folder(self, user_id, folder_id):
+        self.deleted_folders.append((user_id, folder_id))
 
 
 class FakePostgresStore:
     def __init__(self):
         self.deleted = []
+        self.deleted_folders = []
 
     def delete_document(self, doc_id):
         self.deleted.append(doc_id)
+
+    def delete_folder(self, user_id, folder_id):
+        self.deleted_folders.append((user_id, folder_id))
 
 
 def orchestrator_with_fakes():
@@ -68,6 +76,20 @@ def test_delete_after_move_targets_the_same_document():
     assert result["status"] == "deleted"
     assert orchestrator._vector_store.deleted == [ingested_doc_id]
     assert orchestrator.postgres_store.deleted == [ingested_doc_id]
+
+
+def test_folder_delete_uses_one_bulk_cleanup_action():
+    orchestrator = orchestrator_with_fakes()
+
+    result = orchestrator.run(payload(action="delete_folder", note_id=None))
+
+    assert result == {
+        "action": "delete_folder",
+        "status": "deleted",
+        "folder_id": "folder-a",
+    }
+    assert orchestrator._vector_store.deleted_folders == [("user-1", "folder-a")]
+    assert orchestrator.postgres_store.deleted_folders == [("user-1", "folder-a")]
 
 
 def test_actions_doc_id_matches_orchestrator_doc_id():

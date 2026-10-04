@@ -33,6 +33,8 @@ class IngestionOrchestrator:
 
         if action == "delete":
             return self.delete_action(payload)
+        if action == "delete_folder":
+            return self.delete_folder_action(payload)
 
         if self._is_stale_upsert(payload):
             return self._skipped_result(action, payload)
@@ -181,6 +183,23 @@ class IngestionOrchestrator:
             "note_id": payload.get("note_id"),
         }
         logger.info("ingestion.deleted", note_id=result["note_id"])
+        return result
+
+    def delete_folder_action(self, payload: dict) -> dict:
+        user_id = str(payload.get("user_id") or "").strip()
+        folder_id = str(payload.get("folder_id") or "").strip()
+        missing = [name for name, value in (("user_id", user_id), ("folder_id", folder_id)) if not value]
+        if missing:
+            raise ValueError(f"Missing required fields: {', '.join(missing)}")
+
+        self.vector_store.delete_folder(user_id, folder_id)
+        self.postgres_store.delete_folder(user_id, folder_id)
+        result = {
+            "action": "delete_folder",
+            "status": "deleted",
+            "folder_id": folder_id,
+        }
+        logger.info("ingestion.folder_deleted", user_id=user_id, folder_id=folder_id)
         return result
 
     def _skipped_result(self, action: str, payload: dict, stage: str = "pre_pipeline") -> dict:

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import ReactMarkdown from "react-markdown";
 import { useAuthStore } from "@/stores/authStore";
 import { useChatStore } from "@/stores/chatStore";
-import { ArrowUp, Mic, Square } from "lucide-react";
+import MarkdownContent from "@/features/chat/components/MarkdownContent";
+import { ArrowUp, Square } from "lucide-react";
 
 const prompts = [
   ["Summarize", "Summarize the key ideas across my notes"],
@@ -137,7 +137,6 @@ export default function ChatPage() {
           isStreaming={isStreaming}
           onSend={() => handleSend()}
           onCancel={cancelStream}
-          onPrompt={handleSend}
         />
       </div>
     </div>
@@ -230,9 +229,7 @@ function Message({ message, user, onRetry }) {
             ))}
           </span>
         ) : (
-          <div className="chat-markdown">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
-          </div>
+          <div className="chat-markdown"><MarkdownContent content={message.content} /></div>
         )}
         {message.isStreaming && message.content && (
           <span className="animate-pulse text-[#b8ff67]">▋</span>
@@ -363,7 +360,6 @@ function Composer({
   isStreaming,
   onSend,
   onCancel,
-  onPrompt,
 }) {
   const handleKeyDown = (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -401,15 +397,6 @@ function Composer({
       />
 
       <div className="flex h-9 items-center gap-1">
-        <button
-          type="button"
-          onClick={onPrompt}
-          className="flex h-8 w-8 items-center justify-center text-zinc-500 transition hover:text-zinc-900"
-          aria-label="Voice input"
-        >
-          <Mic className="w-4 h-4" />
-        </button>
-
         <button
           type="button"
           onClick={isStreaming ? onCancel : onSend}

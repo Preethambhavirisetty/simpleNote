@@ -1,13 +1,14 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.v1 import fields, ingest, logs, runs, stats
 from app.core.config import get_settings
+from app.core.auth import require_api_key
 from app.core.db import get_engine
 
 settings = get_settings()
@@ -25,12 +26,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
 
 for router in (ingest.router, runs.router, logs.router, fields.router, stats.router):
-    app.include_router(router, prefix="/api/v1")
+    app.include_router(
+        router,
+        prefix="/api/v1",
+        dependencies=[Depends(require_api_key)],
+    )
 
 
 @app.get("/health", tags=["meta"])

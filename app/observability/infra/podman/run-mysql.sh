@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NAME="${MYSQL_CONTAINER:-agentlog-mysql}"
 PORT="${MYSQL_PORT:-3307}"
-PASS="${MYSQL_ROOT_PASSWORD:-devroot}"
+PASS="${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}"
 DB="${MYSQL_DATABASE:-agentlog}"
 IMAGE="docker.io/library/mysql:8.4"
 

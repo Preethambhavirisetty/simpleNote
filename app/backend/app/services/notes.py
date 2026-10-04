@@ -17,6 +17,7 @@ from app.schema.base import ErrorCode
 from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
 from app.services.ingestion_dispatch import dispatch_delete, dispatch_upsert
 
+_ENCRYPTED_SEARCH_BATCH_SIZE = 200
 
 
 class NoteService:
@@ -110,22 +111,45 @@ class NoteService:
         limit: int = 50,
     ):
         if search and is_enabled("notes.encryption"):
-            # Encrypted title/content_text can't be searched in SQL. Fetch the page and
-            # filter the (transparently decrypted) rows in memory. This is page-scoped;
-            # full-corpus search is served semantically via the agent/chat.
-            notes = self.repo.list(
-                db, user_id,
-                folder_id=folder_id,
-                pinned_only=pinned_only,
-                search=None,
-                skip=skip,
-                limit=limit,
-            )
-            term = search.lower()
-            return [
-                note for note in notes
-                if term in (note.title or "").lower() or term in (note.content_text or "").lower()
-            ]
+            # Ciphertext cannot be searched in SQL. Scan bounded source batches and
+            # apply pagination to matching decrypted notes, not to raw database rows.
+            term = search.casefold()
+            source_offset = 0
+            skipped_matches = 0
+            matches = []
+
+            while len(matches) < limit:
+                notes = self.repo.list(
+                    db,
+                    user_id,
+                    folder_id=folder_id,
+                    pinned_only=pinned_only,
+                    search=None,
+                    skip=source_offset,
+                    limit=_ENCRYPTED_SEARCH_BATCH_SIZE,
+                )
+                if not notes:
+                    break
+
+                source_offset += len(notes)
+                for note in notes:
+                    is_match = (
+                        term in (note.title or "").casefold()
+                        or term in (note.content_text or "").casefold()
+                    )
+                    if not is_match:
+                        continue
+                    if skipped_matches < skip:
+                        skipped_matches += 1
+                        continue
+                    matches.append(note)
+                    if len(matches) == limit:
+                        break
+
+                if len(notes) < _ENCRYPTED_SEARCH_BATCH_SIZE:
+                    break
+
+            return matches
         return self.repo.list(
             db, user_id,
             folder_id=folder_id,
@@ -139,7 +163,13 @@ class NoteService:
         return self._get_or_404(db, note_id, user_id)
 
     def update(self, db: Session, note_id: UUID, user_id: UUID, payload: NoteUpdate, user_role: list[str]):
-        note = self._get_or_404(db, note_id, user_id)
+        note = self.repo.get_by_id_for_update(db, note_id, user_id)
+        if not note:
+            raise AppException(
+                message="Note not found",
+                status_code=404,
+                error_code=ErrorCode.NOT_FOUND,
+            )
         if payload.folder_id is not None and payload.folder_id != note.folder_id:
             self._folder_or_404(db, payload.folder_id, user_id)
         content_text = extract_text(payload.content) if payload.content is not None else None

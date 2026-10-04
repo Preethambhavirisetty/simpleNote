@@ -58,8 +58,9 @@ def run_logs(
         where.append("l.phase = :phase")
         params["phase"] = phase
     if q_text:
-        where.append("(l.message LIKE :qtext OR l.source LIKE :qtext)")
-        params["qtext"] = f"%{q_text}%"
+        where.append("(l.message LIKE :qtext ESCAPE '!' OR l.source LIKE :qtext ESCAPE '!')")
+        escaped = q_text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        params["qtext"] = f"%{escaped}%"
 
     stmt = q(
         f"""SELECT l.id, l.seq, l.ts, l.level, l.phase, l.message, l.source,

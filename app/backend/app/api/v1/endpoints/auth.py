@@ -1,17 +1,19 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.schema.responses import ApiResponse, AuthUserData, LogoutData
-
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
+from app.deps.rate_limit import SlidingWindowRateLimiter, client_identifier
 from app.exceptions.handlers import success_response
+from app.schema.responses import ApiResponse, AuthUserData, LogoutData
 from app.schema.users import UserChangePassword, UserLoginRequest, UserRegisterRequest
 from app.services.auth import AuthService
 from app.services.user import UserService
 
 router = APIRouter(prefix='/auth', tags=["auth"])
+_login_rate_limiter = SlidingWindowRateLimiter(limit=5, window_seconds=60)
+_register_rate_limiter = SlidingWindowRateLimiter(limit=5, window_seconds=60)
 
 
 def get_auth_service():
@@ -24,29 +26,39 @@ def get_user_service():
 
 @router.post("/register", response_model=ApiResponse[AuthUserData], summary="Register a user")
 def register_user(
+    request: Request,
     response: Response,
     payload: UserRegisterRequest,
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_postgres_session)
 ):
     """Create a user account and set its authentication cookie."""
+    _register_rate_limiter.check(client_identifier(request))
     result = auth_service.register_user(db, payload, response)
     return success_response(result, "User registered")
 
 
 @router.post("/login", response_model=ApiResponse[AuthUserData], summary="Log in a user")
 def login_user(
+    request: Request,
     response: Response,
     payload: UserLoginRequest,
     auth_service: AuthService = Depends(get_auth_service),
     db: Session = Depends(get_postgres_session)
 ):
     """Validate credentials and set the authentication cookie."""
+    key = f"{client_identifier(request)}:{payload.email.strip().casefold()}"
+    _login_rate_limiter.check(key)
     result = auth_service.login_user(db, payload, response)
     return success_response(result, "User logged in")
 
 
-@router.delete("/logout/", dependencies=[Depends(get_current_user)], response_model=ApiResponse[LogoutData], summary="Log out the current user")
+@router.delete(
+    "/logout/",
+    dependencies=[Depends(get_current_user)],
+    response_model=ApiResponse[LogoutData],
+    summary="Log out the current user",
+)
 def logout(response: Response, auth_service: AuthService = Depends(get_auth_service)):
     """Delete the current authentication cookie."""
     result = auth_service.logout_user(response)
@@ -63,4 +75,3 @@ def change_password(
     """Replace the authenticated user password after verifying the current password."""
     result = user_service.change_password(db, current_user.id, payload)
     return success_response(result, "Password changed successfully")
-

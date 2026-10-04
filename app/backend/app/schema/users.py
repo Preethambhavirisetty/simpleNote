@@ -2,7 +2,9 @@ from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+MAX_PASSWORD_BYTES = 72
 
 
 class Role(str, Enum):
@@ -12,12 +14,12 @@ class Role(str, Enum):
 
 
 def validate_password_strength(v: str) -> str:
-    if len(v) < 6:
-        raise ValueError("Password must have atleast 6 characters")
+    if len(v) < 8:
+        raise ValueError("Password must have at least 8 characters")
     if not any(c.isupper() for c in v):
-        raise ValueError("Password must have at least one uppercase")
-    if not any(c.isdigit() or not c.isalnum() for c in v):
-        raise ValueError("Password must have atleast one alphanumeric or a special character")
+        raise ValueError("Password must have at least one uppercase letter")
+    if not any(c.isdigit() or (not c.isalnum() and not c.isspace()) for c in v):
+        raise ValueError("Password must have at least one digit or non-alphanumeric character")
     return v
 
 
@@ -36,8 +38,9 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: Optional[str] = None
-    email: Optional[EmailStr] = None
 
 
 class UserChangePassword(BaseModel):
@@ -57,11 +60,13 @@ class UserAssignRoles(BaseModel):
 class UserRegisterRequest(BaseModel):
     name: str
     email: EmailStr
-    password: str
+    password: str = Field(max_length=MAX_PASSWORD_BYTES)
 
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > MAX_PASSWORD_BYTES:
+            raise ValueError(f"Password must not exceed {MAX_PASSWORD_BYTES} UTF-8 bytes")
         return validate_password_strength(v)
 
 

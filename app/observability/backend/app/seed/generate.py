@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import sys
 import uuid
@@ -63,6 +64,7 @@ def _chunks(items: list, size: int):
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Seed demo agent runs")
     ap.add_argument("--endpoint", default="http://127.0.0.1:8000")
+    ap.add_argument("--api-key", default=os.environ.get("AGENTLOG_API_KEY"))
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--runs", type=int, default=200)
     ap.add_argument("--days", type=int, default=7)
@@ -80,7 +82,14 @@ def main(argv: list[str] | None = None) -> int:
     rng = random.Random(args.seed)
     base = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
 
-    client = httpx.Client(base_url=args.endpoint.rstrip("/"), timeout=30.0)
+    if not args.api_key:
+        print("AGENTLOG_API_KEY or --api-key is required", file=sys.stderr)
+        return 1
+    client = httpx.Client(
+        base_url=args.endpoint.rstrip("/"),
+        timeout=30.0,
+        headers={"X-API-Key": args.api_key},
+    )
     try:
         client.get("/health").raise_for_status()
     except (httpx.HTTPError, httpx.HTTPStatusError) as exc:

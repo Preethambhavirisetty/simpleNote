@@ -13,6 +13,8 @@ import pytest
 
 TEST_DB = os.environ.setdefault("MYSQL_DATABASE", "agentlog_test")
 os.environ.setdefault("MYSQL_PORT", "3307")
+os.environ.setdefault("MYSQL_PASSWORD", "test-only-password")
+TEST_API_KEY = os.environ.setdefault("AGENTLOG_API_KEY", "test-agentlog-key")
 
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
@@ -67,7 +69,7 @@ def clean_tables(database):
 
 @pytest.fixture
 def client():
-    with TestClient(app) as c:
+    with TestClient(app, headers={"X-API-Key": TEST_API_KEY}) as c:
         yield c
 
 

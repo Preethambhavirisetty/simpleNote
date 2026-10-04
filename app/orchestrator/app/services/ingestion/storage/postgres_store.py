@@ -73,6 +73,15 @@ class PostgresArtifactStore:
         with DatabaseManager.get_session_factory().begin() as session:
             session.execute(delete(DocumentRecord).where(DocumentRecord.doc_id == doc_id))
 
+    def delete_folder(self, user_id: str, folder_id: str) -> None:
+        with DatabaseManager.get_session_factory().begin() as session:
+            session.execute(
+                delete(DocumentRecord).where(
+                    DocumentRecord.user_id == user_id,
+                    DocumentRecord.folder_id == folder_id,
+                )
+            )
+
     def matching_identities(
         self,
         user_id: str | None,

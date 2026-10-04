@@ -17,10 +17,10 @@ import os
 import sys
 import time
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
+from alembic import command
 from app.core.config import POSTGRES_DB_URL
 
 # Must match the ids in alembic/: the baseline revision and env.py's version table.

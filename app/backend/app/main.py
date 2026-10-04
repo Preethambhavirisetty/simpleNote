@@ -1,19 +1,20 @@
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
 
-from structlog.contextvars import bind_contextvars, clear_contextvars
-
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from app.api.v1.api import api_router
 from app.core.config import AGENT_API_KEY, NOTES_ENCRYPTION_KEY, POSTGRES_DB_URL
 from app.core.feature_flags import is_enabled
+from app.core.openapi import OPENAPI_TAGS, configure_openapi
 from app.db.postgres.session import dispose_postgres, init_postgres
 from app.deps.internal import internal_key_matches
 from app.exceptions.handlers import register_exceptions
-from app.logger import setup_logging, logger
-from app.core.openapi import OPENAPI_TAGS, configure_openapi
+from app.logger import logger, setup_logging
 from app.services.token import TokenService
 
 
@@ -28,16 +29,30 @@ async def lifespan(app: FastAPI):
 
 
 setup_logging()
+api_docs_enabled = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
 app = FastAPI(
     title="Notelite Backend API",
     description="Core API for authentication, notes, folders, tags, users, and conversations.",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if api_docs_enabled else None,
+    redoc_url="/redoc" if api_docs_enabled else None,
+    openapi_url="/openapi.json" if api_docs_enabled else None,
     openapi_tags=OPENAPI_TAGS,
     swagger_ui_parameters={"displayRequestDuration": True, "filter": True, "persistAuthorization": True},
     lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        ).split(",")
+        if origin.strip()
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 configure_openapi(app)
 

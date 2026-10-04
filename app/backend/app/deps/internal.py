@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+from uuid import UUID
 
 from app.core.config import AGENT_API_KEY
 from app.exceptions.base import AppException
@@ -29,3 +30,16 @@ def verify_internal_key(
             status_code=401,
             error_code=ErrorCode.UNAUTHORIZED,
         )
+
+
+def verify_internal_user_id(provided_key: str | None, user_id: str) -> UUID:
+    """Authenticate an internal caller and return its validated user UUID."""
+    verify_internal_key(provided_key)
+    try:
+        return UUID(user_id)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise AppException(
+            message="X-User-Id must be a valid UUID",
+            status_code=422,
+            error_code=ErrorCode.VALIDATION_ERROR,
+        ) from exc

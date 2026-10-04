@@ -9,8 +9,9 @@ class Settings(BaseSettings):
     mysql_host: str = "127.0.0.1"
     mysql_port: int = 3307
     mysql_user: str = "root"
-    mysql_password: str = "devroot"
+    mysql_password: str
     mysql_database: str = "agentlog"
+    agentlog_api_key: str
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     log_batch_max: int = 1000

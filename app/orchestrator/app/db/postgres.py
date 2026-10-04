@@ -20,6 +20,8 @@ class DatabaseManager:
                 pool_size=10,
                 max_overflow=20,
                 pool_pre_ping=True,
+                pool_timeout=10,
+                pool_recycle=1800,
             )
 
         return cls._engine
@@ -41,6 +43,9 @@ class DatabaseManager:
 
         try:
             yield session
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 

@@ -4,17 +4,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
-from app.schema.responses import ApiResponse, ConversationData, ConversationDetailData, MessageData
-
 from app.core.feature_flags import require_feature
 from app.db.postgres.models.conversation import Conversation, Message
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
-from app.deps.internal import verify_internal_key
+from app.deps.internal import verify_internal_user_id
 from app.exceptions.base import AppException
 from app.exceptions.handlers import success_response
 from app.schema.base import ErrorCode
 from app.schema.conversation import ConversationCreate, MessageCreate, MessageUpdate
+from app.schema.responses import ApiResponse, ConversationData, ConversationDetailData, MessageData
 from app.services.conversations import ConversationService
 
 router = APIRouter(
@@ -36,9 +35,8 @@ def _resolve_user_id(
     """Return user_id from JWT user or from agent service header."""
     if current_user:
         return current_user.id
-    if x_internal_key and x_user_id:
-        verify_internal_key(x_internal_key)
-        return UUID(x_user_id)
+    if x_internal_key is not None and x_user_id is not None:
+        return verify_internal_user_id(x_internal_key, x_user_id)
     raise AppException(
         message="Authentication required",
         status_code=401,
@@ -132,7 +130,11 @@ def delete_conversation(
 # ── Internal service routes (Agent -> Backend) ────────────────────────────────
 # These use X-Internal-Key + X-User-Id headers instead of cookies.
 
-@router.get("/internal/{conv_id}", response_model=ApiResponse[ConversationDetailData], summary="Get a conversation internally")
+@router.get(
+    "/internal/{conv_id}",
+    response_model=ApiResponse[ConversationDetailData],
+    summary="Get a conversation internally",
+)
 def internal_get_conversation(
     conv_id: UUID,
     x_internal_key: str = Header(...),
@@ -160,7 +162,11 @@ def internal_create_conversation(
     return success_response(_conv_dict(conv), "Conversation created")
 
 
-@router.post("/internal/{conv_id}/messages", response_model=ApiResponse[MessageData], summary="Create a conversation message internally")
+@router.post(
+    "/internal/{conv_id}/messages",
+    response_model=ApiResponse[MessageData],
+    summary="Create a conversation message internally",
+)
 def internal_create_message(
     conv_id: UUID,
     payload: MessageCreate,
@@ -175,7 +181,11 @@ def internal_create_message(
     return success_response(_msg_dict(msg), "Message created")
 
 
-@router.patch("/internal/{conv_id}/messages/{msg_id}", response_model=ApiResponse[MessageData], summary="Update a conversation message internally")
+@router.patch(
+    "/internal/{conv_id}/messages/{msg_id}",
+    response_model=ApiResponse[MessageData],
+    summary="Update a conversation message internally",
+)
 def internal_update_message(
     conv_id: UUID,
     msg_id: UUID,

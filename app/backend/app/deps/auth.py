@@ -31,6 +31,12 @@ def get_current_user(
             error_code=ErrorCode.UNAUTHORIZED
         )
     user = user_service.get_user(db, user_id)
+    if payload.get("ver") != user.auth_version:
+        raise AppException(
+            message="Session has been invalidated",
+            status_code=401,
+            error_code=ErrorCode.UNAUTHORIZED,
+        )
     if not user.is_active:
         raise AppException(
             message="Account is deactivated",

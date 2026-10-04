@@ -1,3 +1,4 @@
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -6,6 +7,7 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 import anyio.to_thread
@@ -26,6 +28,7 @@ from app.logger import logger, setup_logging
 
 setup_logging(service="agent")
 log = logger
+api_docs_enabled = os.getenv("ENABLE_API_DOCS", "false").lower() == "true"
 
 
 @asynccontextmanager
@@ -42,12 +45,25 @@ app = FastAPI(
     title="Notelite Agent API",
     description="RAG ingestion, chat streaming, diagnostics, and prompt preview API.",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if api_docs_enabled else None,
+    redoc_url="/redoc" if api_docs_enabled else None,
+    openapi_url="/openapi.json" if api_docs_enabled else None,
     openapi_tags=OPENAPI_TAGS,
     swagger_ui_parameters={"displayRequestDuration": True, "filter": True, "persistAuthorization": True},
     lifespan=lifespan,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv(
+            "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+        ).split(",")
+        if origin.strip()
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 configure_openapi(app)
 

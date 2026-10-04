@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import Underline from '@tiptap/extension-underline'
 import { useNoteStore } from '@/stores/noteStore'
 import { useFolderStore } from '@/stores/folderStore'
 import { useTagStore } from '@/stores/tagStore'
@@ -66,6 +67,8 @@ export default function NotesPage() {
   const isLoading = useNoteStore((s) => s.isLoading)
   const isSaving = useNoteStore((s) => s.isSaving)
   const fetchNotes = useNoteStore((s) => s.fetchNotes)
+  const loadMoreNotes = useNoteStore((s) => s.loadMoreNotes)
+  const hasMore = useNoteStore((s) => s.hasMore)
   const openNote = useNoteStore((s) => s.openNote)
   const createNote = useNoteStore((s) => s.createNote)
   const updateNote = useNoteStore((s) => s.updateNote)
@@ -109,6 +112,7 @@ export default function NotesPage() {
   }
 
   const handleDelete = async (id) => {
+    if (!window.confirm('Delete this note permanently?')) return
     await deleteNote(id)
     if (String(id) === String(noteId)) navigate(folderId ? `/folders/${folderId}` : '/notes')
   }
@@ -126,6 +130,8 @@ export default function NotesPage() {
         onNew={handleNew}
         onDelete={handleDelete}
         onPin={(note) => updateNote(note.id, { is_pinned: !note.is_pinned })}
+        hasMore={hasMore}
+        onLoadMore={loadMoreNotes}
       />
       <NoteEditor
         note={activeNote}
@@ -142,7 +148,7 @@ export default function NotesPage() {
   )
 }
 
-function NoteBrowser({ title, notes, activeId, search, setSearch, isLoading, onSelect, onNew, onDelete, onPin }) {
+function NoteBrowser({ title, notes, activeId, search, setSearch, isLoading, onSelect, onNew, onDelete, onPin, hasMore, onLoadMore }) {
   return (
     <section className={`notes-browser ${activeId ? 'notes-browser-has-selection' : ''}`}>
       <div className="notes-browser-header">
@@ -173,6 +179,11 @@ function NoteBrowser({ title, notes, activeId, search, setSearch, isLoading, onS
             <NoteCard key={note.id} note={note} index={index} active={String(activeId) === String(note.id)} onSelect={onSelect} onDelete={onDelete} onPin={onPin} />
           ))}
         </div>
+        {hasMore && (
+          <button onClick={onLoadMore} disabled={isLoading} className="workspace-pill mt-4 w-full rounded-xl px-3 py-2 text-xs">
+            {isLoading ? 'Loading…' : 'Load more notes'}
+          </button>
+        )}
       </div>
     </section>
   )
@@ -221,6 +232,7 @@ function NoteEditor({ note, onSave, isSaving, onBack, onDelete, tags, onCreateTa
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Placeholder.configure({ placeholder: 'Start writing your idea...' }),
+      Underline,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     immediatelyRender: false,

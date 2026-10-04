@@ -6,10 +6,9 @@ from typing import Any
 
 import httpx
 
-from config import DOMAIN_API_BASE, DOMAIN_TIMEOUT
+from config import DOMAIN_API_BASE, DOMAIN_API_KEY, DOMAIN_TIMEOUT
 from schemas.catalog import Catalog
 from schemas.playbook import PlaybookCandidates, PlaybookMatch
-
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +42,12 @@ def _post(path: str, payload: dict[str, Any]) -> Any:
 def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
     url = f"{DOMAIN_API_BASE.rstrip('/')}{path}"
     try:
-        response = _http_client().request(method, url, json=payload)
+        response = _http_client().request(
+            method,
+            url,
+            json=payload,
+            headers={"X-API-Key": DOMAIN_API_KEY},
+        )
         response.raise_for_status()
         return response.json()
     except httpx.HTTPStatusError as exc:

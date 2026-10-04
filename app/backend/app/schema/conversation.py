@@ -5,14 +5,14 @@ from pydantic import BaseModel, Field
 
 
 class ConversationCreate(BaseModel):
-    title: Optional[str] = Field(None, max_length=255)
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
 
 
 class ChatStreamRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
     k: int = Field(5, ge=1, le=50)
     conversation_id: Optional[UUID] = None
-    conversation_title: Optional[str] = Field(None, max_length=255)
+    conversation_title: Optional[str] = Field(None, min_length=1, max_length=255)
 
 
 class MessageCreate(BaseModel):

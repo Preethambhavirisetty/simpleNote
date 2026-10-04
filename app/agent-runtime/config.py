@@ -1,9 +1,9 @@
 import os
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 import failures
-
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -12,26 +12,31 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 
-def require_env(key: str, default:str=None) -> str:
+def require_env(key: str, default: str | None = None) -> str:
     value = os.getenv(key, default)
-    if value is None:
+    if value is None or not value.strip():
         raise RuntimeError(f"Missing required environment variable: {key}")
+    return value
+
+
+def require_https_url(key: str) -> str:
+    value = require_env(key).rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RuntimeError(f"{key} must be a valid https:// URL")
     return value
 
 
 # One host serves the LLM (8001) and embeddings/reranking (8003), matching
 # orchestrator/app/core/config.py. Pinning a full URL here is how this service
 # ended up on a dead IP while the orchestrator had already moved.
-EC2_INFERENCE_BASE_IP = require_env("EC2_INFERENCE_BASE_IP", "")
-LLM_API_BASE = require_env(
-    "LLM_API_BASE",
-    f"http://{EC2_INFERENCE_BASE_IP}:8001/v1" if EC2_INFERENCE_BASE_IP else "",
-)
+LLM_API_BASE = require_https_url("LLM_API_BASE")
 LLM_API_KEY = require_env("LLM_API_KEY")
 LLM_SUMMARIZER_MODEL = require_env("LLM_SUMMARIZER_MODEL")
 
 # agent-domain: the declarative catalog of playbooks, operations, and mappings.
 DOMAIN_API_BASE = require_env("DOMAIN_API_BASE", "http://agent-domain:8000")
+DOMAIN_API_KEY = require_env("DOMAIN_API_KEY")
 DOMAIN_TIMEOUT = float(require_env("DOMAIN_TIMEOUT", "10"))
 
 # How the router decides. "single": one call picks playbook and plan together.
@@ -54,6 +59,7 @@ MCP_SERVERS = {
     if name.strip() and url.strip()
 }
 MCP_TIMEOUT = float(require_env("MCP_TIMEOUT", "60"))
+RUN_CONCURRENCY = int(require_env("RUN_CONCURRENCY", "20"))
 
 # Off until a run can pause for approval and resume through the API. Routing
 # still selects the mutating playbook, so logs and evals stay honest; the plan
@@ -65,9 +71,10 @@ MUTATIONS_DISABLED_MESSAGE = require_env(
     "MUTATIONS_DISABLED_MESSAGE", failures.ACTION_NOT_SUPPORTED.message
 )
 
-# Shared secret the orchestrator sends as X-API-Key. Empty disables the check.
-AGENT_API_KEY = require_env("AGENT_WORKFLOW_API_KEY", "")
+# Shared secret the orchestrator sends as X-API-Key.
+AGENT_API_KEY = require_env("AGENT_WORKFLOW_API_KEY")
 # Structured run logging into the agentlog service (observability/). Optional:
 # with the SDK absent or the collector down, every log call is a no-op.
 AGENTLOG_ENABLED = require_env("AGENTLOG_ENABLED", "true").lower() == "true"
 AGENTLOG_ENDPOINT = require_env("AGENTLOG_ENDPOINT", "http://agentlog-api:8000")
+AGENTLOG_API_KEY = require_env("AGENTLOG_API_KEY")

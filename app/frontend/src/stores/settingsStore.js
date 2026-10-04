@@ -6,4 +6,5 @@ export const useSettingsStore = create((set) => ({
   open: () => set({ isOpen: true }),
   close: () => set({ isOpen: false }),
   toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+  reset: () => set({ isOpen: false }),
 }))

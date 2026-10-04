@@ -8,10 +8,12 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
+from app.core.tiptap import MAX_DOCUMENT_DEPTH
 from app.exceptions.base import AppException
 from app.schema.base import ErrorCode
-from app.schema.note import NoteCreate, NoteMoveRequest, NoteUpdate
+from app.schema.note import MAX_NOTE_CONTENT_BYTES, NoteCreate, NoteMoveRequest, NoteUpdate
 from tests.conftest import make_note, make_tag
 
 # Suppress all Celery send_task calls for the entire test module.
@@ -30,6 +32,24 @@ _SIMPLE_DOC = {
 }
 
 _EMPTY_DOC = {"type": "doc", "content": []}
+
+
+# ── Note content validation ───────────────────────────────────────────────────
+
+class TestNoteContentValidation:
+    def test_create_rejects_oversized_content(self):
+        content = {"type": "doc", "text": "x" * MAX_NOTE_CONTENT_BYTES}
+
+        with pytest.raises(ValidationError, match="must not exceed"):
+            NoteCreate(title="T", folder_id=uuid4(), content=content)
+
+    def test_update_rejects_excessive_content_depth(self):
+        content = {}
+        for _ in range(MAX_DOCUMENT_DEPTH):
+            content = {"content": [content]}
+
+        with pytest.raises(ValidationError, match="maximum depth"):
+            NoteUpdate(content=content)
 
 
 # ── NoteService unit tests ────────────────────────────────────────────────────
@@ -128,10 +148,43 @@ class TestNoteServiceGet:
         assert exc.value.status_code == 404
 
 
+class TestNoteServiceList:
+    def test_encrypted_search_paginates_matching_notes_across_source_batches(
+        self, note_service, mock_db, current_user
+    ):
+        from app.services import notes as notes_module
+
+        nonmatch_1 = make_note(title="First", content_text="No result")
+        match_1 = make_note(title="Match one", content_text="")
+        match_2 = make_note(title="Second", content_text="contains MATCH")
+        nonmatch_2 = make_note(title="Third", content_text="No result")
+        match_3 = make_note(title="Match three", content_text="")
+        note_service.repo.list.side_effect = [
+            [nonmatch_1, match_1],
+            [match_2, nonmatch_2],
+            [match_3],
+        ]
+
+        with patch.object(notes_module, "is_enabled", return_value=True), patch.object(
+            notes_module, "_ENCRYPTED_SEARCH_BATCH_SIZE", 2
+        ):
+            result = note_service.list(
+                mock_db,
+                current_user.id,
+                search="match",
+                skip=1,
+                limit=2,
+            )
+
+        assert result == [match_2, match_3]
+        assert [call.kwargs["skip"] for call in note_service.repo.list.call_args_list] == [0, 2, 4]
+        assert all(call.kwargs["search"] is None for call in note_service.repo.list.call_args_list)
+
+
 class TestNoteServiceUpdate:
     def test_update_with_content_re_extracts_text(self, note_service, mock_db, current_user):
         note = make_note(user_id=current_user.id, version=1)
-        note_service.repo.get_by_id.return_value = note
+        note_service.repo.get_by_id_for_update.return_value = note
 
         payload = NoteUpdate(content=_SIMPLE_DOC)
         note_service.update(mock_db, note.id, current_user.id, payload, current_user.role)
@@ -147,7 +200,7 @@ class TestNoteServiceUpdate:
 
     def test_update_without_content_passes_none_text(self, note_service, mock_db, current_user):
         note = make_note(user_id=current_user.id)
-        note_service.repo.get_by_id.return_value = note
+        note_service.repo.get_by_id_for_update.return_value = note
 
         payload = NoteUpdate(title="New Title")
         note_service.update(mock_db, note.id, current_user.id, payload, current_user.role)
@@ -159,7 +212,7 @@ class TestNoteServiceUpdate:
     def test_update_to_unowned_folder_raises_404(self, note_service, mock_db, current_user):
         """PATCH can change folder_id too — it must pass the same ownership guard."""
         note = make_note(user_id=current_user.id)
-        note_service.repo.get_by_id.return_value = note
+        note_service.repo.get_by_id_for_update.return_value = note
         note_service.folder_repo.get_by_id.return_value = None
 
         payload = NoteUpdate(folder_id=uuid4())
@@ -172,7 +225,7 @@ class TestNoteServiceUpdate:
 
     def test_update_keeping_same_folder_skips_folder_lookup(self, note_service, mock_db, current_user):
         note = make_note(user_id=current_user.id)
-        note_service.repo.get_by_id.return_value = note
+        note_service.repo.get_by_id_for_update.return_value = note
         note_service.folder_repo.get_by_id.return_value = None  # would 404 if consulted
 
         payload = NoteUpdate(title="New Title", folder_id=note.folder_id)
@@ -187,7 +240,13 @@ class TestNoteServiceMove:
         note_service.repo.get_by_id.return_value = note
         new_folder_id = uuid4()
 
-        note_service.move(mock_db, note.id, current_user.id, NoteMoveRequest(folder_id=new_folder_id), current_user.role)
+        note_service.move(
+            mock_db,
+            note.id,
+            current_user.id,
+            NoteMoveRequest(folder_id=new_folder_id),
+            current_user.role,
+        )
 
         assert note.folder_id == new_folder_id
         mock_db.commit.assert_called_once()

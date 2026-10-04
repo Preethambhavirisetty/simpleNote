@@ -34,6 +34,7 @@ PAYLOAD_INDEXES = (
     ("doc_id", models.PayloadSchemaType.KEYWORD),
     ("chunk_id", models.PayloadSchemaType.KEYWORD),
     ("metadata.user_id", models.PayloadSchemaType.KEYWORD),
+    ("metadata.folder_id", models.PayloadSchemaType.KEYWORD),
     ("metadata.doc_id", models.PayloadSchemaType.KEYWORD),
 )
 
@@ -201,6 +202,20 @@ class QdrantVectorStore:
                 points_selector=selector,
             )
         self.events.append(f"document vectors deleted: {doc_id}")
+
+    def delete_folder(self, user_id: str, folder_id: str) -> None:
+        point_filter = self.build_filter({"user_id": user_id, "folder_id": folder_id})
+        selector = models.FilterSelector(filter=point_filter)
+
+        for collection_name in (CHUNK_COLLECTION, SUMMARY_COLLECTION, QUESTIONS_COLLECTION):
+            if not self._collection_exists(collection_name):
+                log.info("Skipping Qdrant delete; collection does not exist: %s", collection_name)
+                continue
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=selector,
+            )
+        self.events.append(f"folder vectors deleted: {user_id}/{folder_id}")
 
     def upsert_index_chunks(self, chunks: Sequence[IndexChunk]) -> None:
         """Embed and store application-owned index chunks."""

@@ -41,6 +41,9 @@ export default function Sidebar() {
   const isChatEnabled = useFeatureFlagStore((s) => s.isEnabled)('chat')
   const conversations = useChatStore((s) => s.conversations)
   const fetchConversations = useChatStore((s) => s.fetchConversations)
+  const loadMoreConversations = useChatStore((s) => s.loadMoreConversations)
+  const hasMoreConversations = useChatStore((s) => s.hasMoreConversations)
+  const isLoadingConvs = useChatStore((s) => s.isLoadingConvs)
   const deleteConversation = useChatStore((s) => s.deleteConversation)
 
   const { folderId } = useParams()
@@ -93,6 +96,7 @@ export default function Sidebar() {
 
   const handleDeleteConversation = async (event, id) => {
     event.stopPropagation()
+    if (!window.confirm('Delete this conversation permanently?')) return
     await deleteConversation(id)
     setOpenConversationMenuId(null)
     if (activeConversationId === String(id)) navigate('/chat')
@@ -168,6 +172,16 @@ export default function Sidebar() {
                   </div>
                 )
               })}
+              {!isCollapsed && hasMoreConversations && (
+                <button
+                  type="button"
+                  onClick={loadMoreConversations}
+                  disabled={isLoadingConvs}
+                  className="workspace-pill mt-2 w-full rounded-xl px-3 py-2 text-xs"
+                >
+                  {isLoadingConvs ? 'Loading…' : 'Load more'}
+                </button>
+              )}
             </div>
           </>
         ) : (
@@ -214,7 +228,7 @@ export default function Sidebar() {
                       ) : (
                         <>
                           {!isCollapsed && <button onClick={(event) => handleRenameFolder(event, folder)} className="folder-tree-action" title="Rename folder"><Icon name="pencil" className="h-3.5 w-3.5" /></button>}
-                          {!isCollapsed && <button onClick={() => deleteFolder(folder.id).then(() => String(folder.id) === String(folderId) && navigate('/notes'))} className="folder-tree-action hover:text-red-400" title="Delete folder"><Icon name="trash" className="h-3.5 w-3.5" /></button>}
+                          {!isCollapsed && <button onClick={() => window.confirm('Delete this folder and all of its notes permanently?') && deleteFolder(folder.id).then(() => String(folder.id) === String(folderId) && navigate('/notes'))} className="folder-tree-action hover:text-red-400" title="Delete folder"><Icon name="trash" className="h-3.5 w-3.5" /></button>}
                         </>
                       )}
                     </div>
@@ -229,6 +243,7 @@ export default function Sidebar() {
                             <button
                               onClick={async (event) => {
                                 event.stopPropagation()
+                                if (!window.confirm('Delete this note permanently?')) return
                                 await deleteNote(note.id)
                                 if (String(note.id) === String(activeNoteId)) navigate(`/folders/${folder.id}`)
                               }}

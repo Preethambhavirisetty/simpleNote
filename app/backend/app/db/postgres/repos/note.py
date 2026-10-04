@@ -20,6 +20,15 @@ class NoteRepository:
             .options(selectinload(Note.tags))
         ).scalar_one_or_none()
 
+    def get_by_id_for_update(self, db: Session, note_id: UUID, user_id: UUID) -> Note | None:
+        """Lock a note until the transaction commits so version increments are atomic."""
+        return db.execute(
+            select(Note)
+            .where(Note.id == note_id, Note.user_id == user_id)
+            .options(selectinload(Note.tags))
+            .with_for_update()
+        ).scalar_one_or_none()
+
     def list(
         self,
         db: Session,
@@ -46,9 +55,10 @@ class NoteRepository:
             stmt = stmt.where(Note.is_pinned.is_(True))
 
         if search:
+            escaped_search = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             stmt = stmt.where(
                 or_(
-                    Note.title.ilike(f"%{search}%"),
+                    Note.title.ilike(f"%{escaped_search}%", escape="\\"),
                     func.to_tsvector("english", func.coalesce(Note.content_text, "")).op("@@")(
                         func.plainto_tsquery("english", search)
                     ),

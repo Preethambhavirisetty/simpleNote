@@ -33,6 +33,8 @@ __pycache__/
 coverage/
 htmlcov/
 *.egg-info/
+tests/
+**/tests/
 
 # Local caches / generated artifacts
 .cache/

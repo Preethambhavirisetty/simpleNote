@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: app/backend
 
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: app/backend/requirements.txt
 
       - name: Install ruff
         run: pip install ruff --quiet
@@ -46,7 +46,7 @@ jobs:
     # suite, so no service containers are required.
     defaults:
       run:
-        working-directory: backend
+        working-directory: app/backend
 
     # Env vars that config.py requires at import time.
     # They point at nothing real; every DB call is mocked in tests.
@@ -54,6 +54,12 @@ jobs:
       POSTGRES_DB_URL: postgresql+psycopg://ci:ci@localhost:5432/ci_db
       SECRET_KEY: ci-secret-key-not-used-in-tests
       HASH_ALGORITHM: HS256
+      JWT_ISSUER: notelite-ci
+      JWT_AUDIENCE: notelite-ci
+      MESSAGE_BROKER_URL: redis://localhost:6379/0
+      CELERY_RESULT_BACKEND: redis://localhost:6379/1
+      INGESTION_TASK_STRING: app.tasks.ingestion.ingest_note
+      AGENT_API_KEY: ci-agent-api-key
 
     steps:
       - uses: actions/checkout@v4
@@ -62,10 +68,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: app/backend/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt
+        run: pip install -r requirements.txt pytest
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short --strict-markers
@@ -75,7 +81,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: backend/.pytest_cache/
+          path: app/backend/.pytest_cache/
           retention-days: 7
 
   # ── 3. Docker build (dry-run) ──────────────────────────────────────────────
@@ -94,8 +100,8 @@ jobs:
       - name: Build image (no push)
         uses: docker/build-push-action@v6
         with:
-          context: backend
-          file: backend/Dockerfile
+          context: app/backend
+          file: app/backend/Dockerfile
           push: false
           tags: notelite-backend:ci
           cache-from: type=gha
@@ -139,8 +145,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: backend
-          file: backend/Dockerfile
+          context: app/backend
+          file: app/backend/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

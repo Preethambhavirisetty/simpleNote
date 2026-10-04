@@ -38,6 +38,7 @@ class UserRepository:
 
     def update_password(self, db: Session, user: User, hashed_password: str) -> User:
         user.hashed_password = hashed_password
+        user.auth_version += 1
         return user
 
     def assign_roles(self, db: Session, user: User, roles: list[str]) -> User:

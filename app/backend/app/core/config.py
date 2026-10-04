@@ -49,9 +49,14 @@ def _require_env(name: str, default:str=None) -> str:
 
 SECRET_KEY = _require_env("SECRET_KEY")
 HASH_ALGORITHM = _require_env("HASH_ALGORITHM", "HS256")
+JWT_ISSUER = _require_env("JWT_ISSUER")
+JWT_AUDIENCE = _require_env("JWT_AUDIENCE")
 # Send the auth cookie only over HTTPS. Enable in production (COOKIE_SECURE=true);
 # keep off for local/plain-HTTP development.
 COOKIE_SECURE = _require_env("COOKIE_SECURE", "false").lower() == "true"
+COOKIE_SAMESITE = _require_env("COOKIE_SAMESITE", "lax").lower()
+if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    raise RuntimeError("COOKIE_SAMESITE must be one of: lax, strict, none")
 
 # Note field encryption at rest (opt-in via the notes.encryption feature flag).
 # NOTES_ENCRYPTION_KEY is base64 of 32 random bytes; required only when the flag is on.
@@ -74,4 +79,3 @@ AGENT_WORKFLOW_API_KEY = _require_env("AGENT_WORKFLOW_API_KEY", AGENT_API_KEY)
 AGENT_WORKFLOW_CONFIG_NAME = _require_env("AGENT_WORKFLOW_CONFIG_NAME", "notelite")
 INGESTION_DEBOUNCE_SECONDS = int(_require_env("INGESTION_DEBOUNCE_SECONDS", "10"))
 INGESTION_COALESCE_TTL_SECONDS = int(_require_env("INGESTION_COALESCE_TTL_SECONDS", "120"))
-

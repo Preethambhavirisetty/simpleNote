@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from config import AGENTLOG_ENABLED, AGENTLOG_ENDPOINT
+from config import AGENTLOG_API_KEY, AGENTLOG_ENABLED, AGENTLOG_ENDPOINT
 
 _log = logging.getLogger(__name__)
 
@@ -92,14 +92,14 @@ def run_logger(question: str, conversation_id: str | None, **metadata: Any):
 
     global _configured
     if not _configured:
-        agentlog.configure(AGENTLOG_ENDPOINT)
+        agentlog.configure(AGENTLOG_ENDPOINT, api_key=AGENTLOG_API_KEY)
         _configured = True
 
     try:
         run = agentlog.start(
             question=question, conversation_id=conversation_id, metadata=metadata or None
         )
-    except Exception:  # the collector being down must not fail the request
+    except Exception:  # noqa: BLE001 - telemetry must never fail the request
         _log.warning("agentlog unavailable; continuing without run logging", exc_info=True)
         yield NULL_RUN
         return
@@ -127,7 +127,7 @@ def finish(answer: str | None, status: str = "ok", **track: Any) -> None:
 def _safely(call, *args: Any, **kwargs: Any) -> None:
     try:
         call(*args, **kwargs)
-    except Exception:  # never let a logging failure surface to the caller
+    except Exception:  # noqa: BLE001 - telemetry must never fail the request
         _log.debug("agentlog call failed", exc_info=True)
 
 
@@ -172,7 +172,7 @@ def timed(phase: str, message: str, **track_values: Any):
     try:
         manager = run.timed(phase, message, **track_values)
         handle = manager.__enter__()
-    except Exception:
+    except Exception:  # noqa: BLE001 - telemetry must never fail the request
         _log.debug("agentlog timer unavailable", exc_info=True)
         yield _NullTimed()
         return
@@ -183,13 +183,13 @@ def timed(phase: str, message: str, **track_values: Any):
         # Let the timer record the failed span, then re-raise unchanged.
         try:
             manager.__exit__(*sys.exc_info())
-        except Exception:
+        except Exception:  # noqa: BLE001 - preserve the application exception
             _log.debug("agentlog timer exit failed", exc_info=True)
         raise
     else:
         try:
             manager.__exit__(None, None, None)
-        except Exception:
+        except Exception:  # noqa: BLE001 - telemetry must never fail the request
             _log.debug("agentlog timer exit failed", exc_info=True)
 
 

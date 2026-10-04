@@ -3,14 +3,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.schema.responses import ApiResponse, UserData
-
 from app.db.postgres.models.user import User
 from app.db.postgres.session import get_postgres_session
 from app.deps.auth import get_current_user
 from app.exceptions.base import AppException
 from app.exceptions.handlers import success_response
 from app.schema.base import ErrorCode
+from app.schema.responses import ApiResponse, UserData
 from app.schema.users import UserAssignRoles, UserUpdate
 from app.services.user import UserService
 
@@ -34,7 +33,7 @@ def _user_dict(user: User) -> dict:
 
 
 async def require_admin(current_user=Depends(get_current_user)):
-    if "admin" not in current_user.role:
+    if not {"admin", "admin_user"}.intersection(current_user.role):
         raise AppException(
             message="Admin access required",
             status_code=403,
@@ -76,7 +75,12 @@ def delete_me(
 
 # ── Admin: any user ───────────────────────────────────────────────────────────
 
-@router.get("/", dependencies=[Depends(require_admin)], response_model=ApiResponse[list[UserData]], summary="List users")
+@router.get(
+    "/",
+    dependencies=[Depends(require_admin)],
+    response_model=ApiResponse[list[UserData]],
+    summary="List users",
+)
 def get_all_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -88,7 +92,12 @@ def get_all_users(
     return success_response([_user_dict(u) for u in users], "Users retrieved")
 
 
-@router.get("/{user_id}", dependencies=[Depends(require_admin)], response_model=ApiResponse[UserData], summary="Get a user")
+@router.get(
+    "/{user_id}",
+    dependencies=[Depends(require_admin)],
+    response_model=ApiResponse[UserData],
+    summary="Get a user",
+)
 def get_user(
     user_id: UUID,
     db: Session = Depends(get_postgres_session),
@@ -99,7 +108,12 @@ def get_user(
     return success_response(_user_dict(user), "User retrieved")
 
 
-@router.patch("/{user_id}", dependencies=[Depends(require_admin)], response_model=ApiResponse[UserData], summary="Update a user")
+@router.patch(
+    "/{user_id}",
+    dependencies=[Depends(require_admin)],
+    response_model=ApiResponse[UserData],
+    summary="Update a user",
+)
 def update_user(
     user_id: UUID,
     payload: UserUpdate,
@@ -111,18 +125,30 @@ def update_user(
     return success_response(_user_dict(updated), "User updated")
 
 
-@router.delete("/{user_id}", dependencies=[Depends(require_admin)], response_model=ApiResponse[None], summary="Delete a user")
+@router.delete("/{user_id}", response_model=ApiResponse[None], summary="Delete a user")
 def delete_user(
     user_id: UUID,
+    current_admin=Depends(require_admin),
     db: Session = Depends(get_postgres_session),
     user_service: UserService = Depends(get_user_service),
 ):
     """Delete one user for an administrator."""
+    if user_id == current_admin.id:
+        raise AppException(
+            message="Administrators cannot delete their own account from the admin API",
+            status_code=400,
+            error_code=ErrorCode.VALIDATION_ERROR,
+        )
     user_service.delete_user(db, user_id)
     return success_response(None, "User deleted")
 
 
-@router.patch("/{user_id}/roles", dependencies=[Depends(require_admin)], response_model=ApiResponse[UserData], summary="Assign user roles")
+@router.patch(
+    "/{user_id}/roles",
+    dependencies=[Depends(require_admin)],
+    response_model=ApiResponse[UserData],
+    summary="Assign user roles",
+)
 def assign_roles(
     user_id: UUID,
     payload: UserAssignRoles,
@@ -134,7 +160,12 @@ def assign_roles(
     return success_response(_user_dict(updated), "Roles updated")
 
 
-@router.patch("/{user_id}/activate", dependencies=[Depends(require_admin)], response_model=ApiResponse[None], summary="Activate a user")
+@router.patch(
+    "/{user_id}/activate",
+    dependencies=[Depends(require_admin)],
+    response_model=ApiResponse[None],
+    summary="Activate a user",
+)
 def activate_user(
     user_id: UUID,
     db: Session = Depends(get_postgres_session),
@@ -145,12 +176,19 @@ def activate_user(
     return success_response(None, "User activated")
 
 
-@router.patch("/{user_id}/deactivate", dependencies=[Depends(require_admin)], response_model=ApiResponse[None], summary="Deactivate a user")
+@router.patch("/{user_id}/deactivate", response_model=ApiResponse[None], summary="Deactivate a user")
 def deactivate_user(
     user_id: UUID,
+    current_admin=Depends(require_admin),
     db: Session = Depends(get_postgres_session),
     user_service: UserService = Depends(get_user_service),
 ):
     """Deactivate one user account."""
+    if user_id == current_admin.id:
+        raise AppException(
+            message="Administrators cannot deactivate their own account",
+            status_code=400,
+            error_code=ErrorCode.VALIDATION_ERROR,
+        )
     user_service.deactivate_user(db, user_id)
     return success_response(None, "User deactivated")

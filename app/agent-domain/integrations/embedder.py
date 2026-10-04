@@ -1,6 +1,6 @@
 """Dense embeddings from the remote inference host.
 
-Served over HTTP rather than loaded in-process. The service embeds a handful of
+Served remotely rather than loaded in-process. The service embeds a handful of
 short strings on catalog load and one question per search - work that does not
 justify carrying torch, a model download, and a GPU-shaped memory footprint in
 a container that otherwise reads YAML.
@@ -56,8 +56,7 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         return []
     if not embeddings_available():
         raise EmbeddingsUnavailableError(
-            "no embedding endpoint configured: set EC2_INFERENCE_BASE_IP or "
-            "EMBEDDING_MODEL_BASE"
+            "no embedding endpoint configured: set EMBEDDING_MODEL_BASE"
         )
 
     try:

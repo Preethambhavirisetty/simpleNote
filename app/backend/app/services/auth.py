@@ -1,6 +1,7 @@
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from app.core.config import COOKIE_SAMESITE, COOKIE_SECURE
 from app.core.security import check_password, hash_password
 from app.db.postgres.repos.user import UserRepository
 from app.exceptions.base import AppException
@@ -33,7 +34,8 @@ class AuthService:
         db.refresh(new_user)
 
         if not self.token_service.create_assign_http_only_cookie(
-            response, new_user.id, email=new_user.email, role=new_user.role
+            response, new_user.id, email=new_user.email, role=new_user.role,
+            auth_version=new_user.auth_version,
         ):
             raise AppException(
                 message="Error occurred while setting cookie",
@@ -53,14 +55,14 @@ class AuthService:
         if not existing_user:
             raise AppException(
                 message="Invalid email or password",
-                status_code=400,
+                status_code=401,
                 error_code=ErrorCode.INVALID_CREDENTIALS,
             )
 
         if not check_password(payload.password, existing_user.hashed_password):
             raise AppException(
                 message="Invalid email or password",
-                status_code=400,
+                status_code=401,
                 error_code=ErrorCode.INVALID_CREDENTIALS,
             )
 
@@ -72,12 +74,13 @@ class AuthService:
             )
 
         if not self.token_service.create_assign_http_only_cookie(
-            response, existing_user.id, email=existing_user.email, role=existing_user.role
+            response, existing_user.id, email=existing_user.email, role=existing_user.role,
+            auth_version=existing_user.auth_version,
         ):
             raise AppException(
                 message="Error occurred while setting cookie",
-                status_code=400,
-                error_code=ErrorCode.REGISTRATION_FAILED,
+                status_code=500,
+                error_code=ErrorCode.INTERNAL_SERVER_ERROR,
             )
         return {
             "name": existing_user.name,
@@ -88,7 +91,14 @@ class AuthService:
 
     def logout_user(self, response: Response):
         try:
-            response.delete_cookie("access_token")
+            response.delete_cookie(
+                key="access_token",
+                path="/",
+                domain=None,
+                secure=COOKIE_SECURE,
+                httponly=True,
+                samesite=COOKIE_SAMESITE,
+            )
             return {"message": "successfully deleted cookie"}
         except Exception:
             raise AppException(

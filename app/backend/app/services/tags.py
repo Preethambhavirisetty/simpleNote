@@ -34,8 +34,8 @@ class TagService:
         db.refresh(tag)
         return tag
 
-    def list(self, db: Session, user_id: UUID):
-        return self.repo.list(db, user_id)
+    def list(self, db: Session, user_id: UUID, skip: int = 0, limit: int = 100):
+        return self.repo.list(db, user_id, skip=skip, limit=limit)
 
     def get(self, db: Session, tag_id: UUID, user_id: UUID):
         return self._get_or_404(db, tag_id, user_id)

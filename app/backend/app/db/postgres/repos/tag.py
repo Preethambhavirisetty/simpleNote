@@ -20,10 +20,10 @@ class TagRepository:
             select(Tag).where(Tag.user_id == user_id, Tag.name == name)
         ).scalar_one_or_none()
 
-    def list(self, db: Session, user_id: UUID) -> list[Tag]:
+    def list(self, db: Session, user_id: UUID, skip: int = 0, limit: int = 100) -> list[Tag]:
         return list(
             db.execute(
-                select(Tag).where(Tag.user_id == user_id).order_by(Tag.name)
+                select(Tag).where(Tag.user_id == user_id).order_by(Tag.name).offset(skip).limit(limit)
             ).scalars().all()
         )
 

@@ -5,13 +5,16 @@ VENV    := .venv
 PY      := $(VENV)/bin/python
 PIP     := $(VENV)/bin/pip
 MYSQL_CONTAINER ?= agentlog-mysql
-MYSQL_ROOT_PASSWORD ?= devroot
+MYSQL_ROOT_PASSWORD ?=
 MYSQL_DATABASE ?= agentlog
 SEED_RUNS ?= 200
 SEED_DAYS ?= 7
 SEED ?= 42
 
-.PHONY: help up down migrate seed dev api ui test shell reset logs install nuke
+.PHONY: help require-mysql-password up down migrate seed dev api ui test shell reset logs install nuke
+
+require-mysql-password:
+	@test -n "$(MYSQL_ROOT_PASSWORD)" || (echo "MYSQL_ROOT_PASSWORD must be set" >&2; exit 1)
 
 help: ## Show this help
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -24,7 +27,7 @@ install: ## Create the venv and install backend + frontend deps
 	@cd frontend && npm install --silent
 	@echo "dependencies installed"
 
-up: ## Start MySQL in podman (starts the podman machine if needed)
+up: require-mysql-password ## Start MySQL in podman (starts the podman machine if needed)
 	@podman machine inspect --format '{{.State}}' 2>/dev/null | grep -q running \
 	  || podman machine start
 	@./infra/podman/run-mysql.sh
@@ -32,7 +35,7 @@ up: ## Start MySQL in podman (starts the podman machine if needed)
 down: ## Stop the MySQL container
 	@podman stop $(MYSQL_CONTAINER) 2>/dev/null || true
 
-migrate: ## Apply db/migrations/*.sql
+migrate: require-mysql-password ## Apply db/migrations/*.sql
 	@./db/migrate.sh
 
 seed: ## Load demo runs through the API (needs `make api` running)
@@ -57,14 +60,14 @@ test: ## Run the backend test suite (uses a scratch agentlog_test database)
 smoke: ## Render every dashboard page in Chrome and fail on console errors
 	@cd frontend && node smoke.mjs
 
-shell: ## Open a mysql shell in the container
+shell: require-mysql-password ## Open a mysql shell in the container
 	@podman exec -it $(MYSQL_CONTAINER) \
 	  mysql -uroot -p$(MYSQL_ROOT_PASSWORD) $(MYSQL_DATABASE)
 
 logs: ## Tail the MySQL container logs
 	@podman logs -f $(MYSQL_CONTAINER)
 
-reset: ## Empty every table (keeps the schema)
+reset: require-mysql-password ## Empty every table (keeps the schema)
 	@podman exec -i $(MYSQL_CONTAINER) mysql -uroot -p$(MYSQL_ROOT_PASSWORD) \
 	  $(MYSQL_DATABASE) -e "SET FOREIGN_KEY_CHECKS=0; \
 	    TRUNCATE tracked_fields; TRUNCATE logs; TRUNCATE runs; TRUNCATE field_defs; \

@@ -13,8 +13,9 @@ Same Cohere-compatible endpoint the orchestrator's chat reranker uses.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 import httpx
 
@@ -57,8 +58,7 @@ def rerank(query: str, documents: Sequence[str], top_n: int | None = None) -> li
         return []
     if not reranker_available():
         raise RerankerUnavailableError(
-            "no reranker endpoint configured: set EC2_INFERENCE_BASE_IP or "
-            "RERANKER_API_BASE"
+            "no reranker endpoint configured: set RERANKER_API_BASE"
         )
 
     headers = {"Content-Type": "application/json"}

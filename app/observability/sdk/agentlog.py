@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 DEFAULT_ENDPOINT = os.environ.get("AGENTLOG_ENDPOINT", "http://127.0.0.1:8000")
+DEFAULT_API_KEY = os.environ.get("AGENTLOG_API_KEY")
 DEFAULT_QUEUE_MAX = 10_000
 DEFAULT_BATCH = 100
 DEFAULT_FLUSH_S = 2.0
@@ -70,12 +71,16 @@ class _Transport:
         flush_interval: float = DEFAULT_FLUSH_S,
         timeout: float = 5.0,
         fallback_path: str | None = None,
+        api_key: str | None = DEFAULT_API_KEY,
     ) -> None:
         self.endpoint = endpoint.rstrip("/")
         self.batch_size = batch_size
         self.flush_interval = flush_interval
         self.timeout = timeout
         self.fallback_path = fallback_path
+        if not api_key:
+            raise ValueError("AGENTLOG_API_KEY is required")
+        self.api_key = api_key
         self.dropped = 0
         self._q: queue.Queue = queue.Queue(maxsize=queue_max)
         self._thread = threading.Thread(
@@ -102,7 +107,7 @@ class _Transport:
         req = urllib.request.Request(
             f"{self.endpoint}{path}",
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "X-API-Key": self.api_key},
             method="POST",
         )
         try:

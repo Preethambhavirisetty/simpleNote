@@ -3,7 +3,9 @@ Unit tests for app.core.tiptap.extract_text.
 
 All tests are pure – no DB, no HTTP, no mocks needed.
 """
-from app.core.tiptap import extract_text
+import pytest
+
+from app.core.tiptap import MAX_DOCUMENT_DEPTH, extract_text
 
 # ── Input guard ───────────────────────────────────────────────────────────────
 
@@ -25,6 +27,15 @@ def test_empty_dict_returns_empty():
 
 def test_doc_with_no_content_key():
     assert extract_text({"type": "doc"}) == ""
+
+
+def test_document_exceeding_maximum_depth_is_rejected():
+    doc = {"type": "text", "text": "too deep"}
+    for _ in range(MAX_DOCUMENT_DEPTH):
+        doc = {"type": "paragraph", "content": [doc]}
+
+    with pytest.raises(ValueError, match="maximum depth"):
+        extract_text(doc)
 
 
 # ── Simple text extraction ────────────────────────────────────────────────────

@@ -6,6 +6,8 @@ import { unwrap, unwrapList } from '@/lib/api'
 const pendingNoteLoads = new Map()
 const pendingNoteUpdates = new Map()
 let requestedNoteId = null
+const NOTE_PAGE_SIZE = 50
+let lastNoteParams = {}
 
 // ---------- TipTap helpers ----------
 // BE field is "content" (TipTap JSON). These helpers convert to/from plain text
@@ -46,18 +48,38 @@ export const useNoteStore = create(
       activeNote: null,
       isLoading: false,
       isSaving: false,
+      hasMore: true,
 
-      fetchNotes: async (params = {}) => {
+      reset: () => {
+        pendingNoteLoads.clear()
+        pendingNoteUpdates.clear()
+        requestedNoteId = null
+        lastNoteParams = {}
+        set({ notes: [], activeNote: null, isLoading: false, isSaving: false, hasMore: true })
+      },
+
+      fetchNotes: async (params = {}, append = false) => {
         if (get().isLoading) return
         set({ isLoading: true })
         try {
-          const { data } = await notesApi.list(params)
-          set({ notes: unwrapList(data).map(normalizeNote) })
+          if (!append) lastNoteParams = params
+          const skip = append ? get().notes.length : 0
+          const { data } = await notesApi.list({ ...lastNoteParams, ...params, skip, limit: NOTE_PAGE_SIZE })
+          const page = unwrapList(data).map(normalizeNote)
+          set((state) => ({
+            notes: append ? [...state.notes, ...page] : page,
+            hasMore: page.length === NOTE_PAGE_SIZE,
+          }))
         } catch (err) {
           console.error('[noteStore] fetchNotes:', err.response?.data ?? err.message)
         } finally {
           set({ isLoading: false })
         }
+      },
+
+      loadMoreNotes: async () => {
+        if (!get().hasMore) return
+        await get().fetchNotes({}, true)
       },
 
       openNote: async (noteId) => {
@@ -166,7 +188,7 @@ export const useNoteStore = create(
         set({ activeNote: null })
       },
     }),
-    { name: 'note-store' },
+    { name: 'note-store', enabled: import.meta.env.DEV },
   ),
 )
 

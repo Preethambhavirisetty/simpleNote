@@ -10,7 +10,6 @@ from unittest.mock import patch
 from app.main import _extract_user_id
 from app.services.token import TokenService
 
-
 INTERNAL_KEY = "test-internal-key"
 
 

@@ -30,6 +30,7 @@ def make_user(**kwargs) -> SimpleNamespace:
         hashed_password="hashed_secret",
         role=["standard_user"],
         is_active=True,
+        auth_version=0,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
@@ -91,8 +92,8 @@ def make_tag(**kwargs) -> SimpleNamespace:
 @pytest.fixture
 def no_celery():
     """Prevent any Celery task dispatch from reaching Redis during tests."""
-    with patch("app.services.notes._dispatch_ingest"), \
-         patch("app.services.notes._dispatch_delete"):
+    with patch("app.services.notes.dispatch_upsert"), \
+         patch("app.services.notes.dispatch_delete"):
         yield
 
 

@@ -3,6 +3,7 @@ import { devtools } from 'zustand/middleware'
 import { authApi } from '@/api/auth'
 import { usersApi } from '@/api/users'
 import { unwrap } from '@/lib/api'
+import { resetUserState } from './resetUserState'
 
 function authError(err, fallback) {
   if (!err.response) {
@@ -71,6 +72,7 @@ export const useAuthStore = create(
         try {
           await authApi.logout()
         } finally {
+          resetUserState()
           set({ user: null })
         }
       },
@@ -94,6 +96,6 @@ export const useAuthStore = create(
         }
       },
     }),
-    { name: 'auth-store' },
+    { name: 'auth-store', enabled: import.meta.env.DEV },
   ),
 )

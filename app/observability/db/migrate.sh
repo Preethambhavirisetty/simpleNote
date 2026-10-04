@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NAME="${MYSQL_CONTAINER:-agentlog-mysql}"
-PASS="${MYSQL_ROOT_PASSWORD:-devroot}"
+PASS="${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}"
 DB="${MYSQL_DATABASE:-agentlog}"
 
 mysql_run() { podman exec -i "$NAME" mysql -uroot -p"$PASS" --default-character-set=utf8mb4 "$@"; }

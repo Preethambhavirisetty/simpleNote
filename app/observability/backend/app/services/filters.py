@@ -61,7 +61,7 @@ def parse_field_filters(params: Any) -> list[tuple[str, str, str]]:
 
 
 def build_exists_clauses(
-    filters: list[tuple[str, str, str]], alias: str = "r"
+    filters: list[tuple[str, str, str]],
 ) -> tuple[list[str], dict[str, Any]]:
     """Return (sql_fragments, bind_params) for the parsed filters."""
     clauses: list[str] = []
@@ -76,14 +76,15 @@ def build_exists_clauses(
             if predicate is None:
                 clauses.append(
                     f"NOT EXISTS (SELECT 1 FROM tracked_fields tf{i} "
-                    f"WHERE tf{i}.run_id = {alias}.id AND tf{i}.name = :{n_key})"
+                    f"WHERE tf{i}.run_id = r.id AND tf{i}.name = :{n_key})"
                 )
                 continue
         elif op == "isnull":
             predicate = "tf{i}.value_text IS NULL AND tf{i}.value_num IS NULL".format(i=i)
         elif op == "contains":
-            predicate = f"tf{i}.value_text LIKE :{v_key}"
-            params[v_key] = f"%{raw}%"
+            predicate = f"tf{i}.value_text LIKE :{v_key} ESCAPE '!'"
+            escaped = raw.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            params[v_key] = f"%{escaped}%"
         elif op == "in":
             values = [v for v in (s.strip() for s in raw.split(",")) if v]
             if not values:
@@ -110,7 +111,7 @@ def build_exists_clauses(
 
         clauses.append(
             f"EXISTS (SELECT 1 FROM tracked_fields tf{i} "
-            f"WHERE tf{i}.run_id = {alias}.id AND tf{i}.name = :{n_key} "
+            f"WHERE tf{i}.run_id = r.id AND tf{i}.name = :{n_key} "
             f"AND {predicate})"
         )
 

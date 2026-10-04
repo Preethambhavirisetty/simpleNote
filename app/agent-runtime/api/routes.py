@@ -11,43 +11,50 @@ the frontend. Rename it once this is proven in production.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
 import failures
-from config import AGENT_API_KEY
+from config import AGENT_API_KEY, RUN_CONCURRENCY
 from graph import builder
-from graph.nodes import classify_state
-from workflows.steps.base import collected_facts
 from graph.context import RunContext
 from integrations import observability as obs
 from integrations.domain import DomainUnavailableError, load_catalog
 from state.state import Message, RunState
+from workflows.steps.base import collected_facts
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _context: RunContext | None = None
+_context_lock = Lock()
+_run_slots = asyncio.Semaphore(RUN_CONCURRENCY)
 
 
 def run_context() -> RunContext:
     """Built on first use, so a slow or late agent-domain does not stop boot."""
     global _context
     if _context is None:
-        _context = RunContext(load_catalog())
+        with _context_lock:
+            if _context is None:
+                _context = RunContext(load_catalog())
     return _context
 
 
 def reset_context() -> None:
     global _context
-    _context = None
+    with _context_lock:
+        _context = None
 
 
 class RuntimeContextIn(BaseModel):
@@ -148,12 +155,13 @@ async def health():
 
 
 @router.post("/api/agent-workflow/run")
-def run_agent(
+async def run_agent(
     request: RunRequest, x_api_key: str | None = Header(default=None)
 ) -> dict[str, Any]:
     _authorise(x_api_key)
     try:
-        state = _start(request)
+        async with _run_slots:
+            state = await run_in_threadpool(_start, request)
     except DomainUnavailableError as exc:
         raise HTTPException(
             status_code=failures.DOMAIN_UNAVAILABLE.http_status,
@@ -172,7 +180,7 @@ def run_agent(
 
 
 @router.post("/api/agent-workflow/stream")
-def stream_agent(
+async def stream_agent(
     request: RunRequest, x_api_key: str | None = Header(default=None)
 ) -> StreamingResponse:
     _authorise(x_api_key)
@@ -199,7 +207,7 @@ def _fail(failure: failures.Failure, exc: BaseException) -> Iterator[str]:
     yield _sse("done", {"answer": "", "error": failure.message, "failure": body})
 
 
-def _events(request: RunRequest) -> Iterator[str]:
+async def _events(request: RunRequest):
     """Emit progress, then one terminal `done`.
 
     Steps are reported as they are discovered rather than as "step 3 of 5":
@@ -207,14 +215,17 @@ def _events(request: RunRequest) -> Iterator[str]:
     contract, so nothing here promises a fixed number of steps.
     """
     try:
-        state = _start(request)
+        async with _run_slots:
+            state = await run_in_threadpool(_start, request)
     except DomainUnavailableError as exc:
         log.warning("domain unavailable", exc_info=True)
-        yield from _fail(failures.DOMAIN_UNAVAILABLE, exc)
+        for event in _fail(failures.DOMAIN_UNAVAILABLE, exc):
+            yield event
         return
     except Exception as exc:  # a failed run must still close the stream
         log.exception("run failed")
-        yield from _fail(failures.classify(exc), exc)
+        for event in _fail(failures.classify(exc), exc):
+            yield event
         return
 
     yield _sse(

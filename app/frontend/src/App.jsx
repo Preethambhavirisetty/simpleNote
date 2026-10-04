@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { useFeatureFlagStore } from '@/stores/featureFlagStore'
+import { resetUserState } from '@/stores/resetUserState'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import FeatureGate from '@/components/FeatureGate'
 import RouteErrorPage from '@/components/RouteErrorPage'
@@ -35,19 +36,28 @@ const router = createBrowserRouter([
 ])
 
 export default function App() {
+  const initializationStarted = useRef(false)
   const init = useAuthStore((s) => s.init)
   const initTheme = useThemeStore((s) => s.init)
   const fetchFlags = useFeatureFlagStore((s) => s.fetchFlags)
 
   useEffect(() => {
+    if (initializationStarted.current) return
+    initializationStarted.current = true
     initTheme()
-    init()
-    fetchFlags()
+    const initialize = async () => {
+      await init()
+      await fetchFlags()
+    }
+    void initialize()
   }, [init, initTheme, fetchFlags])
 
   // Listen for 401s emitted by the axios interceptor
   useEffect(() => {
-    const handler = () => useAuthStore.setState({ user: null })
+    const handler = () => {
+      resetUserState()
+      useAuthStore.setState({ user: null })
+    }
     window.addEventListener('auth:unauthorized', handler)
     return () => window.removeEventListener('auth:unauthorized', handler)
   }, [])

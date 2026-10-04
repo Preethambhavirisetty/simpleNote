@@ -109,10 +109,17 @@ class TestFolderServiceDelete:
         folder = make_folder(user_id=current_user.id)
         folder_service.repo.get_by_id.return_value = folder
 
-        folder_service.delete(mock_db, folder.id, current_user.id)
+        with patch("app.services.folders.celery_app.send_task") as send_task:
+            folder_service.delete(mock_db, folder.id, current_user.id)
 
         folder_service.repo.delete.assert_called_once_with(mock_db, folder)
         mock_db.commit.assert_called_once()
+        send_task.assert_called_once()
+        task_kwargs = send_task.call_args.kwargs["kwargs"]
+        assert task_kwargs["action"] == "delete_folder"
+        assert task_kwargs["user_id"] == str(current_user.id)
+        assert task_kwargs["folder_id"] == str(folder.id)
+        assert "note_id" not in task_kwargs
 
     def test_delete_nonexistent_raises_404(self, folder_service, mock_db, current_user):
         folder_service.repo.get_by_id.return_value = None

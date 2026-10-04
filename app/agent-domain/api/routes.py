@@ -16,9 +16,10 @@ GET  /api/domain/steps/{name}
 
 from typing import Annotated
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.auth import require_api_key
 from config import PLAYBOOK_SEARCH_LIMIT
 from schemas.catalog_schema import Catalog, Mapping, Operation, StepDefinition
 from schemas.playbook_schema import Playbook, PlaybookCandidates, PlaybookMatch
@@ -28,7 +29,7 @@ from services.operations import OperationService
 from services.playbook import PlaybookService
 from services.steps import StepService
 
-router = APIRouter(prefix="/api/domain")
+router = APIRouter(prefix="/api/domain", dependencies=[Depends(require_api_key)])
 playbook_service = PlaybookService()
 operation_service = OperationService()
 mapping_service = MappingService()

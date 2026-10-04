@@ -33,6 +33,8 @@ _BLOCK_TYPES = {
     "tableHeader",
 }
 
+MAX_DOCUMENT_DEPTH = 100
+
 
 def extract_text(doc: dict) -> str:
     """
@@ -49,7 +51,10 @@ def extract_text(doc: dict) -> str:
 
     parts: list[str] = []
 
-    def _walk(node: dict) -> None:
+    def _walk(node: dict, depth: int) -> None:
+        if depth > MAX_DOCUMENT_DEPTH:
+            raise ValueError(f"TipTap document exceeds maximum depth of {MAX_DOCUMENT_DEPTH}")
+
         node_type = node.get("type", "")
 
         if node_type == "text":
@@ -67,11 +72,13 @@ def extract_text(doc: dict) -> str:
         if node_type in _BLOCK_TYPES and parts and parts[-1] != "\n":
             parts.append("\n")
 
-        for child in children:
-            _walk(child)
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict):
+                    _walk(child, depth + 1)
 
         if node_type in _BLOCK_TYPES and parts and parts[-1] != "\n":
             parts.append("\n")
 
-    _walk(doc)
+    _walk(doc, 1)
     return "".join(parts).strip()

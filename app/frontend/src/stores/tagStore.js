@@ -9,6 +9,8 @@ export const useTagStore = create(
       tags: [],
       isLoading: false,
 
+      reset: () => set({ tags: [], isLoading: false }),
+
       fetchTags: async () => {
         if (get().isLoading) return
         set({ isLoading: true })
@@ -56,6 +58,6 @@ export const useTagStore = create(
         }
       },
     }),
-    { name: 'tag-store' },
+    { name: 'tag-store', enabled: import.meta.env.DEV },
   ),
 )

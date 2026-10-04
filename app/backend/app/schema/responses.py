@@ -8,7 +8,6 @@ from pydantic import BaseModel, EmailStr
 
 from app.schema.users import Role
 
-
 T = TypeVar("T")
 
 

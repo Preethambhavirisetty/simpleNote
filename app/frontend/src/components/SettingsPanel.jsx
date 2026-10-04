@@ -3,9 +3,82 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { useAvatarStore } from '@/stores/avatarStore'
+import { MAX_AVATAR_DATA_URL_BYTES, useAvatarStore } from '@/stores/avatarStore'
 import ProfileAvatar from '@/components/ProfileAvatar'
 import { CHARACTER_OPTIONS } from '@/lib/avatarOptions'
+
+const MAX_AVATAR_FILE_BYTES = 2 * 1024 * 1024
+const MAX_AVATAR_EDGE = 256
+
+const loadImage = (file) => new Promise((resolve, reject) => {
+  const objectUrl = URL.createObjectURL(file)
+  const image = new Image()
+
+  image.onload = () => {
+    URL.revokeObjectURL(objectUrl)
+    resolve(image)
+  }
+  image.onerror = () => {
+    URL.revokeObjectURL(objectUrl)
+    reject(new Error('Unable to read this image.'))
+  }
+  image.src = objectUrl
+})
+
+const canvasToDataUrl = (canvas, quality) => new Promise((resolve, reject) => {
+  canvas.toBlob(
+    (blob) => {
+      if (!blob) {
+        reject(new Error('Unable to process this image.'))
+        return
+      }
+
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('Unable to process this image.'))
+      reader.readAsDataURL(blob)
+    },
+    'image/jpeg',
+    quality,
+  )
+})
+
+const prepareAvatarImage = async (file) => {
+  const image = await loadImage(file)
+  const sourceSize = Math.min(image.naturalWidth, image.naturalHeight)
+  if (!sourceSize) throw new Error('Unable to read this image.')
+
+  const outputSize = Math.min(MAX_AVATAR_EDGE, sourceSize)
+  const canvas = document.createElement('canvas')
+  canvas.width = outputSize
+  canvas.height = outputSize
+
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Unable to process this image.')
+
+  const sourceX = (image.naturalWidth - sourceSize) / 2
+  const sourceY = (image.naturalHeight - sourceSize) / 2
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, outputSize, outputSize)
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    sourceSize,
+    sourceSize,
+    0,
+    0,
+    outputSize,
+    outputSize,
+  )
+
+  for (const quality of [0.82, 0.68, 0.54, 0.4]) {
+    const dataUrl = await canvasToDataUrl(canvas, quality)
+    if (dataUrl.length <= MAX_AVATAR_DATA_URL_BYTES) return dataUrl
+  }
+
+  throw new Error('The processed image is too large. Please choose another image.')
+}
 
 // ---------- Section wrapper ----------
 function Section({ title, children }) {
@@ -70,24 +143,34 @@ function AvatarChooser() {
   const setImage = useAvatarStore((s) => s.setImage)
   const inputRef = useRef(null)
   const [error, setError] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
 
-  const handleImage = (event) => {
+  const handleImage = async (event) => {
     const file = event.target.files?.[0]
     if (!file) return
+    event.target.value = ''
+
     if (!file.type.startsWith('image/')) {
       setError('Choose an image file.')
       return
     }
-    if (file.size > 2 * 1024 * 1024) {
+    if (file.size > MAX_AVATAR_FILE_BYTES) {
       setError('Image must be smaller than 2 MB.')
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      setImage(reader.result)
+
+    setIsProcessing(true)
+    try {
+      const dataUrl = await prepareAvatarImage(file)
+      if (!setImage(dataUrl)) {
+        throw new Error('The processed image is too large. Please choose another image.')
+      }
       setError('')
+    } catch (imageError) {
+      setError(imageError.message || 'Unable to process this image.')
+    } finally {
+      setIsProcessing(false)
     }
-    reader.readAsDataURL(file)
   }
 
   return (
@@ -112,8 +195,8 @@ function AvatarChooser() {
         ))}
       </div>
       <input ref={inputRef} onChange={handleImage} type="file" accept="image/*" className="hidden" />
-      <button onClick={() => inputRef.current?.click()} className="w-full px-3 py-2 mt-3 text-xs font-medium border rounded-lg border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
-        Upload your own image
+      <button disabled={isProcessing} onClick={() => inputRef.current?.click()} className="w-full px-3 py-2 mt-3 text-xs font-medium border rounded-lg border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+        {isProcessing ? 'Processing image…' : 'Upload your own image'}
       </button>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
